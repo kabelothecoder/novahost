@@ -1,0 +1,65 @@
+# ─── SECRETS — never commit these ─────────────────────────────────
+# Android: holds supabase.anon_key, finnhub.api_key, fmp.api_key, sdk.dir
+local.properties
+# Web: holds SUPABASE_SERVICE_ROLE_KEY — full database access
+.env
+.env.*
+!.env.example
+!.env.template
+*.keystore
+*.jks
+google-services.json
+service-account*.json
+
+# ─── Dependencies ─────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ─── Build output ─────────────────────────────────────────────────
+build/
+dist/
+dev-dist/
+out/
+.gradle/
+.gradle_home/
+.kotlin/
+*.apk
+*.aab
+*.aar
+captures/
+
+# ─── Build logs (noise from earlier debugging) ────────────────────
+build_*.txt
+build_*.log
+compile_output.log
+full_build_log.txt
+final_build_check.txt
+*.bom-backup
+
+# ─── IDE / tooling ────────────────────────────────────────────────
+.idea/
+.vscode/
+.qodo/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ─── Vercel / Supabase local ──────────────────────────────────────
+.vercel
+.supabase/
+supabase/.temp/
+
+# ─── Logs ─────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Vendored third-party SDK reference dumps ─────────────────────
+# Copies of external SDK docs/examples (elevenlabs-js, metaapi-javascript-sdk,
+# magicui). Not Nova Edge source, and their paths exceed the Windows limit.
+**/.agents/skills/
+
+# Parked nested-repo git dirs (temporary, restored after the monorepo commit)
+.git_parked/

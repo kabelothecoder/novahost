@@ -1,0 +1,21 @@
+﻿# ProGuard rules for Nova Edge
+-keep class cloud.metaapi.** { *; }
+-keep class com.novaedge.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn cloud.metaapi.**
+-dontwarn okhttp3.**
+-dontwarn org.osgi.framework.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn java.lang.management.**
+-dontwarn javax.lang.model.**
+-dontwarn javax.naming.**
+-dontwarn org.ietf.jgss.**
+
+-dontwarn java.lang.management.**
+-dontwarn javax.lang.model.element.**
+-dontwarn javax.naming.**
+-dontwarn org.ietf.jgss.**
+-dontwarn org.osgi.framework.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn org.apache.http.**

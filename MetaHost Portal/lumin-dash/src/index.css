@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Clean light-themed admin dashboard design system */
+
+@layer base {
+  :root {
+    /* Base colors - clean whites and grays */
+    --background: 220 20% 97%;
+    --foreground: 220 13% 18%;
+
+    /* Card system */
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 18%;
+
+    /* Popover system */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 18%;
+
+    /* Primary - modern blue */
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 221 83% 68%;
+
+    /* Secondary - soft gray */
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 13% 18%;
+
+    /* Muted - subtle grays */
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 9% 46%;
+
+    /* Accent - soft blue */
+    --accent: 215 100% 96%;
+    --accent-foreground: 221 83% 53%;
+
+    /* Status colors */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders and inputs */
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
+    --ring: 221 83% 53%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(220 14% 98%));
+    --gradient-success: linear-gradient(135deg, hsl(142 71% 45%), hsl(142 71% 55%));
+    --gradient-warning: linear-gradient(135deg, hsl(38 92% 50%), hsl(38 92% 60%));
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-card: 0 4px 12px -1px rgba(0, 0, 0, 0.03), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+    --shadow-hover: 0 12px 24px -4px rgba(0, 0, 0, 0.06), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
+    
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Modern dark background with subtle blue tint */
+    --background: 220 27% 5%;
+    --foreground: 210 40% 98%;
+
+    /* Card with glassmorphism effect */
+    --card: 220 25% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 220 25% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Modern vibrant primary colors */
+    --primary: 221 83% 65%;
+    --primary-foreground: 220 27% 5%;
+    --primary-glow: 221 83% 75%;
+
+    /* Enhanced secondary with better contrast */
+    --secondary: 220 22% 12%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Improved muted colors */
+    --muted: 220 22% 12%;
+    --muted-foreground: 215 20% 70%;
+
+    /* Modern accent with blue tint */
+    --accent: 220 22% 15%;
+    --accent-foreground: 210 40% 98%;
+
+    /* Status colors for dark mode */
+    --success: 142 71% 55%;
+    --success-foreground: 220 27% 5%;
+    --warning: 38 92% 60%;
+    --warning-foreground: 220 27% 5%;
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Modern borders with subtle glow */
+    --border: 220 22% 15%;
+    --input: 220 22% 12%;
+    --ring: 221 83% 65%;
+
+    /* Enhanced gradients for dark mode */
+    --gradient-primary: linear-gradient(135deg, hsl(221 83% 65%), hsl(221 83% 75%));
+    --gradient-card: linear-gradient(145deg, hsl(220 25% 8%), hsl(220 22% 12%));
+    --gradient-success: linear-gradient(135deg, hsl(142 71% 55%), hsl(142 71% 65%));
+    --gradient-warning: linear-gradient(135deg, hsl(38 92% 60%), hsl(38 92% 70%));
+    
+    /* Modern shadows with glow effects */
+    --shadow-sm: 0 1px 2px 0 hsl(221 83% 65% / 0.1);
+    --shadow-card: 0 4px 6px -1px hsl(221 83% 65% / 0.1), 0 2px 4px -1px hsl(221 83% 65% / 0.06);
+    --shadow-hover: 0 10px 20px -5px hsl(221 83% 65% / 0.15), 0 4px 8px -2px hsl(221 83% 65% / 0.1);
+
+    /* Sidebar with modern dark styling */
+    --sidebar-background: 220 30% 4%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 221 83% 65%;
+    --sidebar-primary-foreground: 220 27% 5%;
+    --sidebar-accent: 220 25% 8%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 220 22% 12%;
+    --sidebar-ring: 221 83% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .animated-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.22;
+    background:
+      radial-gradient(600px circle at 20% 10%, hsl(var(--primary) / 0.25), transparent 40%),
+      radial-gradient(700px circle at 80% 50%, hsl(var(--accent-foreground) / 0.12), transparent 45%),
+      radial-gradient(900px circle at 50% 120%, hsl(var(--primary-glow) / 0.12), transparent 50%);
+    filter: blur(40px);
+    animation: subtle-pan 30s ease-in-out infinite alternate;
+  }
+
+  @keyframes subtle-pan {
+    0% { transform: translateY(0) scale(1); }
+    100% { transform: translateY(-8%) scale(1.05); }
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 dark:bg-black/40 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.03)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)];
+  }
+  
+  .glass-modal {
+    @apply bg-white/20 dark:bg-[#111]/80 backdrop-blur-2xl border border-white/30 dark:border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.1)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.05)];
+  }
+  
+  .glass-btn {
+    @apply bg-white/20 dark:bg-white/10 border border-white/30 dark:border-white/20 backdrop-blur-md shadow-sm hover:bg-white/30 dark:hover:bg-white/20 transition-all duration-300;
+  }
+}

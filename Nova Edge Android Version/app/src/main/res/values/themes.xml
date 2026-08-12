@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <!-- Background color of the splash screen -->
+        <item name="windowSplashScreenBackground">#030508</item> <!-- Obsidian -->
+        <!-- Icon -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/app_logo</item>
+        <!-- Duration of icon animation -->
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <!-- Post splash theme -->
+        <item name="postSplashScreenTheme">@style/Theme.NovaEdge</item>
+    </style>
+
+    <style name="Theme.NovaEdge" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+    </style>
+</resources>

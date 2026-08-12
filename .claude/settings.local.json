@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p novaedge)",
+      "Bash(mv metahost/app novaedge/app)",
+      "Bash(rmdir metahost *)",
+      "mcp__917ee01c-aa56-4c8e-b607-a34e29c40870__list_projects",
+      "mcp__917ee01c-aa56-4c8e-b607-a34e29c40870__list_tables",
+      "mcp__917ee01c-aa56-4c8e-b607-a34e29c40870__list_edge_functions",
+      "Bash(grep -v \"^\\\\.git$\")",
+      "WebSearch",
+      "WebFetch(domain:docs.metacopier.io)",
+      "mcp__claude_ai_Supabase__execute_sql"
+    ]
+  }
+}

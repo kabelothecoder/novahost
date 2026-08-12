@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:name=".NovaEdgeApplication"
+        android:allowBackup="true"
+        android:icon="@drawable/app_logo"
+        android:roundIcon="@drawable/app_logo"
+        android:label="Nova Edge"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NovaEdge">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.App.Starting"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Deep link: Payfast payment/success and payment/cancel return URLs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="metahost"
+                    android:host="payment" />
+            </intent-filter>
+        </activity>
+
+        <!-- Nano Banana: MT4/MT5 connection watcher foreground service -->
+        <service
+            android:name=".service.NanoBananaService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <!-- Nova Edge Pulse Service: Floating Bubble & HUD -->
+        <service
+            android:name=".service.NovaEdgePulseService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.screens.OverlayPermissionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NovaEdge" />
+
+    </application>
+</manifest>
