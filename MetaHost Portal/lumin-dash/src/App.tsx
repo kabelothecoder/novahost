@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -31,7 +31,8 @@ const queryClient = new QueryClient();
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  
+  const location = useLocation();
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -44,9 +45,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (!user) {
+    // A visitor arriving at the root should meet the landing page, not a login
+    // wall. Deeper pages still bounce to /login, since there is nothing to
+    // market there and the destination is meaningless when signed out.
+    if (location.pathname === "/") {
+      return <Landing />;
+    }
     return <Navigate to="/login" replace />;
   }
-  
+
   return <>{children}</>;
 }
 
