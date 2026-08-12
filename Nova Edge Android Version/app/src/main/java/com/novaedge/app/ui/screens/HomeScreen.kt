@@ -217,7 +217,7 @@ fun HomeScreen(navController: NavController, mainViewModel: com.novaedge.app.ui.
                 } else {
                     try {
                         com.novaedge.app.sdk.MetaAPIManager.botStatus.value = com.novaedge.app.sdk.BotStatus.STOPPED
-                        MetaAPIManager.disconnect("trade245_sub_001")
+                        MetaAPIManager.disconnect()
                         context.stopService(Intent(context, com.novaedge.app.service.NovaEdgePulseService::class.java))
                         isRunning = false
                     } catch (e: Exception) {

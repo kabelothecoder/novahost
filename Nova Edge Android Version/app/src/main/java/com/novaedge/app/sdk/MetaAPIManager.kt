@@ -120,7 +120,7 @@ object MetaAPIManager {
         }
     }
 
-    suspend fun disconnect(subscriberId: String) {
+    suspend fun disconnect() {
         // TODO: connection.close()
         _isSynchronized.value = false
         _isConnected.value = false

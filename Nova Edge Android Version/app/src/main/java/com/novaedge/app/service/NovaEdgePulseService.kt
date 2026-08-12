@@ -226,7 +226,7 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         
         // Finalize broker connection
         serviceScope.launch {
-            MetaAPIManager.disconnect("trade245_sub_001")
+            MetaAPIManager.disconnect()
         }
 
         wakeLock?.let {

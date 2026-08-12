@@ -504,7 +504,7 @@ fun SettingsScreen(navController: NavController) {
                             onClick = {
                                 scope.launch {
                                     context.stopService(Intent(context, com.novaedge.app.service.NovaEdgePulseService::class.java))
-                                    com.novaedge.app.sdk.MetaAPIManager.disconnect("trade245_sub_001")
+                                    com.novaedge.app.sdk.MetaAPIManager.disconnect()
                                     com.novaedge.app.sdk.TerminalPrefs.clear(context)
                                     showRemoveDialog = false
                                     navController.navigate(com.novaedge.app.navigation.Routes.TERMINAL) {
