@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.components
+﻿package com.novahost.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
@@ -36,8 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.novaedge.app.R
-import com.novaedge.app.ui.theme.*
+import com.novahost.app.R
+import com.novahost.app.ui.theme.*
 
 // ============================================================
 // GlassCard — Premium glass container with inner glow
@@ -52,7 +52,7 @@ fun GlassCard(
 ) {
     Column(
         modifier = modifier
-            .neonGlow(LocalNovaEdgeTheme.current.holographicGlowMode, LocalNovaEdgeTheme.current.primaryColor, 4.dp)
+            .neonGlow(LocalNovaHostTheme.current.holographicGlowMode, LocalNovaHostTheme.current.primaryColor, 4.dp)
             .clip(shape)
             .background(
                 Brush.verticalGradient(
@@ -88,7 +88,7 @@ fun GradientButton(
     glowColor: Color = Color.Unspecified,
     textColor: Color = OnSurface
 ) {
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val actualGlowColor = if (glowColor != Color.Unspecified) glowColor else themeState.primaryColor
     val actualGradientColors = if (gradientColors.isNotEmpty()) gradientColors else {
         if (themeState.isGlossTheme) listOf(themeState.primaryColor, themeState.secondaryColor)
@@ -152,10 +152,13 @@ fun CircularAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 160.dp
 ) {
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val primaryColor = themeState.primaryColor
     val secondaryColor = themeState.secondaryColor
-    
+    // The robot's art comes from its branding, not from the theme -- those are
+    // two separate CompositionLocals now.
+    val avatarUrl = LocalRobotBranding.current.avatarUrl
+
     val pulseAnim = rememberInfiniteTransition(label = "breathePulse")
     val breatheScale by pulseAnim.animateFloat(
         initialValue = 1f,
@@ -205,9 +208,9 @@ fun CircularAvatar(
                 .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            if (themeState.robotAvatarUrl != null) {
+            if (avatarUrl != null) {
                 AsyncImage(
-                    model = themeState.robotAvatarUrl,
+                    model = avatarUrl,
                     contentDescription = "Dynamic Avatar",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -216,7 +219,7 @@ fun CircularAvatar(
                 )
             } else {
                 Image(
-                    painter = painterResource(id = R.drawable.app_logo),
+                    painter = painterResource(id = R.drawable.novahost_mark),
                     contentDescription = "Master Machine Avatar",
                     modifier = Modifier
                         .fillMaxSize()
@@ -322,10 +325,10 @@ fun GlassAlertComponent(
 }
 
 // ============================================================
-// NovaEdgeSwitch — Live / Demo pill toggle with sliding indicator
+// NovaHostSwitch — Live / Demo pill toggle with sliding indicator
 // ============================================================
 @Composable
-fun NovaEdgeSwitch(
+fun NovaHostSwitch(
     isLive: Boolean,
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -396,7 +399,7 @@ fun BottomGlassDock(
         NavItem("settings", Icons.Rounded.Settings,     Icons.Rounded.Settings,     "Settings")
     )
 
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val primaryColor = themeState.primaryColor
     val secondaryColor = themeState.secondaryColor
     val accentBrush = if (themeState.isGlossTheme)

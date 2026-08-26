@@ -7,7 +7,7 @@ const CORS_HEADERS = {
 }
 
 /**
- * Entitlement check for the Nova Edge app.
+ * Entitlement check for the NovaHost app.
  *
  *   R599 once-off  -> lifetime app access   (subscriptions.is_lifetime)
  *   R349 once-off  -> AI chart scanner      (subscriptions.has_scanner)

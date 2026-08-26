@@ -11,7 +11,7 @@ export function AuthLayout({
         <div className="flex justify-center mb-8">
           <img 
             src="/logo.svg" 
-            alt="Nova Edge Logo" 
+            alt="NovaHost Logo" 
             className="h-10 w-auto select-none" 
             draggable={false} 
           />

@@ -90,7 +90,7 @@ const defaultPlans: PricingPlan[] = [
 /**
  * @description Animated glassmorphic pricing cards with Framer Motion hover effects.
  * The popular plan has a persistent glow ring and a "Most Popular" badge.
- * Accepts a `plans` prop to override default Nova Edge pricing tiers.
+ * Accepts a `plans` prop to override default NovaHost pricing tiers.
  */
 export function ModernPricingPage({
   plans = defaultPlans,

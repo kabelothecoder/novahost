@@ -316,7 +316,7 @@ function navPairs() {
 }
 
 function addDemoEA() {
-  eaList.value.push({ id: Date.now(), name: 'Nova Edge EA v6', active: true })
+  eaList.value.push({ id: Date.now(), name: 'NovaHost EA v6', active: true })
   if (navigator.vibrate) navigator.vibrate(20)
 }
 

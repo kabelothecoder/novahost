@@ -11,14 +11,27 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!--
+        android:allowBackup is off, deliberately.
+
+        Auto Backup was restoring metahost_prefs on reinstall, which carries the
+        licence key and the robot's identity (name, avatar, accent). A reinstall
+        therefore came up wearing the previous robot's art, and a restore onto a
+        different handset produced a licence key bound to the old device that
+        could never validate.
+
+        Nothing here is worth restoring: the licence is device-bound by design,
+        and appearance is re-derived from the licence on activation. A fresh
+        install should be genuinely fresh.
+    -->
     <application
-        android:name=".NovaEdgeApplication"
-        android:allowBackup="true"
-        android:icon="@drawable/app_logo"
-        android:roundIcon="@drawable/app_logo"
-        android:label="Nova Edge"
+        android:name=".NovaHostApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="NovaHost"
         android:supportsRtl="true"
-        android:theme="@style/Theme.NovaEdge">
+        android:theme="@style/Theme.NovaHost">
 
         <activity
             android:name=".MainActivity"
@@ -48,16 +61,12 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
-        <!-- Nova Edge Pulse Service: Floating Bubble & HUD -->
+        <!-- NovaHost Pulse Service: Floating Bubble & HUD -->
         <service
-            android:name=".service.NovaEdgePulseService"
+            android:name=".service.NovaHostPulseService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
-        <activity
-            android:name=".ui.screens.OverlayPermissionActivity"
-            android:exported="false"
-            android:theme="@style/Theme.NovaEdge" />
 
     </application>
 </manifest>

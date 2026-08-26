@@ -1,6 +1,6 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
-import com.novaedge.app.BuildConfig
+import com.novahost.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

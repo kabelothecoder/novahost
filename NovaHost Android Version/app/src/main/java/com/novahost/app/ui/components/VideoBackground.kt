@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.components
+﻿package com.novahost.app.ui.components
 
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -20,8 +20,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.novaedge.app.ui.theme.DeepPurple
-import com.novaedge.app.ui.theme.Charcoal
+import com.novahost.app.ui.theme.DeepPurple
+import com.novahost.app.ui.theme.Charcoal
 
 /**
  * GlobalVideoBackground

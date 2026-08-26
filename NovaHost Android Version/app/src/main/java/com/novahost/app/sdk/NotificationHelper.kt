@@ -1,11 +1,11 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.novaedge.app.R
+import com.novahost.app.R
 
 object NotificationHelper {
     private const val CHANNEL_ID = "trade_signals_channel"
@@ -35,7 +35,7 @@ object NotificationHelper {
             ?: "Your robot"
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_logo)
+            .setSmallIcon(R.drawable.novahost_mark)
             .setContentTitle("$robotName executed a trade")
             .setContentText("${action.uppercase()} $pair @ $price")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -59,7 +59,7 @@ object NotificationHelper {
             ?: "Your robot"
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.app_logo)
+            .setSmallIcon(R.drawable.novahost_mark)
             .setContentTitle("$robotName could not place $pair")
             .setContentText(reason)
             .setStyle(NotificationCompat.BigTextStyle().bigText(reason))

@@ -1,4 +1,4 @@
-# Nova Edge — Wednesday 2026-08-12
+# NovaHost — Wednesday 2026-08-12
 ### Copy-paste prompts for VS Code. Deadline: tomorrow.
 
 ---
@@ -101,7 +101,7 @@ so I can diagnose fast if the trade doesn't appear on the slave.
 **My recommendation: ship A tomorrow, keep B for later.** Your portal's Quick Trade already writes to `signals` — that becomes a *notification* feed ("your mentor just bought XAUUSD") while MetaCopier does the actual execution. You get a working product tomorrow instead of a broken one.
 
 ```
-Read NOVA_EDGE_WEDNESDAY.md Part 3 W2. I'm choosing architecture [A or B].
+Read NOVAHOST_WEDNESDAY.md Part 3 W2. I'm choosing architecture [A or B].
 Tell me exactly which files and edge functions become dead code under that choice,
 and which ones I still need. Don't delete anything yet — just show me the list.
 ```
@@ -115,7 +115,7 @@ and which ones I still need. Don't delete anything yet — just show me the list
 The backend now stamps every signal with its `ea_id`. The Android app must **filter on it** — a user's license is tied to one bot (`licenses.ea_id`), so they should only ever act on signals for that bot.
 
 ```
-In the Android app, NovaEdgePulseService subscribes to the Supabase Realtime
+In the Android app, NovaHostPulseService subscribes to the Supabase Realtime
 'signals' channel. Right now it acts on every signal it receives.
 
 Each user's license is tied to a specific bot via licenses.ea_id. Signals now carry

@@ -3,7 +3,7 @@
 
     <header class="screen-header">
       <h2 class="screen-title">Vibe Engine</h2>
-      <span class="screen-sub">Personalise your Nova Edge experience</span>
+      <span class="screen-sub">Personalise your NovaHost experience</span>
     </header>
 
     <div class="settings-scroll">
@@ -17,7 +17,7 @@
             <div class="preview-avatar-ring"></div>
           </div>
           <div class="preview-info">
-            <span class="preview-name" :style="{ color: accent.current.hex }">Nova Edge EA v6</span>
+            <span class="preview-name" :style="{ color: accent.current.hex }">NovaHost EA v6</span>
             <span class="preview-sub">{{ accent.current.name }} · AI Online</span>
           </div>
           <div class="preview-pill" :style="{ borderColor: accent.current.hex + '60', color: accent.current.hex }">
@@ -119,7 +119,7 @@
 
       <!-- App version footer -->
       <div class="app-footer">
-        <span class="app-version">Nova Edge EA v6 · Build 42</span>
+        <span class="app-version">NovaHost EA v6 · Build 42</span>
         <span class="app-copy">© 2025 monga_za</span>
       </div>
 

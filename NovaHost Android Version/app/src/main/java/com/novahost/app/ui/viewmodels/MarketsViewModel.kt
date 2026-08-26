@@ -1,10 +1,10 @@
-﻿package com.novaedge.app.ui.viewmodels
+﻿package com.novahost.app.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.novaedge.app.sdk.EconomicEvent
-import com.novaedge.app.sdk.ForexRepository
-import com.novaedge.app.sdk.MarketSession
+import com.novahost.app.sdk.EconomicEvent
+import com.novahost.app.sdk.ForexRepository
+import com.novahost.app.sdk.MarketSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

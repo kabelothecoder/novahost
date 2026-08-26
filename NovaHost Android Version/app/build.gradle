@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.novaedge.app"
+    namespace = "com.novahost.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.novaedge.app"
+        applicationId = "com.novahost.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -75,6 +75,9 @@ android {
 }
 
 dependencies {
+    // Local unit tests (JVM only, no device needed).
+    testImplementation 'junit:junit:4.13.2'
+
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

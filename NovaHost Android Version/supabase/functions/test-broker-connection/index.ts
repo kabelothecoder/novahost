@@ -63,7 +63,7 @@ serve(async (req: Request) => {
       password: plainPassword,
       server: server,
       platform: platform || "mt5",
-      name: "Nova Edge Cloud Terminal Container",
+      name: "NovaHost Cloud Terminal Container",
       magic: 0,
       type: "cloud-g2"
     };

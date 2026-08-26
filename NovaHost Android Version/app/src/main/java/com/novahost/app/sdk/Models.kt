@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -49,6 +49,14 @@ data class LicenseActivationRequest(
 data class LicenseActivationResponse(
     val success: Boolean = false,
     val error: String? = null,
+    /**
+     * The canonical, upper-cased key as the server recorded it.
+     *
+     * Stored in preference to whatever the user typed: every device-facing
+     * function upper-cases before looking a key up, so a locally-cached lower
+     * case copy would mismatch the row it came from.
+     */
+    val license_key: String? = null,
     val ea_id: String? = null,
     val product_name: String? = null,
     val display_name: String? = null,
@@ -139,7 +147,17 @@ data class RobotIdentity(
     val accent_color: String? = null,
     val background_video_url: String? = null,
     val tts_script: String? = null,
-    val symbols: List<String>? = emptyList()
+    val symbols: List<String>? = emptyList(),
+    /**
+     * True when the robot has art that was too large to inline in a list row.
+     *
+     * Mentors upload avatars through the portal and they land in
+     * `expert_advisors.avatar_url` as base64 data URIs of 216KB to 3.0MB. A
+     * four-robot drawer was an 8.8MB response re-fetched on every resume, so
+     * `my-licenses` drops data URIs and sets this instead. The row draws the
+     * placeholder; the full art arrives when the robot is actually selected.
+     */
+    val has_art: Boolean = false
 )
 
 @Serializable
@@ -171,6 +189,54 @@ data class MetaCopierTradeRequest(
     val signal_id: String? = null
 )
 
+/**
+ * Request for license-status — "is this licence usable, and is an account on it".
+ *
+ * The app cannot answer this from PostgREST: RLS on `licenses` excludes anon,
+ * and the anon key is the only credential a licence-key install has.
+ */
+@Serializable
+data class LicenseStatusRequest(
+    val license_key: String
+)
+
+/** Response from license-status. Carries no MetaCopier account id by design. */
+@Serializable
+data class LicenseStatusResponse(
+    val success: Boolean = false,
+    val active: Boolean = false,
+    val linked: Boolean = false,
+    val ea_id: String? = null,
+    val allowed_symbols: List<String>? = null,
+    val broker_server: String? = null,
+    val platform: String? = null,
+    val connected_at: String? = null,
+    val reason: String? = null,
+    val message: String? = null,
+    val error: String? = null
+)
+
+/**
+ * Request for `my-licenses` — "which keys live on this handset".
+ *
+ * The device is the key, not an email. A licence-key install never supplies an
+ * email, `licenses.owner_email` is null on most rows, and there is no auth
+ * session for RLS to key off. The android id is the same identity
+ * `validate-license` already binds a key against.
+ */
+@Serializable
+data class MyLicensesRequest(
+    val android_id: String
+)
+
+/** Response from `my-licenses`. */
+@Serializable
+data class MyLicensesResponse(
+    val success: Boolean = false,
+    val licenses: List<LicenseRecord> = emptyList(),
+    val error: String? = null
+)
+
 /** Request for metacopier-connect (registers an MT4/MT5 account). */
 @Serializable
 data class MetaCopierConnectRequest(
@@ -186,6 +252,14 @@ data class MetaCopierConnectRequest(
 @Serializable
 data class MetaCopierConnectResponse(
     val success: Boolean = false,
+    /**
+     * Machine-readable outcome, e.g. `WRONG_CREDENTIALS`, `LICENCE_UNKNOWN`,
+     * `PROVIDER_UNFUNDED`, `CONNECTED`.
+     *
+     * [error] is written for the user and will be reworded; this will not. Branch
+     * on this, never on the prose.
+     */
+    val code: String? = null,
     val account_id: String? = null,
     val platform: String? = null,
     val region: String? = null,
@@ -207,11 +281,30 @@ data class MetaCopierTradeResponse(
 @Serializable
 data class LicenseRecord(
     val id: String,
+    /**
+     * The key itself. Carried so the drawer can mark the active robot by the
+     * thing that actually drives execution.
+     *
+     * Matching on display name instead (as the picker used to) breaks the
+     * moment a user holds two keys for one robot: `expert_advisors` is joined
+     * through `ea_id`, so both rows carry the identical name and both light up
+     * as active. Two keys for one robot is the ordinary case here, not an edge
+     * one -- most accounts in the database look exactly like that.
+     */
+    val license_key: String? = null,
     // The robot this key unlocks. Needed so the device can filter incoming
     // signals down to its own robot.
     val ea_id: String? = null,
     val status: String? = null,
-    val user_email: String? = null,
+    /**
+     * The licence owner's email.
+     *
+     * This was `user_email`, a column that has never existed on `licenses`.
+     * PostgREST answered 400, the caller's bare catch turned that into an empty
+     * list, and the Connected Robots drawer reported "no active licenses found"
+     * for accounts holding half a dozen keys.
+     */
+    val owner_email: String? = null,
     val allowed_symbols: List<String>? = emptyList(),
     // Joined from expert_advisors. display_name/avatar/tts/symbols are columns
     // on THAT table, not on licenses -- reading them off the license row always

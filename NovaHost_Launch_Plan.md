@@ -1,4 +1,4 @@
-# Nova Edge — Launch Plan (Tue 2026-08-11 → Thu 2026-08-13)
+# NovaHost — Launch Plan (Tue 2026-08-11 → Thu 2026-08-13)
 
 **Scope:** Android app + Mentor Portal + Supabase/MetaCopier backend. iOS is **dropped** for this window.
 **Definition of launched:** signed internal build on a real device, license gate + paygate + 10 screens functional, and **one real end-to-end trade proven** from mentor portal → connected broker account. No app-store submission.
@@ -17,7 +17,7 @@ I ran a real build and queried the live Supabase project (`MetaHost` / `epulmnfb
 |---|---|
 | Android screens | **13 Compose screens already written** (~5,400 lines) — Welcome, Onboarding, Auth, Vault, Home, Settings, Pairs, MetaTraderConnect, SymbolScanner, Markets, MarketsTabs, HelpSupport, OverlayPermission |
 | Android navigation | `AppNavigation.kt` wires all 11 routes |
-| Floating overlay | `NovaEdgePulseService` (503 lines) + `SYSTEM_ALERT_WINDOW` permission + `OverlayPermissionActivity` — the "float over apps" feature is built |
+| Floating overlay | `NovaHostPulseService` (503 lines) + `SYSTEM_ALERT_WINDOW` permission + `OverlayPermissionActivity` — the "float over apps" feature is built |
 | Paygate | `PaywallOverlay.kt` (258 lines) exists |
 | Mentor portal | React/Vite/shadcn, **21 pages** incl. `QuickTrade` (signal dispatcher), `LicenseManagement`, `GenerateKey`, `ReActivateKey`, `ManageEAs`, auth + protected routes |
 | Backend | **15 edge functions deployed and ACTIVE**, 13 tables with RLS enabled |
@@ -65,7 +65,7 @@ Related: `execute-trade-v2` passes a **text** `license_key` into `signal_logs.li
 
 #### P0-3 — Anyone on the internet can fire trades into your users' live accounts
 - `broadcast-signal` is deployed with `verify_jwt: false`.
-- Its only auth is header `x-novaedge-key`, compared against `ADMIN_BROADCAST_KEY` which **defaults to the literal string `dev-secret-key`**.
+- Its only auth is header `x-novahost-key`, compared against `ADMIN_BROADCAST_KEY` which **defaults to the literal string `dev-secret-key`**.
 - `src/pages/QuickTrade.tsx:107` **hardcodes `'dev-secret-key'` in client-side React**, so it ships inside the public JS bundle.
 
 If `ADMIN_BROADCAST_KEY` is not set in Supabase, the fallback matches the key printed in your public bundle. Anyone who opens devtools can broadcast BUY/SELL orders to every connected account. **This must be fixed before a single real user connects real money.** Non-negotiable.
@@ -136,7 +136,7 @@ Ripping out MetaAPI wholesale is a Friday-or-later job. Say so out loud now rath
 | 5 | Home Dashboard | `HomeScreen.kt` (1199 L) | Built | Replace stub `synchronize()` with real state |
 | 5b | Robot Avatar | in `HomeScreen.kt` | Built | Visual QA |
 | 5c | Robot Status Sheet | in `HomeScreen.kt` | Built | Bind to real connection state, not the boolean stub |
-| 5d | Float over apps | `NovaEdgePulseService.kt` (503 L) | Built | Replace feed simulation (`:461`) |
+| 5d | Float over apps | `NovaHostPulseService.kt` (503 L) | Built | Replace feed simulation (`:461`) |
 | 6 | Quotes + risk calc | `MarketsScreen.kt`, `MarketsTabs.kt`, `PairManagementScreen.kt` | Built | Remove `// Simulate live calculation` (`:151`); symbols from robot |
 | 7 | Chart Scanner + risk calc | `SymbolScannerScreen.kt` (507 L) | **Blocked** | **Implement image picker (P0-5)** — highest-value single fix |
 | 8 | Broker Setup | `MetaTraderConnectScreen.kt` (522 L) | Built | De-hardcode Trade245; add MetaCopier account registration |

@@ -38,7 +38,7 @@ const handleUnlock = async () => {
         </svg>
       </div>
 
-      <h1 class="headline">Unlock Nova Edge</h1>
+      <h1 class="headline">Unlock NovaHost</h1>
       <p class="subtitle">Enter your registered email to verify your subscription.</p>
 
       <form @submit.prevent="handleUnlock" class="form-container">

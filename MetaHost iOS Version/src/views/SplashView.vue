@@ -6,11 +6,11 @@
     <!-- Logo lockup -->
     <div class="logo-lockup">
       <div class="logo-frame glass">
-        <img src="/app_logo.png" class="logo-img" alt="Nova Edge" />
+        <img src="/app_logo.png" class="logo-img" alt="NovaHost" />
       </div>
 
       <div class="brand-copy">
-        <h1 class="brand-name">Nova Edge</h1>
+        <h1 class="brand-name">NovaHost</h1>
         <p class="brand-sub mono-tech">Silent Precision</p>
       </div>
     </div>

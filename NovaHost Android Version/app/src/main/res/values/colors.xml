@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="background">#0A0A0A</color>
+    <!-- The splash canvas. Must equal NovaSurface in Color.kt: the system
+         splash window and the Compose splash draw the same ground, and any
+         difference between them shows up as a flash at the ~1000ms handoff. -->
+    <color name="nova_surface">#FFFFFF</color>
+    <!-- Sampled from the corners of ic_launcher_art.png, so any launcher that
+         tints or letterboxes the icon lands on the artwork's own ground. -->
+    <color name="novahost_icon_bg">#E1E7EF</color>
 </resources>

@@ -58,7 +58,7 @@ yarn-error.log*
 
 # ─── Vendored third-party SDK reference dumps ─────────────────────
 # Copies of external SDK docs/examples (elevenlabs-js, metaapi-javascript-sdk,
-# magicui). Not Nova Edge source, and their paths exceed the Windows limit.
+# magicui). Not NovaHost source, and their paths exceed the Windows limit.
 **/.agents/skills/
 
 # Parked nested-repo git dirs (temporary, restored after the monorepo commit)

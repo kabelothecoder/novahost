@@ -159,9 +159,38 @@ Deno.serve(async (req) => {
         if (updErr) throw updErr;
       }
 
+      // Android used to bind a handset ONLY into licenses.metadata.device_id,
+      // while the portal branch below wrote device_activations. Two registries
+      // with no overlap: the portal's 1-tap hardware reset clears a row that an
+      // Android install never had, so the reset silently did nothing, and
+      // nothing could enumerate "which keys live on this handset".
+      //
+      // Both are written now. metadata.device_id stays because it is what the
+      // mismatch check above reads and what existing installs are bound by;
+      // device_activations is the registry the portal and `my-licenses` query.
+      // Failure here is logged, not fatal -- the licence is already validated
+      // and refusing activation over a bookkeeping row helps nobody.
+      if (deviceId) {
+        const { error: seatErr } = await supabase
+          .from("device_activations")
+          .upsert({
+            license_id: license.id,
+            device_id: deviceId,
+            last_seen_at: new Date().toISOString(),
+            status: "active",
+          }, { onConflict: "license_id,device_id" });
+
+        if (seatErr) {
+          console.warn("[validate-license] device_activations upsert failed:", seatErr.message);
+        }
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
+          // Echoed back so the handset stores the canonical, upper-cased key
+          // rather than whatever casing the user typed.
+          license_key: licenseKey,
           // The robot this key unlocks. The device stores it and drops any
           // realtime signal tagged with a different robot, so a user only ever
           // executes trades from the robot they actually paid for.

@@ -5,10 +5,10 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Nova Edge — Automated Luxury Trading Platform",
+  title: "NovaHost — Automated Luxury Trading Platform",
   description:
     "Effortlessly connect your Expert Advisors to our ultra-low latency mobile VPS. Run 24/7 automated trading strategies directly from your mobile device.",
-  keywords: ["Nova Edge", "algorithmic trading", "Expert Advisors", "VPS", "MT4", "MT5", "mobile trading"],
+  keywords: ["NovaHost", "algorithmic trading", "Expert Advisors", "VPS", "MT4", "MT5", "mobile trading"],
 };
 
 export default function RootLayout({

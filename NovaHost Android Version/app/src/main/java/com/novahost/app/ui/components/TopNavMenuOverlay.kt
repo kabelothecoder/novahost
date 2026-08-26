@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.components
+﻿package com.novahost.app.ui.components
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -18,19 +18,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.novaedge.app.navigation.Routes
-import com.novaedge.app.ui.theme.LocalNovaEdgeTheme
+import com.novahost.app.navigation.Routes
+import com.novahost.app.ui.theme.LocalNovaHostTheme
 
 @Composable
 fun TopNavMenuOverlay(navController: NavController, currentRoute: String?) {
     // Only show on authenticated main screens
     val showNav = currentRoute in listOf(
-        Routes.HOME, Routes.TERMINAL, Routes.SCANNER, Routes.MARKETS, Routes.SETTINGS, Routes.PAIRS
+        Routes.HOME, Routes.TERMINAL, Routes.SCANNER, Routes.SETTINGS, Routes.PAIRS
     )
 
     if (!showNav) return
 
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     var isMenuOpen by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -53,7 +53,7 @@ fun TopNavMenuOverlay(navController: NavController, currentRoute: String?) {
                         .padding(top = 110.dp, start = 32.dp, end = 32.dp)
                 ) {
                     Text(
-                        text = "Nova Edge NAVIGATION",
+                        text = "NovaHost NAVIGATION",
                         color = themeState.primaryColor,
                         fontSize = 12.sp,
                         letterSpacing = 2.sp
@@ -72,10 +72,14 @@ fun TopNavMenuOverlay(navController: NavController, currentRoute: String?) {
                         isMenuOpen = false
                         if (currentRoute != Routes.SCANNER) navController.navigate(Routes.SCANNER)
                     }
-                    NavMenuItem("Markets Terminal", Icons.Rounded.Language, currentRoute == Routes.MARKETS) {
-                        isMenuOpen = false
-                        if (currentRoute != Routes.MARKETS) navController.navigate(Routes.MARKETS)
-                    }
+                    // Trading Symbols is deliberately not listed.
+                    //
+                    // It has exactly one way in: the Quotes button on the home
+                    // ignition row. Two entry points to a screen that decides
+                    // what the robot is allowed to trade meant two places to
+                    // look for it and no clue which was canonical -- and the
+                    // home button is the one sitting next to START, where the
+                    // question "what will this trade?" actually gets asked.
                     NavMenuItem("Global Settings", Icons.Rounded.Settings, currentRoute == Routes.SETTINGS) {
                         isMenuOpen = false
                         if (currentRoute != Routes.SETTINGS) navController.navigate(Routes.SETTINGS)
@@ -113,7 +117,7 @@ fun TopNavMenuOverlay(navController: NavController, currentRoute: String?) {
 
 @Composable
 fun NavMenuItem(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, isSelected: Boolean, onClick: () -> Unit) {
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val color = if (isSelected) themeState.primaryColor else Color.White
     
     Row(

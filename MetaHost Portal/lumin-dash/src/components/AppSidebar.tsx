@@ -57,7 +57,7 @@ export function AppSidebar() {
             </div>
             {(!isCollapsed || isMobile) && (
               <div className="transition-all duration-300">
-                <h1 className="font-bold text-lg text-foreground">Nova Edge</h1>
+                <h1 className="font-bold text-lg text-foreground">NovaHost</h1>
                 <p className="text-xs text-muted-foreground">Admin Portal</p>
               </div>
             )}
@@ -172,7 +172,7 @@ export function AppSidebar() {
           <div className="mt-auto space-y-6 pt-6">
             <div className="p-4 rounded-xl bg-gradient-to-r from-primary/5 to-secondary/5 border border-border/50">
               <div className="text-xs text-muted-foreground text-center">
-                <p className="font-medium">Nova Edge EA Manager</p>
+                <p className="font-medium">NovaHost EA Manager</p>
                 <p>Professional Edition</p>
               </div>
             </div>

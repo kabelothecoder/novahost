@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.viewmodels
+﻿package com.novahost.app.ui.viewmodels
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -23,6 +23,7 @@ class MetaTraderViewModel(application: Application) : AndroidViewModel(applicati
     private val ACCOUNT_ID_KEY   = stringPreferencesKey("account_id")
     private val SERVER_KEY       = stringPreferencesKey("server")
     private val ACCOUNT_TYPE_KEY = stringPreferencesKey("account_type")
+    private val PLATFORM_KEY     = stringPreferencesKey("platform")
 
     private val _accountId = MutableStateFlow("")
     val accountId: StateFlow<String> = _accountId
@@ -35,6 +36,17 @@ class MetaTraderViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _accountType = MutableStateFlow("Standard — No Bonus")
     val accountType: StateFlow<String> = _accountType
+
+    /**
+     * MT4 or MT5, remembered across visits.
+     *
+     * The tab used to reset to MT5 on every recomposition of the screen, so an
+     * MT4 user who fixed their password on a second attempt silently resubmitted
+     * it as MT5. The broker answers that with a credential rejection, which sent
+     * them back to re-checking a password that was right all along.
+     */
+    private val _platform = MutableStateFlow("MT5")
+    val platform: StateFlow<String> = _platform
 
     /** Automatically derives the symbol suffix based on account type.
      *  Micro accounts require a .m suffix on every symbol (e.g. XAUUSD.m).
@@ -54,7 +66,14 @@ class MetaTraderViewModel(application: Application) : AndroidViewModel(applicati
             _password.value    = "" // Never load raw password from disk
             _server.value      = context.dataStore.data.map { it[SERVER_KEY]        ?: "" }.first()
             _accountType.value = context.dataStore.data.map { it[ACCOUNT_TYPE_KEY] ?: "Standard — No Bonus" }.first()
+            _platform.value    = context.dataStore.data.map { it[PLATFORM_KEY]     ?: "MT5" }.first()
         }
+    }
+
+    fun updatePlatform(value: String) {
+        val normalized = if (value.equals("MT4", ignoreCase = true)) "MT4" else "MT5"
+        _platform.value = normalized
+        viewModelScope.launch { context.dataStore.edit { it[PLATFORM_KEY] = normalized } }
     }
 
     fun updateAccountId(id: String) {

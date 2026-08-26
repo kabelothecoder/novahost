@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
@@ -9,7 +9,7 @@ import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.ktor.client.plugins.HttpTimeout
-import com.novaedge.app.BuildConfig
+import com.novahost.app.BuildConfig
 
 object SupabaseSetup {
     private val SUPABASE_URL = BuildConfig.SUPABASE_URL.removeSuffix("/")
@@ -34,10 +34,15 @@ object SupabaseSetup {
             install(Storage)
 
             httpConfig {
+                // 15s across the board was too tight for a handset on mobile
+                // data. Broker-side operations legitimately run past it, and the
+                // timeout fired on calls that had already succeeded server-side
+                // -- users were told their account failed to link while the link
+                // was being written. Slow is acceptable; lying is not.
                 install(HttpTimeout) {
-                    requestTimeoutMillis = 15000 // 15 seconds
-                    connectTimeoutMillis = 15000 // 15 seconds
-                    socketTimeoutMillis = 15000  // 15 seconds
+                    requestTimeoutMillis = 60_000
+                    connectTimeoutMillis = 30_000
+                    socketTimeoutMillis = 60_000
                 }
             }
         }

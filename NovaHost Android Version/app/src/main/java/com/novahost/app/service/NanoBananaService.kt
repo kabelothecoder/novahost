@@ -1,11 +1,11 @@
-﻿package com.novaedge.app.service
+﻿package com.novahost.app.service
 
 import android.app.*
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.novaedge.app.NovaEdgeApplication
-import com.novaedge.app.R
+import com.novahost.app.NovaHostApplication
+import com.novahost.app.R
 import kotlinx.coroutines.*
 
 /**
@@ -47,9 +47,9 @@ class NanoBananaService : Service() {
 
     private fun fireDisconnectAlert() {
         val nm = getSystemService(NotificationManager::class.java)
-        val notif = NotificationCompat.Builder(this, NovaEdgeApplication.CHANNEL_ID_WATCHER)
-            .setSmallIcon(R.drawable.app_logo)
-            .setContentTitle("⚠ Nova Edge — Connection Lost")
+        val notif = NotificationCompat.Builder(this, NovaHostApplication.CHANNEL_ID_WATCHER)
+            .setSmallIcon(R.drawable.novahost_mark)
+            .setContentTitle("⚠ NovaHost — Connection Lost")
             .setContentText("MT4/MT5 terminal connection dropped. Tap to reconnect.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
@@ -58,9 +58,9 @@ class NanoBananaService : Service() {
     }
 
     private fun buildForegroundNotification(): Notification =
-        NotificationCompat.Builder(this, NovaEdgeApplication.CHANNEL_ID_WATCHER)
-            .setSmallIcon(R.drawable.app_logo)
-            .setContentTitle("Nova Edge Active")
+        NotificationCompat.Builder(this, NovaHostApplication.CHANNEL_ID_WATCHER)
+            .setSmallIcon(R.drawable.novahost_mark)
+            .setContentTitle("NovaHost Active")
             .setContentText("Monitoring your trading terminal…")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()

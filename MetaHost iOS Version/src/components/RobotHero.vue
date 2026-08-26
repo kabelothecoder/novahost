@@ -27,7 +27,7 @@
       <img
         class="hero-avatar"
         src="/robot_avatar.png"
-        alt="Nova Edge AI Trading Robot"
+        alt="NovaHost AI Trading Robot"
         draggable="false"
       />
 
@@ -60,7 +60,7 @@
 
     <!-- Tagline -->
     <div class="hero-tagline">
-      <h1 class="hero-name">Nova Edge</h1>
+      <h1 class="hero-name">NovaHost</h1>
       <p class="hero-subtitle">Precision-Engineered AI Trading</p>
     </div>
   </div>

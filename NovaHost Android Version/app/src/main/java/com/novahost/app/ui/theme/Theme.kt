@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.theme
+﻿package com.novahost.app.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -22,7 +22,16 @@ enum class AppTheme {
 }
 
 enum class HolographicGlowMode {
-    SOFT, MEDIUM, INTENSE, PULSE
+    /**
+     * No bloom at all.
+     *
+     * Added for the Settings redesign, whose glow ladder starts at Off and
+     * treats it as a supported choice -- the battery option, and the option for
+     * anyone who finds bloom uncomfortable -- exactly as [NovaGlow.OFF] already
+     * did. Without it, the "Off" row could not turn off the glow that
+     * `Modifier.neonGlow` draws.
+     */
+    OFF, SOFT, MEDIUM, INTENSE, PULSE
 }
 
 enum class HomeButtonShape {
@@ -43,24 +52,37 @@ enum class RobotFontStyle {
 }
 
 // === Dynamic Theme State ===
-data class NovaEdgeThemeState(
-    val primaryColor: Color = Crimson,
+data class NovaHostThemeState(
+    // The active robot's accent. Also the fallback when a robot defines no
+    // accent_color -- it used to default to Crimson and then get special-cased
+    // back to blue at the point of use, so the "default" was never the value
+    // anyone actually saw.
+    val primaryColor: Color = SoftLightBlue,
+
+    // Glow intensity for the Neon Glow preset. Operator-controlled from
+    // Settings -> Appearance. OFF is a supported state, not a broken one: the
+    // crisp edge survives, so it serves as both the accessibility option and
+    // the battery option.
+    val glow: NovaGlow = NovaGlow.Default,
     val appTheme: AppTheme = AppTheme.HOLOGRAPHIC,
     val useRoundedShape: Boolean = true,
     val isGlossTheme: Boolean = false,
     val secondaryColor: Color = Cyan,
     val backgroundAssetIndex: Int? = null,
-    val robotName: String = "OPTIMUS PRIME SCALPER EA",
-    val robotAvatarUrl: String? = null,
-    val robotBackgroundImageUrl: String? = null,
-    val productCode: String = "NovaEdge",
-    // TODO(rebrand): this points at a *different* legacy Supabase project (kivpdtisymhymmndndun) than the rest
-    // of the app (epulmnfbxjmaimefhofp) — confirm what this is before migrating, then re-upload promo asset
-    // to the new Nova Edge Supabase project's storage bucket and update this URL.
-    val promoVideoUrl: String? = "https://kivpdtisymhymmndndun.supabase.co/storage/v1/object/public/assets/metahost_promo.mp4",
     val holographicGlowMode: HolographicGlowMode = HolographicGlowMode.MEDIUM,
     val secondaryBackgroundColor: Color? = null,
-    val allowedSymbols: List<String> = emptyList(),
+
+    /**
+     * Light is an explicit opt-in, not the default.
+     *
+     * `premiumLightColorScheme` used to be hardwired as the only scheme while
+     * every screen painted dark surfaces over it. Anything the screens did not
+     * paint themselves -- ripples, disabled text, unstyled dividers, the
+     * keyboard's own surface -- resolved against a light palette on a dark
+     * screen. Dark is what the app actually is; light is a setting.
+     */
+    val useLightScheme: Boolean = false,
+
     /** @description When true, card borders and inventory rows are suppressed — only the full-bleed background fills the screen. */
     val immersiveMode: Boolean = false,
     /** @description Controls which editorial typeface is used for the robot name label on HomeScreen. */
@@ -69,11 +91,10 @@ data class NovaEdgeThemeState(
     val robotNameFontSize: Float = 24f,
     val robotNameFontColor: Color = Color.White,
     val homeButtonShape: HomeButtonShape = HomeButtonShape.CIRCLE,
-    val isTradeCalculatorEnabled: Boolean = true
 )
 
-val LocalNovaEdgeTheme = compositionLocalOf { NovaEdgeThemeState() }
-val LocalNovaEdgeThemeUpdater = compositionLocalOf<(NovaEdgeThemeState) -> Unit> { {} }
+val LocalNovaHostTheme = compositionLocalOf { NovaHostThemeState() }
+val LocalNovaHostThemeUpdater = compositionLocalOf<(NovaHostThemeState) -> Unit> { {} }
 
 /**
  * @description CompositionLocal that resolves the active RobotFontStyle enum into a
@@ -165,11 +186,19 @@ fun obsidianColorScheme(primary: Color = Crimson) = darkColorScheme(
 )
 
 @Composable
-fun NovaEdgeTheme(
-    themeState: NovaEdgeThemeState = NovaEdgeThemeState(),
+fun NovaHostTheme(
+    themeState: NovaHostThemeState = NovaHostThemeState(),
+    robotBranding: RobotBranding = RobotBranding(),
     content: @Composable () -> Unit
 ) {
-    val colorScheme = premiumLightColorScheme(themeState.primaryColor.takeIf { it != Crimson } ?: SoftLightBlue)
+    // primaryColor already defaults to SoftLightBlue, so the old Crimson
+    // special-case is gone. A robot's accent_color flows straight through.
+    // Dark is the real scheme -- see NovaHostThemeState.useLightScheme.
+    val colorScheme = if (themeState.useLightScheme) {
+        premiumLightColorScheme(themeState.primaryColor)
+    } else {
+        obsidianColorScheme(themeState.primaryColor)
+    }
     val baseStyle = robotFontStyleToTextStyle(themeState.robotFontStyle)
     val robotTextStyle = baseStyle.copy(
         fontSize = themeState.robotNameFontSize.sp,
@@ -177,16 +206,17 @@ fun NovaEdgeTheme(
     )
 
     CompositionLocalProvider(
-        LocalNovaEdgeTheme provides themeState,
+        LocalNovaHostTheme provides themeState,
+        LocalRobotBranding provides robotBranding,
         LocalRobotFont provides robotTextStyle
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography  = NovaEdgeTypography,
+            typography  = NovaHostTypography,
             content     = content
         )
     }
 }
 
-val NovaEdgeThemeState.cardShape: Shape
+val NovaHostThemeState.cardShape: Shape
     get() = if (useRoundedShape) RoundedCornerShape(12.dp) else RectangleShape

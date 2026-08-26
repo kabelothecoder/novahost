@@ -213,7 +213,7 @@ function RobotPreviewCard({ eaName, licenseKey, robotType, primaryColor, onCopy,
 
           {/* Footer hint */}
           <p className="text-xs text-white/40 text-center font-mono tracking-wide">
-            ⚡ Paste this key into your Nova Edge Mobile App to activate
+            ⚡ Paste this key into your NovaHost Mobile App to activate
           </p>
         </div>
       </div>

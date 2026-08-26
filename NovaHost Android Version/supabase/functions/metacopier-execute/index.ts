@@ -18,6 +18,35 @@ function toOrderType(side: string): string | null {
 }
 
 /**
+ * The order comment MetaTrader shows against the position.
+ *
+ * Format is `<robot>-NovaHost`, e.g. `Quantum Breaker EA-NovaHost`, so anyone
+ * reading the trade history can tell at a glance which positions were placed by
+ * automation and which robot placed them.
+ *
+ * Built here rather than sent by the client: the robot name is an attribute of
+ * the licence, and a device that could choose its own comment could attribute
+ * its trades to somebody else's robot.
+ *
+ * MetaTrader truncates comments around 31 characters, so the suffix is
+ * protected and the robot name is what gets shortened -- losing the tail of a
+ * long robot name is survivable, losing "-NovaHost" defeats the point.
+ */
+const COMMENT_SUFFIX = '-NovaHost'
+const COMMENT_MAX = 31
+
+function tradeComment(license: Record<string, unknown>): string {
+  const ea = license.expert_advisors as { name?: string; display_name?: string } | null
+  const raw = (ea?.display_name || ea?.name || 'NovaHost Bot').toString()
+
+  // Strip what MetaTrader will not carry cleanly in a comment field.
+  const cleaned = raw.replace(/[^\w \-.]/g, '').trim() || 'NovaHost Bot'
+
+  const room = COMMENT_MAX - COMMENT_SUFFIX.length
+  return cleaned.slice(0, room).trim() + COMMENT_SUFFIX
+}
+
+/**
  * Stable 32-bit request id derived from the signal id. MetaCopier uses
  * requestId to deduplicate, so a retry of the SAME signal must produce the
  * SAME number -- that is what stops a network retry opening a second position.
@@ -29,6 +58,39 @@ function requestIdFrom(seed: string): number {
     h = Math.imul(h, 16777619)
   }
   return Math.abs(h | 0)
+}
+
+/**
+ * How many positions are already open on this account for one symbol.
+ *
+ * Returns null when the broker could not be asked, which callers must treat as
+ * "unknown" and never as "none" -- reading a failed request as zero would turn
+ * every outage into an unlimited position cap.
+ */
+async function countOpenPositions(
+  accountId: string,
+  symbol: string,
+  apiKey: string
+): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/positions`,
+      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' } }
+    )
+    if (!res.ok) {
+      console.warn(`[metacopier-execute] positions query failed ${res.status}`)
+      return null
+    }
+    const positions = await res.json()
+    if (!Array.isArray(positions)) return null
+
+    return positions.filter((p: Record<string, unknown>) =>
+      String(p?.symbol ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase() === symbol
+    ).length
+  } catch (e) {
+    console.warn(`[metacopier-execute] positions query threw: ${(e as Error).message}`)
+    return null
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -80,9 +142,13 @@ Deno.serve(async (req: Request) => {
     // so the licence IS the credential. Never trust the client's word for it.
     const { data: license, error: licErr } = await supabase
       .from('licenses')
-      .select('id, ea_id, status, expires_at, allowed_symbols, metadata')
+      .select(
+        'id, ea_id, status, expires_at, allowed_symbols, metadata, ' +
+        'expert_advisors:expert_advisors!licenses_ea_id_fkey(name, display_name)'
+      )
       .eq('license_key', String(license_key).trim().toUpperCase())
       .maybeSingle()
+
 
     if (licErr) throw licErr
 
@@ -113,16 +179,94 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, error: `Symbol ${cleanPair} is not enabled on this licence.` }, 403)
     }
 
+    // ---- Apply the subscriber's own per-symbol plan --------------------------
+    //
+    // licenses.allowed_symbols above is the MENTOR's allowance. This is the
+    // other half: of the symbols the robot permits, which ones this subscriber
+    // actually enabled, at what size, and how many at once. Set on the Trading
+    // Symbols screen and pushed here by sync-symbol-config.
+    //
+    // Enforced server-side because the handset is not a trustworthy place to
+    // keep a cap. A stale, rolled-back or tampered-with client would otherwise
+    // size positions off numbers the user thought they had changed.
+    //
+    // Absent configuration is NOT a block: a licence that has never synced has
+    // no rows here, and those installs must keep trading exactly as before.
+    const { data: symbolCfg, error: cfgErr } = await supabase
+      .from('license_symbol_config')
+      .select('enabled, lot, max_trades, smart_lot')
+      .eq('license_id', license.id)
+      .eq('symbol', cleanPair)
+      .maybeSingle()
+
+    if (cfgErr) {
+      // Reading the plan failed, which says nothing about what the user wants.
+      // Logged and skipped rather than thrown: a status query hiccup must not
+      // become a trading outage.
+      console.warn(`[metacopier-execute] symbol config unreadable: ${cfgErr.message}`)
+    }
+
+    let effectiveLots = lots
+
+    if (symbolCfg) {
+      if (symbolCfg.enabled === false) {
+        return json({
+          success: false,
+          error: `${cleanPair} is switched off in your trading symbols.`,
+        }, 403)
+      }
+
+      // The configured size is a ceiling, not a replacement. A client sending
+      // less than the user configured is honoured -- it may be sizing down for
+      // a reason this function cannot see -- but nothing may exceed the number
+      // the user actually set on the screen.
+      const riskProfile = (license.metadata as Record<string, unknown> | null)
+        ?.risk_profile as Record<string, unknown> | undefined
+
+      const smartLotSize = Number(riskProfile?.smart_lot_size) || 0
+      const ceiling = symbolCfg.smart_lot && smartLotSize > 0
+        ? smartLotSize
+        : Number(symbolCfg.lot) || 0
+
+      if (ceiling > 0 && effectiveLots > ceiling) {
+        console.log(
+          `[metacopier-execute] ${cleanPair} volume ${effectiveLots} capped to configured ${ceiling}`
+        )
+        effectiveLots = ceiling
+      }
+
+      // ---- Concurrency cap --------------------------------------------------
+      const maxTrades = Number(symbolCfg.max_trades) || 0
+      if (maxTrades > 0) {
+        const open = await countOpenPositions(account_id, cleanPair, METACOPIER_API_KEY)
+
+        // null means the broker could not be asked. Fail open and say so: a
+        // transient failure on the positions endpoint blocking every order is a
+        // worse outcome than briefly exceeding a self-imposed cap, and silence
+        // here would make that choice invisible.
+        if (open === null) {
+          console.warn(
+            `[metacopier-execute] could not count open ${cleanPair} positions; cap not enforced`
+          )
+        } else if (open >= maxTrades) {
+          return json({
+            success: false,
+            error: `Already holding ${open} ${cleanPair} position(s); your limit is ${maxTrades}.`,
+          }, 409)
+        }
+      }
+    }
+
     // ---- Place the position -------------------------------------------------
     const positionRequest = {
       symbol: cleanPair,
       orderType,
-      volume: lots,
+      volume: effectiveLots,
       openPrice: 0,                       // 0 => market order
       stopLoss: Number(sl) || 0,          // 0 => no stop loss
       takeProfit: Number(tp) || 0,        // 0 => no take profit
       requestId: requestIdFrom(String(signal_id ?? `${license.id}:${Date.now()}`)),
-      comment: 'NovaEdge',
+      comment: tradeComment(license),
     }
 
     const mcResponse = await fetch(
@@ -168,7 +312,9 @@ Deno.serve(async (req: Request) => {
 
     return json({
       success: true,
-      message: `${orderType} ${cleanPair} ${lots} lots sent.`,
+      // effectiveLots, not lots: reporting the requested size when a cap reduced
+      // it tells the user they hold a position they do not hold.
+      message: `${orderType} ${cleanPair} ${effectiveLots} lots sent.`,
       requestId: positionRequest.requestId,
     })
 

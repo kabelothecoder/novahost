@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Your Nova Edge License Key</title>
+      <title>Your NovaHost License Key</title>
       <style>
         body {
           margin: 0;
@@ -144,15 +144,15 @@ Deno.serve(async (req) => {
           <div class="key-box">${licenseKey}</div>
           
           <p style="color: #9ca3af; font-size: 13px; line-height: 1.5; margin: 20px 0;">
-            To activate your Expert Advisor, download the Nova Edge mobile app, select your broker account, and paste the activation key into the license section.
+            To activate your Expert Advisor, download the NovaHost mobile app, select your broker account, and paste the activation key into the license section.
           </p>
           
-          <a href="https://novaedge.co/download" class="cta-button">Download App & Activate</a>
+          <a href="https://novahost.co/download" class="cta-button">Download App & Activate</a>
         </div>
         
         <div class="footer">
-          <p>This email was sent automatically by Nova Edge Admin Portal on behalf of your administrator.</p>
-          <p>© 2026 Nova Edge. All rights reserved.</p>
+          <p>This email was sent automatically by NovaHost Admin Portal on behalf of your administrator.</p>
+          <p>© 2026 NovaHost. All rights reserved.</p>
         </div>
       </div>
     </body>
@@ -168,9 +168,9 @@ Deno.serve(async (req) => {
           'Authorization': `Bearer ${resendApiKey}`,
         },
         body: JSON.stringify({
-          from: 'Nova Edge <onboarding@resend.dev>', // resend sandbox domain or custom verified domain
+          from: 'NovaHost <onboarding@resend.dev>', // resend sandbox domain or custom verified domain
           to: [email],
-          subject: `Your Nova Edge License for ${eaName} is Ready`,
+          subject: `Your NovaHost License for ${eaName} is Ready`,
           html: htmlContent,
         }),
       });
@@ -204,9 +204,9 @@ Deno.serve(async (req) => {
       });
 
       await client.send({
-        from: 'Nova Edge Admin <no-reply@novaedge.co>',
+        from: 'NovaHost Admin <no-reply@novahost.co>',
         to: email,
-        subject: `Your Nova Edge License for ${eaName} is Ready`,
+        subject: `Your NovaHost License for ${eaName} is Ready`,
         html: htmlContent,
       });
 

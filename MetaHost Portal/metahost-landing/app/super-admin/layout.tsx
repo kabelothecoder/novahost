@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 
 // ─── Mock Auth ────────────────────────────────────────────────────────────────
-const ADMIN_CREDENTIALS = { email: "admin@novaedge.com", password: "NovaEdge@Admin2026!" };
+const ADMIN_CREDENTIALS = { email: "admin@novahost.com", password: "NovaHost@Admin2026!" };
 const AUTH_KEY = "mh_super_admin_auth";
 
 const AuthCtx = createContext<{
@@ -59,7 +59,7 @@ function LoginWall({ onLogin }: { onLogin: (e: string, p: string) => boolean }) 
             Restricted Access — Super Admins Only
           </div>
           <h1 className="text-2xl font-extrabold text-white tracking-tight">
-            Nova Edge Command Center
+            NovaHost Command Center
           </h1>
           <p className="text-sm text-white/30 mt-1.5">
             Authorised personnel only. All access is logged and audited.
@@ -77,7 +77,7 @@ function LoginWall({ onLogin }: { onLogin: (e: string, p: string) => boolean }) 
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="admin@novaedge.com"
+                placeholder="admin@novahost.com"
                 required
                 className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
               />
@@ -151,7 +151,7 @@ function Sidebar({
             <Terminal size={15} className="text-white" />
           </div>
           <div>
-            <p className="text-[13px] font-black text-white tracking-tight">Nova Edge</p>
+            <p className="text-[13px] font-black text-white tracking-tight">NovaHost</p>
             <p className="text-[9px] text-red-400 font-bold tracking-widest uppercase">Super Admin</p>
           </div>
         </div>
@@ -208,7 +208,7 @@ function Sidebar({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-white">Super Admin</p>
-            <p className="text-[10px] text-white/30 truncate">admin@novaedge.com</p>
+            <p className="text-[10px] text-white/30 truncate">admin@novahost.com</p>
           </div>
         </div>
         <button

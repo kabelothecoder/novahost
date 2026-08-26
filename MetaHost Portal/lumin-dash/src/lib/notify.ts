@@ -25,7 +25,7 @@ export function playWelcomeSwoosh() {
     if ('speechSynthesis' in window) {
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
-      const msg = new SpeechSynthesisUtterance("Welcome, Nova Edge Systems initialized.");
+      const msg = new SpeechSynthesisUtterance("Welcome, NovaHost Systems initialized.");
       msg.pitch = 0.8;
       msg.rate = 1.1;
       // Optional: try to find a female/AI sounding voice

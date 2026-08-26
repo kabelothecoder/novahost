@@ -1,18 +1,18 @@
-﻿# Nova Edge Architecture & Claude Code Onboarding Brief
+﻿# NovaHost Architecture & Claude Code Onboarding Brief
 
-This document serves as the master technical blueprint and context brief for Nova Edge. It onboards Claude Code as an autonomous Lead Engineer for this repository.
+This document serves as the master technical blueprint and context brief for NovaHost. It onboards Claude Code as an autonomous Lead Engineer for this repository.
 
 ## 1. Executive Summary & Core Value Proposition
 
-### What is Nova Edge?
-Nova Edge is a mobile-first cloud VPS and automated algorithmic trading management platform ("Silent Precision"). It allows retail forex and crypto traders to connect their MetaTrader 4 (MT4) or MetaTrader 5 (MT5) accounts, execute automated trading strategies (Expert Advisors / EAs) 24/7 in the cloud without draining phone battery, scan chart patterns using Claude 3.5 Sonnet AI, and execute remote trade signals broadcast instantly from mentors or trading desks.
+### What is NovaHost?
+NovaHost is a mobile-first cloud VPS and automated algorithmic trading management platform ("Silent Precision"). It allows retail forex and crypto traders to connect their MetaTrader 4 (MT4) or MetaTrader 5 (MT5) accounts, execute automated trading strategies (Expert Advisors / EAs) 24/7 in the cloud without draining phone battery, scan chart patterns using Claude 3.5 Sonnet AI, and execute remote trade signals broadcast instantly from mentors or trading desks.
 
 ### Target Users
 - **Retail Traders**: Users seeking zero-latency, 24/7 cloud execution for automated trading strategies directly from their iOS or Android smartphones.
 - **Mentors & Signal Providers**: Trading educators who broadcast high-probability trade setups to student accounts and manage subscriber fleets.
 
 ### Key Business Goals
-Nova Edge Direct-to-Consumer: A unified mobile application and platform offering premium cloud hosting, AI chart scanning, and risk management exclusively under the proprietary Nova Edge brand.
+NovaHost Direct-to-Consumer: A unified mobile application and platform offering premium cloud hosting, AI chart scanning, and risk management exclusively under the proprietary NovaHost brand.
 
 ## 2. Architecture & Tech Stack Breakdown
 
@@ -41,7 +41,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 │  ┌────────────────────────┐     ┌────────────────────────┐  │   │      (MT4 / MT5 Broker Bridge)       │
 │  │   Android Native App   │     │      iOS Hybrid App    │  │   └──────────────────┬───────────────────┘
 │  │ (Kotlin/Compose, M3,   │     │  (Vue.js, Capacitor,   │  │                      │
-│  │ NovaEdgePulseService)  │     │   Apple HIG, Pinia)    │  │                      │ Opens Orders Instantly
+│  │ NovaHostPulseService)  │     │   Apple HIG, Pinia)    │  │                      │ Opens Orders Instantly
 │  └────────────────────────┘     └────────────────────────┘  │                      ▼
 └─────────────────────────────────────────────────────────────┘   ┌──────────────────────────────────────┐
                                                                   │         BROKER INFRASTRUCTURE        │
@@ -50,7 +50,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 ```
 
 ### Mobile Applications
-- **Android Application**: Native Kotlin built with Jetpack Compose (Material 3 tokens customized for the Premium Light theme). Uses `NovaEdgePulseService` (a foreground service) to maintain persistent WebSocket connections to Supabase Realtime without system-level background process throttling.
+- **Android Application**: Native Kotlin built with Jetpack Compose (Material 3 tokens customized for the Premium Light theme). Uses `NovaHostPulseService` (a foreground service) to maintain persistent WebSocket connections to Supabase Realtime without system-level background process throttling.
 - **iOS Application**: Vue.js combined with Capacitor for cross-platform native runtime, styled according to Apple Human Interface Guidelines (HIG). Uses `@capacitor/device` for hardware-level fingerprinting and Pinia/Vuex for state management.
 
 ### Web Mentor Portal
@@ -81,7 +81,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 | System Setup Onboarding | 5-step setup wizard introducing value, capturing display name, simulating server allocation, and verifying activation. | `HorizontalPager` (Compose) / 5-step Touch Slider (Vue). |
 | Device-Locked Activation | Validates user license/email and binds physical device UUID to Supabase database. | `@capacitor/device` + Supabase `subscriptions` table. |
 | Home Dashboard | Minimalist command center featuring user greeting, glassmorphic status badge, and central ignition button. | Jetpack Compose / Vue, reactive `is_active` state. |
-| Robot Ignition (START/STOP) | Toggles cloud trading engine status, spins up local logging service, and joins Realtime socket. | `NovaEdgePulseService` / WebSocket connection. |
+| Robot Ignition (START/STOP) | Toggles cloud trading engine status, spins up local logging service, and joins Realtime socket. | `NovaHostPulseService` / WebSocket connection. |
 | AI Chart Scanner | Analyzes uploaded chart screenshots to extract patterns, signals, Stop Loss, and Take Profit levels. | Camera/Picker -> base64 -> Claude 3.5 Sonnet Edge Function. |
 | Smart Risk Calculator | Computes lot sizes dynamically based on account balance, risk percentage, asset pip value, and SL pips. | `riskCalculator.js` / Kotlin Math Utility. |
 | Trading Symbols Hub | Lists active asset pairs (XAUUSD, US30, etc.) with gear icons opening per-symbol lot size configuration sheets. | Modal Bottom Sheet + Supabase `symbol_preferences` upsert. |
@@ -98,7 +98,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 
 ## 4. Component & Design System Guidelines
 
-Nova Edge strictly adheres to a "Premium Light / Clean Neumorphic" visual aesthetic across all mobile screens.
+NovaHost strictly adheres to a "Premium Light / Clean Neumorphic" visual aesthetic across all mobile screens.
 
 ### Color Tokens
 
@@ -119,7 +119,7 @@ Nova Edge strictly adheres to a "Premium Light / Clean Neumorphic" visual aesthe
 
 ## 5. Instructions for Claude Code
 
-You are the Lead Engineer working on Nova Edge, a mobile-first cloud VPS and automated trading management suite (Android native in Kotlin/Compose, iOS hybrid in Vue.js/Capacitor, Admin Portal in Vue/React, and Supabase backend).
+You are the Lead Engineer working on NovaHost, a mobile-first cloud VPS and automated trading management suite (Android native in Kotlin/Compose, iOS hybrid in Vue.js/Capacitor, Admin Portal in Vue/React, and Supabase backend).
 
 ### Mandatory Workflow & Implementation Rules
 

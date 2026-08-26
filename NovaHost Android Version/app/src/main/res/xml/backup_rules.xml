@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Auto-backup rules, API 30 and below.
+
+    secure_terminal_prefs is EncryptedSharedPreferences. Its master key lives in
+    the Android Keystore and is bound to this install on this device, so it is
+    never part of a backup. Carrying the ciphertext across a reinstall therefore
+    restores a file nothing on the new install can decrypt, and every read throws
+    AEADBadTagException.
+
+    Excluding it costs nothing: the contents are broker credentials and a session
+    token, none of which were portable in the first place.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_terminal_prefs.xml" />
+</full-backup-content>

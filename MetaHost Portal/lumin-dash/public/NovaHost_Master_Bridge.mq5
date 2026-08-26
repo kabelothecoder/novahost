@@ -1,20 +1,20 @@
 ﻿//+------------------------------------------------------------------+
-//|                                     NovaEdge_Master_Bridge.mq5   |
-//|                                     Copyright 2026, Nova Edge     |
-//|                                     https://novaedge.co          |
+//|                                     NovaHost_Master_Bridge.mq5   |
+//|                                     Copyright 2026, NovaHost     |
+//|                                     https://novahost.co          |
 //+------------------------------------------------------------------+
-#property copyright "Nova Edge"
-#property link      "https://api.novaedge.co"
+#property copyright "NovaHost"
+#property link      "https://api.novahost.co"
 #property version   "1.00"
-#property description "Nova Edge Master Bridge - Signal Uploader EA"
+#property description "NovaHost Master Bridge - Signal Uploader EA"
 
 input string   InpEAID         = "MASTER_001";          // EA ID
-input string   InpAdminKey     = "your-secret-key";     // Admin / Nova Edge Key
+input string   InpAdminKey     = "your-secret-key";     // Admin / NovaHost Key
 input string   InpServerURL    = "https://epulmnfbxjmaimefhofp.supabase.co/functions/v1/broadcast-signal"; // Server URL
 input bool     InpIsCentAccount = false;                 // Is this a Cent Account?
 
 // File name for persistent history
-#define HISTORY_FILE "NovaEdge_Signal_History.bin"
+#define HISTORY_FILE "NovaHost_Signal_History.bin"
 
 // Memory for tracked positions
 struct TrackedPosition {
@@ -38,7 +38,7 @@ int OnInit()
    LoadHistory();
    
    EventSetMillisecondTimer(200);
-   Print("Nova Edge Master Bridge initialized. History Loaded: ", ArraySize(historyTickets), " tickets.");
+   Print("NovaHost Master Bridge initialized. History Loaded: ", ArraySize(historyTickets), " tickets.");
    return(INIT_SUCCEEDED);
   }
 
@@ -96,7 +96,7 @@ bool IsInHistory(ulong ticket)
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   Print("Nova Edge Master Bridge deinitialized.");
+   Print("NovaHost Master Bridge deinitialized.");
   }
 
 //+------------------------------------------------------------------+
@@ -152,7 +152,7 @@ void SendSignal(string type, string symbol, double price, double sl, double tp, 
    StringToCharArray(json, postData, 0, WHOLE_ARRAY, CP_UTF8);
    
    string headers = "Content-Type: application/json\r\n";
-   headers += "X-NovaEdge-Key: " + InpAdminKey + "\r\n";
+   headers += "X-NovaHost-Key: " + InpAdminKey + "\r\n";
    
    char resultData[];
    string resultHeaders;

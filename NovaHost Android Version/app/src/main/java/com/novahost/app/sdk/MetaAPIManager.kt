@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,7 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import com.novaedge.app.BuildConfig
+import com.novahost.app.BuildConfig
 import io.ktor.client.request.header
 import io.ktor.client.request.setBody
 import io.ktor.client.request.headers
@@ -20,6 +20,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.ContentType
 import io.ktor.client.call.body
 import io.ktor.client.request.post
+import io.ktor.client.plugins.timeout
 import io.github.jan.supabase.postgrest.from
 
 /**
@@ -35,13 +36,29 @@ import io.github.jan.supabase.postgrest.from
  */
 object MetaAPIManager {
 
-    // No hardcoded broker. Nova Edge is broker-agnostic -- the server the user
+    // No hardcoded broker. NovaHost is broker-agnostic -- the server the user
     // types is passed straight through to MetaCopier.
     const val BROKER_NAME = "your broker"
 
     // Observable connection state
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    /**
+     * True while [probeLinkStatus] has a call in flight.
+     *
+     * [isConnected] starts false and, until this existed, was only ever written
+     * by [synchronize] -- which runs on ignition. So a cold start on a fully
+     * linked account rendered "NOT LINKED" until the user pressed START, and
+     * every user who read that as "my broker fell off" was reading a default,
+     * not a fact.
+     *
+     * A boolean cannot say "unknown", which is why the probe needs its own
+     * flag: the header shows CHECKING while this is true and only commits to
+     * NOT LINKED once the server has actually answered.
+     */
+    private val _isProbingLink = MutableStateFlow(false)
+    val isProbingLink: StateFlow<Boolean> = _isProbingLink.asStateFlow()
 
     val botStatus = MutableStateFlow(BotStatus.IDLE)
 
@@ -86,38 +103,145 @@ object MetaAPIManager {
                 return false
             }
 
-            val rows = SupabaseSetup.client
-                .from("licenses")
-                .select(io.github.jan.supabase.postgrest.query.Columns.raw("metadata")) {
-                    filter { eq("license_key", licenseKey.trim().uppercase()) }
+            val status = fetchLicenseStatus(licenseKey)
+
+            when {
+                status == null -> {
+                    _isSynchronized.value = false
+                    _isConnected.value = false
+                    addLog(">> Could not reach the licence server")
+                    return false
                 }
-                .decodeList<kotlinx.serialization.json.JsonObject>()
 
-            val accountId = rows.firstOrNull()
-                ?.get("metadata")?.let { it as? kotlinx.serialization.json.JsonObject }
-                ?.get("metacopier_account_id")
-                ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                ?.takeIf { it.isNotBlank() && it != "null" }
+                !status.success -> {
+                    _isSynchronized.value = false
+                    _isConnected.value = false
+                    addLog(">> Could not verify licence: ${status.error ?: "unknown error"}")
+                    false
+                }
 
-            if (accountId.isNullOrBlank()) {
-                _isSynchronized.value = false
-                _isConnected.value = false
-                addLog(">> No trading account connected")
-                false
-            } else {
-                _isSynchronized.value = true
-                _isConnected.value = true
-                addLog(">> Trading account linked")
-                addLog(">> Trade engine activated")
-                true
+                !status.active -> {
+                    _isSynchronized.value = false
+                    _isConnected.value = false
+                    addLog(">> ${status.message ?: "Licence is not active"}")
+                    false
+                }
+
+                !status.linked -> {
+                    _isSynchronized.value = false
+                    _isConnected.value = false
+                    addLog(">> No trading account connected")
+                    false
+                }
+
+                else -> {
+                    _isSynchronized.value = true
+                    _isConnected.value = true
+                    addLog(">> Trading account linked (${status.broker_server ?: "broker"})")
+                    addLog(">> Trade engine activated")
+                    true
+                }
             }
         } catch (e: Exception) {
-            android.util.Log.e("Nova Edge", "[Sync] failed", e)
+            android.util.Log.e("NovaHost", "[Sync] failed", e)
             _isSynchronized.value = false
             _isConnected.value = false
             addLog(">> Could not verify trading account")
             false
         }
+    }
+
+    /**
+     * Refreshes the broker-link indicator without touching the trade engine.
+     *
+     * [synchronize] answers the same question but is an ignition step: it logs
+     * to the terminal, and its false return blocks START. This is the passive
+     * version, safe to run on every resume -- it reports what the server says
+     * and nothing else.
+     *
+     * A call that fails leaves [isConnected] alone rather than clearing it. The
+     * indicator exists to tell the user whether their broker is attached, and
+     * a flat network is not evidence that it came off.
+     */
+    fun probeLinkStatus(context: android.content.Context) {
+        if (_isProbingLink.value) return
+
+        managerScope.launch {
+            _isProbingLink.value = true
+            try {
+                val licenseKey = context
+                    .getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+                    .getString("license_key", null)
+
+                if (licenseKey.isNullOrBlank()) {
+                    // No licence is a definite answer, not an unknown one.
+                    _isConnected.value = false
+                    _isSynchronized.value = false
+                    return@launch
+                }
+
+                val status = fetchLicenseStatus(licenseKey) ?: return@launch
+
+                val linked = status.success && status.active && status.linked
+                _isConnected.value = linked
+                if (!linked) _isSynchronized.value = false
+            } catch (e: Exception) {
+                android.util.Log.w("NovaHost", "[LinkProbe] failed: ${e.message}")
+            } finally {
+                _isProbingLink.value = false
+            }
+        }
+    }
+
+    /**
+     * Asks `license-status` what this key is and whether an account hangs off it.
+     *
+     * Server-side because RLS on `licenses` has no policy for `anon`, and a
+     * licence-key install has no auth session -- see [synchronize].
+     *
+     * Returns null when the call itself failed, which callers must treat as
+     * "unknown", never as "no".
+     */
+    private suspend fun fetchLicenseStatus(licenseKey: String): LicenseStatusResponse? = try {
+        val payload = kotlinx.serialization.json.Json.encodeToString(
+            LicenseStatusRequest.serializer(),
+            LicenseStatusRequest(license_key = licenseKey.trim().uppercase())
+        )
+
+        val response = SupabaseSetup.client.httpClient.post(
+            "${BuildConfig.SUPABASE_URL}/functions/v1/license-status"
+        ) {
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            header(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+            header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            timeout { requestTimeoutMillis = 20_000 }
+            setBody(payload)
+        }
+
+        kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString<LicenseStatusResponse>(response.body<String>())
+    } catch (e: Exception) {
+        android.util.Log.e("NovaHost", "[LicenceStatus] failed", e)
+        null
+    }
+
+    /**
+     * Polls `license-status` for a few seconds waiting for a link to appear.
+     *
+     * Used after a connect attempt that threw. Registering an account is not
+     * atomic from the client's point of view: the edge function can finish
+     * writing the link long after the handset has given up on the socket, and
+     * every timeout so far has been a *successful* registration that the user
+     * was told had failed. Asking the server what actually happened is the only
+     * honest way to report the outcome.
+     */
+    private suspend fun awaitLink(licenseKey: String, attempts: Int = 4): Boolean {
+        repeat(attempts) { attempt ->
+            if (attempt > 0) kotlinx.coroutines.delay(3_000)
+            val status = fetchLicenseStatus(licenseKey)
+            if (status?.linked == true) return true
+        }
+        return false
     }
 
     suspend fun disconnect() {
@@ -129,26 +253,66 @@ object MetaAPIManager {
 
     // ── Broker Connection & Sync (Task ID: 1205) ─────────────────
     
+    /**
+     * How far along a link attempt is. Reported so the screen can show the user
+     * something true during a wait that legitimately runs to two minutes.
+     *
+     * There are only two phases because there are only two things the app
+     * actually knows: the request is out, or the request died and we are asking
+     * the server what happened. The screen used to animate through three
+     * invented stages on a fixed timer, ending on "Verification complete" before
+     * the call had returned -- which was a progress bar for a process nobody was
+     * watching.
+     */
+    enum class LinkPhase {
+        /** The registration request is in flight; MetaCopier is dialling the broker. */
+        REGISTERING,
+        /** The socket died. Polling the server to find out whether it landed anyway. */
+        VERIFYING
+    }
+
     suspend fun testBrokerConnection(
         context: android.content.Context,
         server: String,
         accountId: String,
         passwordRaw: String,
         platform: String = "mt5",
-        accountType: String = "Standard — No Bonus",
-        symbolSuffix: String = ""
+        symbolSuffix: String = "",
+        onPhase: (LinkPhase) -> Unit = {}
     ): Result<String> {
         return try {
+            onPhase(LinkPhase.REGISTERING)
             val prefs = context.getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
-            val licenseKey = prefs.getString("license_key", "DEMO-1234") ?: "DEMO-1234"
+
+            // No placeholder key. This used to fall back to "DEMO-1234", which
+            // the server correctly refuses -- so an unactivated device was told
+            // "Licence not recognised" while standing on a broker form, and read
+            // that as the broker link being broken. Every other call site in
+            // this file already treats a missing key as a stop.
+            val licenseKey = prefs.getString("license_key", null)?.trim()?.uppercase()
+            if (licenseKey.isNullOrBlank()) {
+                return Result.failure(
+                    IllegalStateException(
+                        "This device is not activated yet. Enter your licence key first, then connect your broker."
+                    )
+                )
+            }
+
+            // MetaTrader accepts none of these with surrounding whitespace, and
+            // all three are pasted out of a broker email more often than typed.
+            // An invisible trailing newline on the password is otherwise
+            // indistinguishable from a wrong password.
+            val cleanAccount = accountId.filterNot { it.isWhitespace() }
+            val cleanServer = server.trim()
+            val cleanPassword = passwordRaw.trim()
 
             // Registers the account with MetaCopier and binds the returned
             // MetaCopier account id to this licence, server-side.
             val request = MetaCopierConnectRequest(
                 license_key = licenseKey,
-                account_number = accountId,
-                password = passwordRaw,
-                server = server,
+                account_number = cleanAccount,
+                password = cleanPassword,
+                server = cleanServer,
                 platform = platform.uppercase()
             )
 
@@ -158,6 +322,16 @@ object MetaAPIManager {
                 headers {
                     append(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                     append(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                }
+                // Registering an account makes MetaCopier dial the broker and
+                // authenticate, which routinely runs past the client defaults.
+                // All three limits are raised, not just the request one: the
+                // failure users actually hit was `connect_timeout`, which fires
+                // before a request timeout can.
+                timeout {
+                    requestTimeoutMillis = 120_000
+                    connectTimeoutMillis = 30_000
+                    socketTimeoutMillis = 120_000
                 }
                 setBody(request)
             }
@@ -171,18 +345,56 @@ object MetaAPIManager {
             // payload that merely contained that word.
             if (httpResponse.status.value in 200..299 && parsed.success && parsed.account_id != null) {
                 _isConnected.value = true
-                android.util.Log.i("Nova Edge", "[BrokerConn] Connected via MetaCopier (${parsed.platform ?: platform})")
+                _isSynchronized.value = true
+                addLog(">> Trading account linked ($cleanServer)")
+                android.util.Log.i("NovaHost", "[BrokerConn] Connected via MetaCopier (${parsed.platform ?: platform})")
                 Result.success(parsed.account_id)
             } else {
-                _isConnected.value = false
+                // Deliberately does NOT clear isConnected. A rejected *new*
+                // attempt says nothing about an account already bound to this
+                // licence, and forcing false here is what flipped a working
+                // install to NOT LINKED the moment a user mistyped a password on
+                // a reconnect. probeLinkStatus owns that flag; this only sets it
+                // on a confirmed success.
                 val reason = parsed.error ?: "Connection failed (${httpResponse.status.value})"
-                android.util.Log.e("Nova Edge", "[BrokerConn] $reason ${parsed.details ?: ""}")
+                android.util.Log.e(
+                    "NovaHost",
+                    "[BrokerConn] ${parsed.code ?: "NO_CODE"}: $reason ${parsed.details ?: ""}"
+                )
+                addLog(">> Broker link refused (${parsed.code ?: httpResponse.status.value})")
                 Result.failure(Exception(reason))
             }
         } catch (e: Exception) {
-            android.util.Log.e("Nova Edge", "[BrokerConn] Connection Failed: ${e.message}", e)
-            _isConnected.value = false
-            Result.failure(e)
+            // The socket died, which says nothing about whether the account was
+            // registered. It usually was: the edge function finishes writing the
+            // link well after a handset on mobile data has given up waiting, and
+            // every timeout observed in testing was a successful registration
+            // reported to the user as a failure.
+            //
+            // So ask the server what actually happened instead of guessing from
+            // the transport.
+            android.util.Log.w("NovaHost", "[BrokerConn] transport failed (${e.message}); verifying server-side")
+            addLog(">> Connection slow -- checking whether the account linked")
+            onPhase(LinkPhase.VERIFYING)
+
+            val licenseKey = context
+                .getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+                .getString("license_key", null)
+
+            if (!licenseKey.isNullOrBlank() && awaitLink(licenseKey)) {
+                _isConnected.value = true
+                _isSynchronized.value = true
+                android.util.Log.i("NovaHost", "[BrokerConn] Link confirmed server-side after transport failure")
+                addLog(">> Trading account linked")
+                Result.success("linked")
+            } else {
+                // Left alone for the same reason as the rejection branch above:
+                // a dead socket is not evidence that an existing link came off.
+                android.util.Log.e("NovaHost", "[BrokerConn] Connection Failed: ${e.message}", e)
+                Result.failure(
+                    Exception("Could not reach the server. Check your connection and try again.")
+                )
+            }
         }
     }
 
@@ -210,7 +422,7 @@ object MetaAPIManager {
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("Nova Edge", "[BrokerConn] Balance Sync failed: ${e.message}", e)
+                android.util.Log.e("NovaHost", "[BrokerConn] Balance Sync failed: ${e.message}", e)
             }
         }
     }
@@ -273,6 +485,9 @@ object MetaAPIManager {
                 ) {
                     header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
                     header(io.ktor.http.HttpHeaders.ContentType, io.ktor.http.ContentType.Application.Json)
+                    // A market order goes broker-side before it answers. 15s is
+                    // not enough margin to distinguish "slow fill" from "failed".
+                    timeout { requestTimeoutMillis = 45_000 }
                     setBody(request)
                 }
 
@@ -283,15 +498,15 @@ object MetaAPIManager {
             // A 2xx with success=false is still a failure -- never report a
             // trade as placed unless the broker actually accepted it.
             if (response.status.value in 200..299 && parsed.success) {
-                android.util.Log.i("Nova Edge", "[Trade] ${parsed.message}")
+                android.util.Log.i("NovaHost", "[Trade] ${parsed.message}")
                 Result.success(parsed.message ?: "Trade sent.")
             } else {
                 val reason = parsed.error ?: "Execution failed (${response.status.value})"
-                android.util.Log.e("Nova Edge", "[Trade] $reason ${parsed.details ?: ""}")
+                android.util.Log.e("NovaHost", "[Trade] $reason ${parsed.details ?: ""}")
                 Result.failure(Exception(reason))
             }
         } catch (e: Exception) {
-            android.util.Log.e("Nova Edge", "[Trade] Execution failed", e)
+            android.util.Log.e("NovaHost", "[Trade] Execution failed", e)
             Result.failure(e)
         }
     }
@@ -312,7 +527,7 @@ object MetaAPIManager {
                             }
                         }
                 } catch (e: Exception) {
-                    android.util.Log.e("Nova Edge", "Heartbeat pulse failed", e)
+                    android.util.Log.e("NovaHost", "Heartbeat pulse failed", e)
                 }
                 kotlinx.coroutines.delay(60000) // Pulse every 60 seconds
             }

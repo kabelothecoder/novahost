@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { RobotArtPreview } from "@/components/RobotArtPreview";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -379,17 +380,31 @@ export default function ManageEA() {
                 </div>
               </div>
 
-              {/* Preview */}
-              {imageUrl && (
-                <div className="rounded-xl border border-white/10 overflow-hidden relative group">
-                  <img src={imageUrl} alt="EA Logo preview" className="w-full h-32 object-cover bg-black/40" />
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                    <Button variant="destructive" size="sm" type="button" onClick={() => setImageUrl("")} className="h-8 text-[10px] px-3">
-                      Remove Preview
+              {/* Live preview — renders the art exactly as the app will, so the
+                  mentor sees the crop, accent tint and scrim before saving.
+                  Always shown: with no image it previews the initials fallback,
+                  which is what buyers actually get. */}
+              <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+                <div className="mb-2.5 flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">In the app</Label>
+                  {imageUrl && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={() => setImageUrl("")}
+                      className="h-6 px-2 text-[10px] text-muted-foreground hover:text-white"
+                    >
+                      Clear image
                     </Button>
-                  </div>
+                  )}
                 </div>
-              )}
+                <RobotArtPreview
+                  imageUrl={imageUrl}
+                  accentColor={accentColor}
+                  displayName={displayName || name}
+                />
+              </div>
             </CardContent>
           </Card>
         </div>

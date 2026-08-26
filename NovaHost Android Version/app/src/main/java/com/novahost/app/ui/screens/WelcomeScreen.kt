@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.screens
+﻿package com.novahost.app.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -20,11 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.novaedge.app.R
-import com.novaedge.app.navigation.Routes
-import com.novaedge.app.ui.components.GradientButton
-import com.novaedge.app.ui.components.MeshGradientBackground
-import com.novaedge.app.ui.theme.*
+import com.novahost.app.R
+import com.novahost.app.navigation.Routes
+import com.novahost.app.ui.components.GradientButton
+import com.novahost.app.ui.components.MeshGradientBackground
+import com.novahost.app.ui.theme.*
 
 /**
  * Screen 1 — Ignition (Welcome)
@@ -76,8 +76,8 @@ fun WelcomeScreen(navController: NavController) {
                 )
 
                 Image(
-                    painter            = painterResource(id = R.drawable.app_logo),
-                    contentDescription = "Nova Edge Logo",
+                    painter            = painterResource(id = R.drawable.novahost_mark),
+                    contentDescription = "NovaHost Logo",
                     contentScale       = ContentScale.Fit,
                     modifier           = Modifier
                         .size(140.dp)
@@ -86,7 +86,7 @@ fun WelcomeScreen(navController: NavController) {
 
             // Brand label
             Text(
-                text       = "Nova Edge",
+                text       = "NovaHost",
                 style      = MaterialTheme.typography.displayLarge,
                 color      = OnSurface,
                 fontWeight = FontWeight.Bold
@@ -103,7 +103,7 @@ fun WelcomeScreen(navController: NavController) {
 
             // CTA — Gradient button
             GradientButton(
-                text    = "Enter Nova Edge",
+                text    = "Enter NovaHost",
                 onClick = { navController.navigate(Routes.ONBOARDING) },
                 modifier = Modifier.width(240.dp),
                 gradientColors = listOf(SoftLightBlue, SoftLightBlue),

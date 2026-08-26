@@ -60,7 +60,7 @@ const initialRequests: FeatureRequest[] = [
 ];
 
 /**
- * @description Feedback board allowing admins/users to view, submit, and vote on feature suggestions for Nova Edge platforms.
+ * @description Feedback board allowing admins/users to view, submit, and vote on feature suggestions for NovaHost platforms.
  */
 export default function Feedback() {
   const { toast } = useToast();
@@ -148,7 +148,7 @@ export default function Feedback() {
             <MessageSquare className="w-6 h-6 text-primary" />
             Feedback Board
           </h1>
-          <p className="text-muted-foreground">Submit and vote on feature requests for the Nova Edge ecosystem</p>
+          <p className="text-muted-foreground">Submit and vote on feature requests for the NovaHost ecosystem</p>
         </div>
       </div>
 

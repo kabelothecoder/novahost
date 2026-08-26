@@ -35,7 +35,7 @@
         <!-- Bottom: Info & Actions -->
         <div class="hud-bottom">
           <h3 class="bot-name">GhostRider X</h3>
-          <span class="bot-sub">Powered by Nova Edge</span>
+          <span class="bot-sub">Powered by NovaHost</span>
           
           <div class="hud-actions">
             <!-- Simulated Stop button changes status -->

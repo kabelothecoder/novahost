@@ -22,12 +22,12 @@
 
       <!-- Contact strip -->
       <div class="contact-strip glass liquid">
-        <a class="contact-btn" href="mailto:support@novaedge.io">
+        <a class="contact-btn" href="mailto:support@novahost.io">
           <span class="contact-ico">📧</span>
           <span>Email</span>
         </a>
         <div class="strip-div" />
-        <a class="contact-btn" href="https://t.me/novaedge" target="_blank">
+        <a class="contact-btn" href="https://t.me/novahost" target="_blank">
           <span class="contact-ico">✈️</span>
           <span>Telegram</span>
         </a>
@@ -87,16 +87,16 @@ const categories = ref([
   {
     title: '🚀 Getting Started',
     items: [
-      { q: 'What is Nova Edge?', a: 'Nova Edge is a premium AI-powered Expert Advisor hosting platform. Your EAs run 24/7 on our low-latency servers with SMS and Telegram alerts.', open: false },
-      { q: 'How do I connect my MT5 account?', a: 'Go to the Terminal tab, enter your broker server, account number and investor/master password. Nova Edge uses read-only credentials by default for safety.', open: false },
-      { q: 'Which brokers are supported?', a: 'Nova Edge works with any MetaTrader 4 or 5 broker. Popular choices include Exness, IC Markets, FP Markets, and XM.', open: false },
+      { q: 'What is NovaHost?', a: 'NovaHost is a premium AI-powered Expert Advisor hosting platform. Your EAs run 24/7 on our low-latency servers with SMS and Telegram alerts.', open: false },
+      { q: 'How do I connect my MT5 account?', a: 'Go to the Terminal tab, enter your broker server, account number and investor/master password. NovaHost uses read-only credentials by default for safety.', open: false },
+      { q: 'Which brokers are supported?', a: 'NovaHost works with any MetaTrader 4 or 5 broker. Popular choices include Exness, IC Markets, FP Markets, and XM.', open: false },
     ]
   },
   {
     title: '⚡ Expert Advisors',
     items: [
       { q: 'How do I upload a custom EA?', a: 'Navigate to Home → Expert Advisors → Upload. Your .ex5 or .ex4 file is encrypted and stored securely on our servers.', open: false },
-      { q: 'Can I run multiple EAs simultaneously?', a: 'Yes! Nova Edge supports up to 10 concurrent EAs per account tier. Each EA gets its own isolated thread.', open: false },
+      { q: 'Can I run multiple EAs simultaneously?', a: 'Yes! NovaHost supports up to 10 concurrent EAs per account tier. Each EA gets its own isolated thread.', open: false },
       { q: 'What happens if the EA crashes?', a: 'Our watchdog system detects crashes instantly and restarts the EA. You receive a push notification for each event.', open: false },
       { q: 'How do I set lot sizes per pair?', a: 'Go to Pair Management → Allowed Pairs, expand any pair card and configure the Lot Size field.', open: false },
     ]
@@ -105,7 +105,7 @@ const categories = ref([
     title: '🔒 Security',
     items: [
       { q: 'Is my password stored?', a: 'Never. Credentials are AES-256 encrypted and stored in an HSM. We use investor-read-only passwords where possible.', open: false },
-      { q: 'Can Nova Edge withdraw my funds?', a: 'No. We use investor passwords which are read-only — Nova Edge can view trades but cannot withdraw or make deposits.', open: false },
+      { q: 'Can NovaHost withdraw my funds?', a: 'No. We use investor passwords which are read-only — NovaHost can view trades but cannot withdraw or make deposits.', open: false },
     ]
   },
   {

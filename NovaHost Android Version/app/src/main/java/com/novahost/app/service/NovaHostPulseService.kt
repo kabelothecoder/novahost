@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.service
+﻿package com.novahost.app.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -12,7 +12,7 @@ import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.LruCache
 import android.view.Gravity
-import com.novaedge.app.sdk.NotificationHelper
+import com.novahost.app.sdk.NotificationHelper
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -58,9 +58,9 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.novaedge.app.R
-import com.novaedge.app.ui.theme.Cyan
-import com.novaedge.app.ui.theme.NovaEdgeTheme
+import com.novahost.app.R
+import com.novahost.app.ui.theme.Cyan
+import com.novahost.app.ui.theme.NovaHostTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -68,11 +68,11 @@ import kotlinx.coroutines.launch
 import android.os.Build
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.Serializable
-import com.novaedge.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.SupabaseSetup
 import io.github.jan.supabase.realtime.*
 import kotlinx.coroutines.flow.collect
-import com.novaedge.app.sdk.TradeSignal
-import com.novaedge.app.sdk.MetaAPIManager
+import com.novahost.app.sdk.TradeSignal
+import com.novahost.app.sdk.MetaAPIManager
 
 
 @Serializable
@@ -83,7 +83,7 @@ data class TradeLog(
     val pl: Double
 )
 
-class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
+class NovaHostPulseService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     private lateinit var windowManager: WindowManager
     private lateinit var composeView: ComposeView
@@ -109,7 +109,7 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         
         // Acquire WakeLock to prevent Deep Doze from killing socket
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NovaEdge::PulseLock").apply {
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NovaHost::PulseLock").apply {
             acquire(12 * 60 * 60 * 1000L) // 12 hours max
         }
 
@@ -117,19 +117,40 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         startForegroundServiceNotification()
         setupPulseOverlay()
-        
+
+        // Execution belongs to the service, not to the bubble. This used to run
+        // inside the overlay's composition, which meant it only ran while the
+        // overlay was attached -- so a device without the draw-over permission
+        // received no signals at all and said nothing about it. See
+        // [SignalListener].
+        SignalListener.start(applicationContext, serviceScope)
+
         serviceScope.launch {
             MetaAPIManager.botStatus.collect { status ->
                 when (status) {
-                    com.novaedge.app.sdk.BotStatus.RUNNING -> {
+                    com.novahost.app.sdk.BotStatus.RUNNING -> {
                         if (!isOverlayAdded) {
-                            try {
-                                windowManager.addView(composeView, params)
-                                isOverlayAdded = true
-                            } catch (e: Exception) { e.printStackTrace() }
+                            // A missing draw-over grant is the usual cause, and
+                            // it is no longer fatal to trading -- the listener
+                            // runs either way. Say so in the terminal feed
+                            // rather than swallowing it: a silent absence here
+                            // is what made "no floating button" look identical
+                            // to "the app is not listening".
+                            if (!android.provider.Settings.canDrawOverlays(this@NovaHostPulseService)) {
+                                android.util.Log.w("NovaHost", "PULSE: no draw-over permission; running without the bubble")
+                                MetaAPIManager.addLog(">> Bubble hidden (no draw-over permission) -- still trading")
+                            } else {
+                                try {
+                                    windowManager.addView(composeView, params)
+                                    isOverlayAdded = true
+                                } catch (e: Exception) {
+                                    android.util.Log.e("NovaHost", "PULSE: could not attach the bubble", e)
+                                    MetaAPIManager.addLog(">> Bubble could not be shown -- still trading")
+                                }
+                            }
                         }
                     }
-                    com.novaedge.app.sdk.BotStatus.STOPPED, com.novaedge.app.sdk.BotStatus.IDLE -> {
+                    com.novahost.app.sdk.BotStatus.STOPPED, com.novahost.app.sdk.BotStatus.IDLE -> {
                         if (isOverlayAdded) {
                             try {
                                 windowManager.removeView(composeView)
@@ -153,9 +174,9 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
             manager.createNotificationChannel(channel)
         }
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Nova Edge Pulse Active")
+            .setContentTitle("NovaHost Pulse Active")
             .setContentText("Monitoring live trading signals.")
-            .setSmallIcon(R.drawable.app_logo)
+            .setSmallIcon(R.drawable.novahost_mark)
             .build()
         startForeground(2, notification)
     }
@@ -174,11 +195,11 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         params.y = 200
 
         composeView = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@NovaEdgePulseService)
-            setViewTreeViewModelStoreOwner(this@NovaEdgePulseService)
-            setViewTreeSavedStateRegistryOwner(this@NovaEdgePulseService)
+            setViewTreeLifecycleOwner(this@NovaHostPulseService)
+            setViewTreeViewModelStoreOwner(this@NovaHostPulseService)
+            setViewTreeSavedStateRegistryOwner(this@NovaHostPulseService)
             setContent {
-                NovaEdgeTheme {
+                NovaHostTheme {
                     PulseApp(
                         onDrag = { dx, dy ->
                             params.x += dx.toInt()
@@ -223,7 +244,9 @@ class NovaEdgePulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
     override fun onDestroy() {
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-        
+
+        SignalListener.stop()
+
         // Finalize broker connection
         serviceScope.launch {
             MetaAPIManager.disconnect()
@@ -258,112 +281,22 @@ fun PulseApp(
     val prefs = context.getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
     val avatarUrl = prefs.getString("avatar_url", null)
     val displayName = prefs.getString("display_name", "TRADING BOT") ?: "TRADING BOT"
-    
-    val processedSignals = remember { LruCache<String, Boolean>(100) }
 
-    // Real-time signal subscription
-    LaunchedEffect(Unit) {
-        try {
-            val channel = SupabaseSetup.client.realtime.channel("signals_channel")
-            val signalFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-                table = "signals"
-            }
-    
-            channel.subscribe()
-    
-            signalFlow.collect { action ->
-                val signal = action.decodeRecord<TradeSignal>()
-    
-                // 1. SIGNAL DEDUPLICATION CHECK
-                val signalId = signal.id ?: return@collect
-                if (processedSignals.get(signalId) != null) return@collect
-                processedSignals.put(signalId, true)
-    
-                // 2. FILTERING LOGIC
-                val prefs = context.getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
-                val rawSymbols = prefs.getString("allowed_symbols", "") ?: ""
-                val allowedSymbols = if (rawSymbols.isEmpty()) emptyList() else rawSymbols.split(",")
-
-                // 2a. ROBOT OWNERSHIP CHECK (multi-tenancy).
-                // This device is licensed to exactly one robot. Signals are
-                // tagged with the robot that issued them, so anything from a
-                // different robot must be dropped -- otherwise a user would
-                // execute trades from a mentor they never paid.
-                val activeEaId = prefs.getString("active_ea_id", "") ?: ""
-                val signalEaId = signal.ea_id ?: ""
-                if (activeEaId.isNotEmpty() && signalEaId.isNotEmpty() && activeEaId != signalEaId) {
-                    android.util.Log.d("Nova Edge", "PULSE: ignoring signal for robot $signalEaId (this device runs $activeEaId)")
-                    return@collect
-                }
-
-                if (allowedSymbols.isEmpty() || allowedSymbols.contains(signal.pair)) {
-                    currentPair = signal.pair
-                    signalActive = true
-                    expanded = true
-    
-                    // 3. ACTUAL TRADE EXECUTION
-                    val userBalance = MetaAPIManager.balance.value
-                    val adminBalance = signal.adminBalance ?: userBalance // fallback if not provided
-                    val signalLot = signal.lot ?: 0.01
-    
-                    // Dynamic lot sizing math: scaling volume based on ratio
-                    var calculatedLot = if (adminBalance > 0.0) {
-                        (userBalance / adminBalance) * signalLot
-                    } else {
-                        0.01
-                    }
-    
-                    // Enforce 0.01 minimums
-                    if (calculatedLot < 0.01) calculatedLot = 0.01
-    
-                    // Round to 2 decimal places
-                    val volume = kotlin.math.round(calculatedLot * 100.0) / 100.0
-    
-                    // Execute via MetaCopier. Broker credentials and the
-                    // MetaCopier account id stay server-side -- the licence is
-                    // the only thing this device sends.
-                    val tradeResult = MetaAPIManager.executeTrade(
-                        context = context,
-                        pair = signal.pair,
-                        side = signal.action,
-                        volume = volume,
-                        sl = signal.sl,
-                        tp = signal.tp,
-                        signalId = signal.signal_id ?: signal.id
-                    )
-
-                    // 4. NOTIFY -- only when the trade actually went through.
-                    // Announcing an execution that failed is worse than silence:
-                    // the user believes they are in a position they do not hold.
-                    tradeResult
-                        .onSuccess {
-                            NotificationHelper.showTradeNotification(
-                                context = context,
-                                pair = signal.pair,
-                                action = signal.action,
-                                price = "Current Market"
-                            )
-                        }
-                        .onFailure { err ->
-                            android.util.Log.e("Nova Edge", "PULSE_ERROR: execution failed - ${err.message}")
-                            NotificationHelper.showTradeFailedNotification(
-                                context = context,
-                                pair = signal.pair,
-                                reason = err.message ?: "Trade could not be placed."
-                            )
-                        }
-    
-                    // Auto-dismiss after 10 seconds
-                    delay(10000)
-                    signalActive = false
-                    expanded = false
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("Nova Edge", "PULSE_ERROR: Realtime connection dropped", e)
+    // The bubble reports on the work; it no longer performs it. Receiving and
+    // executing signals moved to [SignalListener] so that neither depends on
+    // this view existing -- see the note there.
+    val active by SignalListener.activeSignal.collectAsState()
+    LaunchedEffect(active) {
+        val current = active
+        if (current != null) {
+            currentPair = current.pair
+            signalActive = true
+            expanded = true
+        } else {
+            signalActive = false
+            expanded = false
         }
     }
-
 
     val bubbleSize by animateFloatAsState(targetValue = if (expanded) 360f else 64f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     val bubbleHeight by animateFloatAsState(targetValue = if (expanded) 240f else 64f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
@@ -396,7 +329,7 @@ fun PulseApp(
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.app_logo),
+                    painter = painterResource(id = R.drawable.novahost_mark),
                     contentDescription = "Pulse",
                     modifier = Modifier.size(40.dp).padding(4.dp)
                 )
@@ -437,7 +370,7 @@ fun PulseApp(
                                 )
                             } else {
                                 Image(
-                                    painter = painterResource(id = R.drawable.app_logo),
+                                    painter = painterResource(id = R.drawable.novahost_mark),
                                     contentDescription = "Pulse",
                                     modifier = Modifier.size(36.dp).clip(CircleShape).border(1.dp, Cyan, CircleShape)
                                 )
@@ -482,7 +415,7 @@ fun PulseApp(
                                         0 -> if (signalActive) "[BOT] Bot Active" else "[BOT] Running..."
                                         1 -> "[MT5] Connection OK"
                                         2 -> "[SYS] Market Data Sync"
-                                        else -> "[INIT] Nova Edge Neural Core"
+                                        else -> "[INIT] NovaHost Neural Core"
                                     }
                                     Text(logText, color = Color.Green, fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                                     Spacer(Modifier.height(4.dp))

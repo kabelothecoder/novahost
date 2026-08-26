@@ -42,7 +42,7 @@ function Navbar() {
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-950 text-white text-xs font-black tracking-tight">
           MH
         </span>
-        <span className="text-lg font-bold tracking-tight text-gray-900">Nova Edge</span>
+        <span className="text-lg font-bold tracking-tight text-gray-900">NovaHost</span>
       </Link>
 
       {/* Center links */}
@@ -444,7 +444,7 @@ export default function Landing() {
                 {
                   num: "02",
                   title: "Buy License Key",
-                  desc: "Purchase a valid license key directly from your certified Nova Edge mentor.",
+                  desc: "Purchase a valid license key directly from your certified NovaHost mentor.",
                   color: "bg-violet-500",
                 },
                 {
@@ -577,7 +577,7 @@ export default function Landing() {
             custom={0.1}
             className="text-lg text-slate-500 leading-relaxed max-w-xl mx-auto"
           >
-            Download Nova Edge directly to your device for exclusive strategies and a seamless luxury trading experience.
+            Download NovaHost directly to your device for exclusive strategies and a seamless luxury trading experience.
           </motion.p>
 
           {/* Download buttons */}
@@ -650,9 +650,9 @@ export default function Landing() {
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-950 text-white text-[10px] font-black">
               MH
             </span>
-            <span className="text-sm font-bold text-gray-900">Nova Edge</span>
+            <span className="text-sm font-bold text-gray-900">NovaHost</span>
           </div>
-          <p className="text-xs text-slate-400">© {new Date().getFullYear()} Nova Edge. All rights reserved.</p>
+          <p className="text-xs text-slate-400">© {new Date().getFullYear()} NovaHost. All rights reserved.</p>
           <div className="flex gap-6">
             {["Privacy", "Terms", "Contact"].map((l) => (
               <a key={l} href="#" className="text-xs text-slate-400 hover:text-gray-700 transition-colors">

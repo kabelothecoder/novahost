@@ -1,13 +1,13 @@
 ﻿<template>
   <Transition name="slide-up">
-    <div v-if="visible" class="install-card glass liquid" role="dialog" aria-label="Install Nova Edge">
+    <div v-if="visible" class="install-card glass liquid" role="dialog" aria-label="Install NovaHost">
       <button class="close-x" @click="dismiss" aria-label="Close">✕</button>
 
       <div class="install-icon">
-        <img src="/app_logo.png" alt="Nova Edge" />
+        <img src="/app_logo.png" alt="NovaHost" />
       </div>
 
-      <h3 class="install-title">Install Nova Edge iOS</h3>
+      <h3 class="install-title">Install NovaHost iOS</h3>
       <p class="install-sub">Use this as a native app on your iPhone:</p>
 
       <div class="steps">
@@ -21,7 +21,7 @@
         </div>
         <div class="step">
           <span class="step-num">3</span>
-          <span>Tap <strong>Add</strong> — Nova Edge launches standalone!</span>
+          <span>Tap <strong>Add</strong> — NovaHost launches standalone!</span>
         </div>
       </div>
 

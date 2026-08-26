@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.screens
+﻿package com.novahost.app.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -19,12 +19,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.novaedge.app.R
-import com.novaedge.app.navigation.Routes
-import com.novaedge.app.ui.components.GlassCard
-import com.novaedge.app.ui.components.GradientButton
-import com.novaedge.app.ui.components.MeshGradientBackground
-import com.novaedge.app.ui.theme.*
+import com.novahost.app.R
+import com.novahost.app.navigation.Routes
+import com.novahost.app.ui.components.GlassCard
+import com.novahost.app.ui.components.GradientButton
+import com.novahost.app.ui.components.MeshGradientBackground
+import com.novahost.app.ui.theme.*
 
 private val DEMO_EAS = listOf("GoldRush Pro", "NightScalper v3", "TrendFollower AI", "NEO-5 Grid")
 
@@ -49,7 +49,7 @@ fun LicenseScreen(navController: NavController) {
             horizontalAlignment     = Alignment.CenterHorizontally
         ) {
             Text("Activate License", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
-            Text("Enter your Nova Edge activation key", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
+            Text("Enter your NovaHost activation key", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
 
             OutlinedTextField(
                 value         = licenseKey,
@@ -104,7 +104,7 @@ fun LicenseScreen(navController: NavController) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
-                                    painter = painterResource(id = R.drawable.app_logo),
+                                    painter = painterResource(id = R.drawable.novahost_mark),
                                     contentDescription = ea,
                                     modifier = Modifier.size(28.dp)
                                 )
@@ -152,7 +152,7 @@ fun VaultScreen(navController: NavController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("The Vault", style = MaterialTheme.typography.headlineLarge, color = OnSurface)
-            Text("Choose your Nova Edge tier", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
+            Text("Choose your NovaHost tier", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 tiers.forEachIndexed { i, (name, price, features) ->

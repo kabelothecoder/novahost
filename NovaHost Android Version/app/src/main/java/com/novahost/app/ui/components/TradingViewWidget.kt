@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.components
+﻿package com.novahost.app.ui.components
 
 import android.annotation.SuppressLint
 import android.graphics.Color

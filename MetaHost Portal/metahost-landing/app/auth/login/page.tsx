@@ -10,9 +10,9 @@ export default function LoginPage() {
     <main className="min-h-screen bg-[#121212] flex items-center justify-center p-4">
       <SignIn1 
         logo={<Box className="text-white w-6 h-6" />}
-        title="Nova Edge"
+        title="NovaHost"
         subtitle="Sign in to your account"
-        bottomText="Join the elite network of automated trading mentors running on Nova Edge."
+        bottomText="Join the elite network of automated trading mentors running on NovaHost."
       />
     </main>
   );

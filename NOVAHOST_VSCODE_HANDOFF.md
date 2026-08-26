@@ -1,7 +1,7 @@
-# Nova Edge — VS Code Working Doc
+# NovaHost — VS Code Working Doc
 ### Your prompt generator + teacher for the Tue→Thu build
 
-Companion to [`Nova_Edge_Launch_Plan.md`](Nova_Edge_Launch_Plan.md). That one is *what and why*. This one is *what to type*.
+Companion to [`NovaHost_Launch_Plan.md`](NovaHost_Launch_Plan.md). That one is *what and why*. This one is *what to type*.
 
 **Session 1: Tuesday 2026-08-11, 16:00–17:00 SAST.**
 
@@ -20,7 +20,7 @@ If you ever catch yourself about to paste a secret into chat: don't. Put it in t
 | **MetaCopier API key** | Supabase **Edge Function Secrets** | Dashboard → Project Settings → Edge Functions → Secrets → `METACOPIER_API_KEY` | **Server-side only.** Project-level key = full trading rights on every account. In an APK, anyone who decompiles it can trade your users' money. |
 | **`ADMIN_BROADCAST_KEY`** | Supabase Edge Function Secrets | Same screen. Generate: `openssl rand -hex 32` | This is the P0-3 fix. Replaces the `dev-secret-key` default. |
 | **`METAAPI_TOKEN`** | Supabase Edge Function Secrets | Same screen (probably already set) | Powers `test-broker-connection` |
-| **Supabase URL + anon key** | `Nova Edge Android Version/local.properties` | Already there ✅ | Gitignored; injected via `BuildConfig`. Anon key is *designed* to be public — RLS is what protects you. |
+| **Supabase URL + anon key** | `NovaHost Android Version/local.properties` | Already there ✅ | Gitignored; injected via `BuildConfig`. Anon key is *designed* to be public — RLS is what protects you. |
 | **Portal env** | `MetaHost Portal/lumin-dash/.env` | Already there ✅ | Gitignored and untracked — I verified. |
 
 **The one rule that matters:** in Vite, any variable starting `VITE_` gets **compiled into the public JS bundle**. `SUPABASE_SERVICE_ROLE_KEY` in your `.env` has no `VITE_` prefix, so it stays server-side. **Never** rename it to `VITE_SUPABASE_SERVICE_ROLE_KEY`. That single prefix is the difference between a secret and a public broadcast.
@@ -74,7 +74,7 @@ Work them in order. Each ends somewhere verifiable. **Don't start a block until 
 > **What you're learning:** why a schema mismatch fails *silently*. Postgres rejects the insert, the edge function catches it, returns 200-ish, and the UI says "Signal Broadcasted" — while nothing was written. Your UI has been lying to you for months. Lesson: **success in the UI is not success in the database.** Always verify at the data layer.
 
 ```
-Read Nova_Edge_Launch_Plan.md section 1.2 P0-2.
+Read NovaHost_Launch_Plan.md section 1.2 P0-2.
 
 The live `signals` table has columns: id, ea_id, pair, type, price, sl, tp, lot,
 status, created_at. But broadcast-signal, dispatch-signal, execute-trade-v2 and
@@ -99,10 +99,10 @@ test row through broadcast-signal and reading it back.
 > **What you're learning:** the difference between authentication (*who are you*) and a shared secret (*do you know the password*). `broadcast-signal` uses a shared secret, ships it in public JavaScript, **and** falls back to a default when unset. Three failures stacked. The fix is to make the client prove identity (JWT) instead of knowing a string.
 
 ```
-Fix P0-3 from Nova_Edge_Launch_Plan.md.
+Fix P0-3 from NovaHost_Launch_Plan.md.
 
 Currently: broadcast-signal is deployed with verify_jwt:false, its only auth is the
-x-novaedge-key header compared to ADMIN_BROADCAST_KEY which DEFAULTS to the literal
+x-novahost-key header compared to ADMIN_BROADCAST_KEY which DEFAULTS to the literal
 string 'dev-secret-key' — and src/pages/QuickTrade.tsx:107 hardcodes that same string
 in client-side React, so it ships in the public bundle.
 

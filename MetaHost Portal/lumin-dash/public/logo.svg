@@ -29,5 +29,5 @@
     <circle cx="14" cy="8" r="2.5" fill="#3b82f6" />
   </g>
   <!-- Logo Typography -->
-  <text x="44" y="25" class="logo-text" font-family="Outfit, Inter, system-ui, sans-serif" font-size="21" font-weight="700" letter-spacing="-0.03em">Nova Edge</text>
+  <text x="44" y="25" class="logo-text" font-family="Outfit, Inter, system-ui, sans-serif" font-size="21" font-weight="700" letter-spacing="-0.03em">NovaHost</text>
 </svg>

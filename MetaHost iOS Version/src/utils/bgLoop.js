@@ -1,5 +1,5 @@
 ﻿/**
- * Nova Edge — Animated Background Canvas Loop Generator
+ * NovaHost — Animated Background Canvas Loop Generator
  * Generates a dark animated mesh gradient, captured as a looping video
  * via MediaRecorder and saved to IndexedDB / Cache Storage as bg_loop.mp4
  */

@@ -1,18 +1,18 @@
-﻿# Nova Edge Architecture & Claude Code Onboarding Brief
+﻿# NovaHost Architecture & Claude Code Onboarding Brief
 
-This document serves as the master technical blueprint and context brief for Nova Edge. It onboards Claude Code as an autonomous Lead Engineer for this repository.
+This document serves as the master technical blueprint and context brief for NovaHost. It onboards Claude Code as an autonomous Lead Engineer for this repository.
 
 ## 1. Executive Summary & Core Value Proposition
 
-### What is Nova Edge?
-Nova Edge is a mobile-first cloud VPS and automated algorithmic trading management platform ("Silent Precision"). It allows retail forex and crypto traders to connect their MetaTrader 4 (MT4) or MetaTrader 5 (MT5) accounts, execute automated trading strategies (Expert Advisors / EAs) 24/7 in the cloud without draining phone battery, scan chart patterns using Claude 3.5 Sonnet AI, and execute remote trade signals broadcast instantly from mentors or trading desks.
+### What is NovaHost?
+NovaHost is a mobile-first cloud VPS and automated algorithmic trading management platform ("Silent Precision"). It allows retail forex and crypto traders to connect their MetaTrader 4 (MT4) or MetaTrader 5 (MT5) accounts, execute automated trading strategies (Expert Advisors / EAs) 24/7 in the cloud without draining phone battery, scan chart patterns using Claude 3.5 Sonnet AI, and execute remote trade signals broadcast instantly from mentors or trading desks.
 
 ### Target Users
 - **Retail Traders**: Users seeking zero-latency, 24/7 cloud execution for automated trading strategies directly from their iOS or Android smartphones.
 - **Mentors & Signal Providers**: Trading educators who broadcast high-probability trade setups to student accounts and manage subscriber fleets.
 
 ### Key Business Goals
-Nova Edge Direct-to-Consumer: A unified mobile application and platform offering premium cloud hosting, AI chart scanning, and risk management exclusively under the proprietary Nova Edge brand.
+NovaHost Direct-to-Consumer: A unified mobile application and platform offering premium cloud hosting, AI chart scanning, and risk management exclusively under the proprietary NovaHost brand.
 
 ## 2. Architecture & Tech Stack Breakdown
 
@@ -41,7 +41,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 │  ┌────────────────────────┐     ┌────────────────────────┐  │   │      (MT4 / MT5 Broker Bridge)       │
 │  │   Android Native App   │     │      iOS Hybrid App    │  │   └──────────────────┬───────────────────┘
 │  │ (Kotlin/Compose, M3,   │     │  (Vue.js, Capacitor,   │  │                      │
-│  │ NovaEdgePulseService)  │     │   Apple HIG, Pinia)    │  │                      │ Opens Orders Instantly
+│  │ NovaHostPulseService)  │     │   Apple HIG, Pinia)    │  │                      │ Opens Orders Instantly
 │  └────────────────────────┘     └────────────────────────┘  │                      ▼
 └─────────────────────────────────────────────────────────────┘   ┌──────────────────────────────────────┐
                                                                   │         BROKER INFRASTRUCTURE        │
@@ -50,7 +50,7 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 ```
 
 ### Mobile Applications
-- **Android Application**: Native Kotlin built with Jetpack Compose (Material 3 tokens customized for the Premium Light theme). Uses `NovaEdgePulseService` (a foreground service) to maintain persistent WebSocket connections to Supabase Realtime without system-level background process throttling.
+- **Android Application**: Native Kotlin built with Jetpack Compose (Material 3, dark scheme by default with an opt-in Light scheme — see §4). Uses `NovaHostPulseService` (a foreground service) to maintain persistent WebSocket connections to Supabase Realtime without system-level background process throttling.
 - **iOS Application**: Vue.js combined with Capacitor for cross-platform native runtime, styled according to Apple Human Interface Guidelines (HIG). Uses `@capacitor/device` for hardware-level fingerprinting and Pinia/Vuex for state management.
 
 ### Web Mentor Portal
@@ -65,7 +65,8 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 
 ### API Endpoints & External Integrations
 - `POST /functions/v1/analyze-chart`: Supabase Edge Function accepting a base64 image string + `trading_mode`. Invokes Anthropic API (`claude-3-5-sonnet-latest`) to perform visual analysis and return structured JSON.
-- `POST /functions/v1/generate-payfast-checkout`: Serverless payment gateway bridge generating secure PayFast checkout URLs.
+- `POST /functions/v1/generate-payfast-checkout`: Builds a PayFast checkout for one of three **once-off** products — R599 app access (`LIFETIME`), R349 AI chart scanner (`SCANNER`), R150 device move (`REACTIVATION`). There is no subscription; recurring parameters are never sent.
+- `POST /functions/v1/check-subscription-status`: The **only** authority on entitlement. Answers `is_premium` / `has_scanner` for an email + device, owns the one-email-one-device rule, and fails closed. Android reaches it through `sdk/Entitlements.kt`, never directly.
 - **MetaAPI Cloud SDK**: Remote API connecting the client app to MetaTrader broker terminals (Trade245, Exness, Deriv, etc.).
 
 ### Authentication & Security Engine ("The Vault")
@@ -80,11 +81,14 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 |---|---|---|
 | System Setup Onboarding | 5-step setup wizard introducing value, capturing display name, simulating server allocation, and verifying activation. | `HorizontalPager` (Compose) / 5-step Touch Slider (Vue). |
 | Device-Locked Activation | Validates user license/email and binds physical device UUID to Supabase database. | `@capacitor/device` + Supabase `subscriptions` table. |
-| Home Dashboard | Minimalist command center featuring user greeting, glassmorphic status badge, and central ignition button. | Jetpack Compose / Vue, reactive `is_active` state. |
-| Robot Ignition (START/STOP) | Toggles cloud trading engine status, spins up local logging service, and joins Realtime socket. | `NovaEdgePulseService` / WebSocket connection. |
+| Home Dashboard | Five swappable interfaces over one Home state — Classic Core, Focus Engine, Full-Bleed Art (default), Glass Stack, Signal Feed. Art dominant, robot name legible at thumbnail size, one obvious glowing control. | `HomeLayoutHost` (`ui/home/`), state in `HomeViewModel`. Layout is presentation only — a running bot survives a layout switch. |
+| Interface Picker | Applies a layout instantly; art mode (Avatar / Framed / Full) is set per layout on that layout's own card. | `InterfaceScreen`, `Routes.INTERFACE`. |
+| Arrange Widgets | Drag-to-reorder and per-widget visibility, saved per layout. Robot Hero and Ignition Pod are pinned in all five. | `ArrangeWidgetsScreen`, `Routes.ARRANGE_WIDGETS`. Device-local via `NovaPrefs`; nothing syncs. |
+| Robot Ignition (START/STOP) | Toggles cloud trading engine status, spins up local logging service, and joins Realtime socket. | `NovaHostPulseService` / WebSocket connection. |
 | AI Chart Scanner | Analyzes uploaded chart screenshots to extract patterns, signals, Stop Loss, and Take Profit levels. | Camera/Picker -> base64 -> Claude 3.5 Sonnet Edge Function. |
-| Smart Risk Calculator | Computes lot sizes dynamically based on account balance, risk percentage, asset pip value, and SL pips. | `riskCalculator.js` / Kotlin Math Utility. |
-| Trading Symbols Hub | Lists active asset pairs (XAUUSD, US30, etc.) with gear icons opening per-symbol lot size configuration sheets. | Modal Bottom Sheet + Supabase `symbol_preferences` upsert. |
+| Trade Calculator | Balance, a typed total risk %, and a trade count; splits the budget and reports risk per trade and a suggested lot. Lives on the **Chart Scanner** input step, where its per-trade figure is what `TradePlanner` sizes the position with. It is not a home widget — `TradeCalculatorCard.kt`. |
+| Trading Symbols | One scroll, six sections: the robot's allowance, the user's selection with per-symbol lot and concurrent-trade limits, the trade calculator, newsfeed, session windows, and high-impact events. Reached **only** from the Quotes button on the home ignition row — it is deliberately not in the nav menu. | `Routes.PAIRS`, `PairManagementScreen.kt` + `MarketContext.kt` embeds. |
+| Per-symbol trading plan | Which of the robot's permitted symbols this subscriber actually trades, at what size, and how many at once. Stored device-side by `SymbolPlanStore` and pushed to `license_symbol_config` so the executor can enforce it. **Never** written into `allowed_symbols` — that is the mentor's allowance and is read-only on the device. | `sdk/SymbolPlan.kt`, `sync-symbol-config`, `metacopier-execute`. |
 | Agnostic Broker Setup | Secure form collecting MT4/MT5 Server, Account ID, and Password without hardcoded broker strings. | Material 3 / HIG Outlined Inputs + MetaAPI SDK. |
 
 ### Mentor Portal Features
@@ -98,9 +102,26 @@ Nova Edge Direct-to-Consumer: A unified mobile application and platform offering
 
 ## 4. Component & Design System Guidelines
 
-Nova Edge strictly adheres to a "Premium Light / Clean Neumorphic" visual aesthetic across all mobile screens.
+**Dark is the app's real colour scheme.** `NovaHostTheme` builds `obsidianColorScheme` by default; Light is an explicit opt-in toggle in Settings (`NovaHostThemeState.useLightScheme`, persisted by `NovaPrefs`). The "Premium Light" palette below survives as that opt-in and as the palette the onboarding and splash art were drawn against — it is no longer the default, and it is not what most screens render.
 
-### Color Tokens
+This changed because every screen already painted dark surfaces while `premiumLightColorScheme` was hardwired underneath them. Anything the screens did not paint themselves — ripples, disabled text, unstyled dividers — resolved against the wrong palette.
+
+### Home Command Center (dark only, no opt-out)
+
+The five home layouts sit on mentor-supplied art, and a light ground under a photograph has no reading that works. They are dark regardless of the Light toggle, using the `Home*` tokens in `ui/theme/Color.kt`.
+
+| Token group | Purpose |
+|---|---|
+| `HomeCanvas` / `HomeCanvasArt` / `HomeCanvasFocus` / `HomeCanvasGlass` / `HomeCanvasFeed` | Per-layout grounds. Each layout needs a slightly different black to keep its art gradient from banding. |
+| `HomeSurface`, `HomeSurfaceRaised`, `HomeSurfaceSunken`, `HomeSurfaceWell` | Rows, picker cards, stat tiles, terminal log well. |
+| `HomeBorder`, `HomeBorderStrong`, `HomeBorderSubtle`, `HomeBorderFaint` | Hairlines, chips, control outlines. |
+| `HomeTextBright` → `HomeTextFaint` | Headings, body, monospace readouts, captions, field labels. |
+| `HomeAccentBlue/Violet/Jade/Amber/Crimson` | The five mentor accents. Blue is the fallback when a robot defines no `accent_color`. |
+| `HomeLive`, `HomeSell` | Live/OK and sell/error on a dark ground. Distinct from `NovaSuccess`/`NovaDanger`, which are tuned for light. |
+
+**Contrast floor is not optional.** Mentor accent, user override, art mode and glow multiply into combinations that go illegible. Any accent drawn as text or as a control edge over art must pass through `Color.onArtFloor()` (`ui/home/HomeKit.kt`), and any art reaching the background must carry a scrim. A mentor is free to pick a near-black accent; the floor is what stops that from shipping an invisible START button.
+
+### Premium Light tokens (opt-in scheme, onboarding + splash)
 
 | Token | Value |
 |---|---|
@@ -113,13 +134,18 @@ Nova Edge strictly adheres to a "Premium Light / Clean Neumorphic" visual aesthe
 | Muted Subtitles | Soft Slate Grey (`#8A94A6`) |
 
 ### Component Rules & Conventions
-- **Pill Shapes Only**: Every primary button MUST be pill-shaped (`CircleShape` in Compose, `border-radius: 9999px` in Vue/CSS). Square or rectangular buttons are strictly prohibited.
-- **Floating Cards**: Content blocks must be placed inside pure white (`#FFFFFF`) cards with a large border-radius (24px / 24.dp) and soft drop shadows (`box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06)`).
+- **Pill Shapes Only**: Every primary button MUST be pill-shaped (`CircleShape` in Compose, `border-radius: 9999px` in Vue/CSS). Square or rectangular buttons are strictly prohibited. Glass Stack's 22.dp rounded controls are the one deliberate exception, and they are a home-layout choice, not a licence to square off buttons elsewhere.
+- **Floating Cards**: On the Light scheme, content blocks sit in pure white (`#FFFFFF`) cards with a 24px / 24.dp radius and soft drop shadows (`box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06)`). On dark, depth comes from the `GlassPanel` / `HomeCard` pair in `ui/home/HomeKit.kt` instead — glass over art, flat card over a flat ground.
+- **One glowing control per screen**: Each home layout has exactly one obvious ignition. Satellite controls never compete with it.
 - **Zero Broker Hardcoding**: Never hardcode specific broker names (such as "Trade245") in UI text or placeholders. All server selection fields must use dynamic, searchable inputs.
+
+### Where appearance is stored
+
+`NovaPrefs` (plain `nova_appearance` store) is the single home for every appearance and layout value. `TerminalPrefs` holds credentials only — do not add appearance keys back to it. Robot identity (`display_name`, `avatar_url`, `accent_color`) stays in `metahost_prefs`, written by licence activation.
 
 ## 5. Instructions for Claude Code
 
-You are the Lead Engineer working on Nova Edge, a mobile-first cloud VPS and automated trading management suite (Android native in Kotlin/Compose, iOS hybrid in Vue.js/Capacitor, Admin Portal in Vue/React, and Supabase backend).
+You are the Lead Engineer working on NovaHost, a mobile-first cloud VPS and automated trading management suite (Android native in Kotlin/Compose, iOS hybrid in Vue.js/Capacitor, Admin Portal in Vue/React, and Supabase backend).
 
 ### Mandatory Workflow & Implementation Rules
 
@@ -128,7 +154,8 @@ Before writing or modifying any code in this repository, strictly adhere to the 
 #### 1. Pre-Flight Verification & Skill Check
 - Analyze the codebase to understand existing architecture, state management patterns, and design tokens.
 - Review necessary core concepts before writing code (e.g., Jetpack Compose state hoisting, Vue 3 Composition API, Supabase Realtime WebSocket subscriptions, Capacitor native plugins, or Deno Edge Function constraints).
-- Check that all proposed UI updates maintain absolute compliance with our "Premium Light" theme (Background `#F4F7F9`, pure white floating cards `#FFFFFF` with 24px radius, and pill-shaped Soft Light Blue `#5C9CE6` buttons).
+- Check proposed UI against the right scheme for the surface (§4): the five home layouts are dark-only and use the `Home*` tokens; other screens follow the dark default with Light as an opt-in. Never reintroduce a hardcoded single scheme.
+- Any accent used as text or a control edge over mentor art must go through `Color.onArtFloor()`, and art reaching the background must carry a scrim.
 
 #### 2. Step-by-Step Implementation Plan
 - Provide a concise, numbered plan detailing every file you intend to create, modify, or delete.

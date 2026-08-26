@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.components
+﻿package com.novahost.app.ui.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,7 +14,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.novaedge.app.ui.theme.HolographicGlowMode
+import com.novahost.app.ui.theme.HolographicGlowMode
 
 /**
  * @description Applies a holographic neon glow halo around a composable using the canvas
@@ -36,6 +36,10 @@ import com.novaedge.app.ui.theme.HolographicGlowMode
  */
 fun Modifier.neonGlow(intensity: HolographicGlowMode, color: Color, cornerRadius: Dp = 12.dp): Modifier = composed {
     when (intensity) {
+
+        // Tier 0: the crisp edge and nothing else. Callers keep their border
+        // and background; they just get no shadow under them.
+        HolographicGlowMode.OFF -> this
 
         HolographicGlowMode.SOFT -> {
             // Tier 1: Subtle ambient presence — low elevation, low alpha

@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.screens
+﻿package com.novahost.app.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -28,11 +28,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.novaedge.app.R
-import com.novaedge.app.navigation.Routes
-import com.novaedge.app.ui.components.GlassCard
-import com.novaedge.app.ui.components.GradientButton
-import com.novaedge.app.ui.theme.*
+import com.novahost.app.R
+import com.novahost.app.navigation.Routes
+import com.novahost.app.ui.components.GlassCard
+import com.novahost.app.ui.components.GradientButton
+import com.novahost.app.ui.theme.*
 import kotlinx.coroutines.launch
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
@@ -47,7 +47,7 @@ private enum class AuthMode { SIGN_IN, SIGN_UP, FORGOT }
 @Composable
 fun AuthScreen(navController: NavController) {
     var mode by remember { mutableStateOf(AuthMode.SIGN_IN) }
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val primaryColor = themeState.primaryColor
 
     Box(
@@ -87,14 +87,14 @@ fun AuthScreen(navController: NavController) {
                 contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.app_logo),
+                    painter = painterResource(id = R.drawable.novahost_mark),
                     contentDescription = "Nexus Logo",
                     modifier = Modifier.fillMaxSize().clip(CircleShape)
                 )
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "Nova Edge NEXUS",
+                "NovaHost NEXUS",
                 color = Color.White,
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 24.sp,
@@ -195,7 +195,7 @@ private fun SignInForm(navController: NavController) {
     
     if (errorMessage != null) {
         Spacer(Modifier.height(8.dp))
-        Text(errorMessage ?: "", color = com.novaedge.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(errorMessage ?: "", color = com.novahost.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 
     Spacer(Modifier.height(16.dp))
@@ -207,13 +207,13 @@ private fun SignInForm(navController: NavController) {
                 errorMessage = null
                 scope.launch {
                     try {
-                        com.novaedge.app.sdk.SupabaseSetup.client.auth.signInWith(Email) {
+                        com.novahost.app.sdk.SupabaseSetup.client.auth.signInWith(Email) {
                             this.email = email
                             this.password = password
                         }
                         // Optionally fetch avatar_url
                         try {
-                            val profile = com.novaedge.app.sdk.SupabaseSetup.client.postgrest.from("profiles")
+                            val profile = com.novahost.app.sdk.SupabaseSetup.client.postgrest.from("profiles")
                                 .select().decodeSingleOrNull<UserProfile>()
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -250,11 +250,11 @@ private fun SignUpForm() {
 
     if (errorMessage != null) {
         Spacer(Modifier.height(8.dp))
-        Text(errorMessage ?: "", color = com.novaedge.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(errorMessage ?: "", color = com.novahost.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
     if (successMessage != null) {
         Spacer(Modifier.height(8.dp))
-        Text(successMessage ?: "", color = com.novaedge.app.ui.theme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(successMessage ?: "", color = com.novahost.app.ui.theme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 
     Spacer(Modifier.height(16.dp))
@@ -267,7 +267,7 @@ private fun SignUpForm() {
                 successMessage = null
                 scope.launch {
                     try {
-                        com.novaedge.app.sdk.SupabaseSetup.client.auth.signUpWith(io.github.jan.supabase.auth.providers.builtin.Email) {
+                        com.novahost.app.sdk.SupabaseSetup.client.auth.signUpWith(io.github.jan.supabase.auth.providers.builtin.Email) {
                             this.email = email
                             this.password = password
                         }
@@ -297,11 +297,11 @@ private fun ForgotForm() {
 
     if (errorMessage != null) {
         Spacer(Modifier.height(8.dp))
-        Text(errorMessage ?: "", color = com.novaedge.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(errorMessage ?: "", color = com.novahost.app.ui.theme.Crimson, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
     if (successMessage != null) {
         Spacer(Modifier.height(8.dp))
-        Text(successMessage ?: "", color = com.novaedge.app.ui.theme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(successMessage ?: "", color = com.novahost.app.ui.theme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 
     Spacer(Modifier.height(16.dp))
@@ -314,7 +314,7 @@ private fun ForgotForm() {
                 successMessage = null
                 scope.launch {
                     try {
-                        com.novaedge.app.sdk.SupabaseSetup.client.auth.resetPasswordForEmail(email)
+                        com.novahost.app.sdk.SupabaseSetup.client.auth.resetPasswordForEmail(email)
                         successMessage = "Recovery instructions sent. Check your email."
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -336,7 +336,7 @@ private fun StyledTextField(
     isPassword: Boolean = false,
     onChange: (String) -> Unit
 ) {
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val primaryColor = themeState.primaryColor
 
     OutlinedTextField(

@@ -162,7 +162,7 @@ export function RadialOrbitalTimeline({
           }}
         >
           <span className="text-[10px] text-white/90 font-bold leading-tight tracking-widest uppercase">
-            Nova Edge<br />AI Core
+            NovaHost<br />AI Core
           </span>
         </div>
 

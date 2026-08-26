@@ -12,11 +12,11 @@
 
       <!-- Logo + heading -->
       <div class="gate-logo">
-        <img src="/app_logo.png" alt="Nova Edge" class="gate-logo-img" />
+        <img src="/app_logo.png" alt="NovaHost" class="gate-logo-img" />
         <div class="gate-logo-glow"></div>
       </div>
 
-      <h1 class="gate-title">Nova Edge</h1>
+      <h1 class="gate-title">NovaHost</h1>
       <p class="gate-sub mono-tech">PRECISION AI TRADING</p>
       <div class="gate-divider"></div>
       <p class="gate-label mono-tech">ENTER YOUR LICENSE KEY</p>
@@ -61,7 +61,7 @@
         <div v-if="!activating" class="btn-shimmer"></div>
       </button>
 
-      <p class="gate-footer mono-tech">Secured by Nova Edge · v2.0</p>
+      <p class="gate-footer mono-tech">Secured by NovaHost · v2.0</p>
     </div>
 
   </div>

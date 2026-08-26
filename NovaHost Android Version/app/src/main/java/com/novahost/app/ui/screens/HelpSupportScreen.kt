@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.ui.screens
+﻿package com.novahost.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -23,15 +23,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.novaedge.app.ui.components.*
-import com.novaedge.app.ui.theme.*
+import com.novahost.app.ui.components.*
+import com.novahost.app.ui.theme.*
 import androidx.compose.ui.draw.alpha
-import com.novaedge.app.BuildConfig
+import com.novahost.app.BuildConfig
 
 @Composable
 fun HelpSupportScreen(navController: NavController) {
     val scrollState = rememberScrollState()
-    val themeState = LocalNovaEdgeTheme.current
+    val themeState = LocalNovaHostTheme.current
     val context = androidx.compose.ui.platform.LocalContext.current
     
     Box(modifier = Modifier.fillMaxSize().background(Charcoal)) {
@@ -57,7 +57,7 @@ fun HelpSupportScreen(navController: NavController) {
                 }
                 Text("Core Architecture Profile", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
             }
-            Text("Nova Edge Infrastructure & Licensing", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
+            Text("NovaHost Infrastructure & Licensing", style = MaterialTheme.typography.bodyMedium, color = ActiveGrey)
 
             Spacer(Modifier.height(8.dp))
 
@@ -77,7 +77,7 @@ fun HelpSupportScreen(navController: NavController) {
                     }
                     Spacer(Modifier.width(16.dp))
                     Column {
-                        Text("Nova Edge Runtime Engine", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("NovaHost Runtime Engine", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         Text("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", color = themeState.primaryColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Text("Architecture: Cloud-Native Neural Link", color = ActiveGrey, fontSize = 12.sp)
                     }
@@ -120,7 +120,7 @@ fun HelpSupportScreen(navController: NavController) {
             GradientButton(
                 text = "SYSTEM DEPLOYMENT DOCS",
                 onClick = { 
-                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://novaedge.app/docs"))
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://novahost.app/docs"))
                     context.startActivity(intent)
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -129,7 +129,7 @@ fun HelpSupportScreen(navController: NavController) {
             )
             Button(
                 onClick = { 
-                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://novaedge.app/portal"))
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://novahost.app/portal"))
                     context.startActivity(intent)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.White),
@@ -163,10 +163,10 @@ fun HelpSupportScreen(navController: NavController) {
 
             Spacer(Modifier.height(32.dp))
 
-            // Powered by Nova Edge
+            // Powered by NovaHost
             Row(modifier = Modifier.fillMaxWidth().alpha(0.6f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Text("Powered by ", color = Color.White, fontSize = 12.sp)
-                Text("Nova Edge", color = themeState.primaryColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("NovaHost", color = themeState.primaryColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(24.dp))
             }

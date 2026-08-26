@@ -7,12 +7,12 @@ import { useToast } from "@/hooks/use-toast";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 
 const mq5Template = `//+------------------------------------------------------------------+
-//|                                                   Nova Edge EA.mq5 |
-//|                                        Copyright 2026, Nova Edge.  |
-//|                                             https://novaedge.app/ |
+//|                                                   NovaHost EA.mq5 |
+//|                                        Copyright 2026, NovaHost.  |
+//|                                             https://novahost.app/ |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Nova Edge."
-#property link      "https://novaedge.app/"
+#property copyright "Copyright 2026, NovaHost."
+#property link      "https://novahost.app/"
 #property version   "1.00"
 
 //--- inputs
@@ -25,7 +25,7 @@ input string SupabaseKey = "YOUR_SUPABASE_ANON_KEY";
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("Nova Edge EA Initialized with License: ", LicenseKey);
+   Print("NovaHost EA Initialized with License: ", LicenseKey);
    // Connect to Supabase via WebRequest
    return(INIT_SUCCEEDED);
   }
@@ -35,7 +35,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   Print("Nova Edge EA Deinitialized");
+   Print("NovaHost EA Deinitialized");
   }
 
 //+------------------------------------------------------------------+
@@ -67,7 +67,7 @@ export default function HostingTutorial() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `NovaEdge_EA_v1.0.mq5`;
+    link.download = `NovaHost_EA_v1.0.mq5`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -77,7 +77,7 @@ export default function HostingTutorial() {
     setChecklist(prev => ({ ...prev, downloadSource: true }));
     toast({
       title: "Download Complete",
-      description: "NovaEdge_EA_v1.0.mq5 has been saved to your computer."
+      description: "NovaHost_EA_v1.0.mq5 has been saved to your computer."
     });
   };
 
@@ -114,7 +114,7 @@ export default function HostingTutorial() {
                 <div className="flex items-center gap-3">
                   <FileCode2 className="w-8 h-8 text-blue-400" />
                   <div>
-                    <p className="font-semibold text-white">NovaEdge_EA_v1.0.mq5</p>
+                    <p className="font-semibold text-white">NovaHost_EA_v1.0.mq5</p>
                     <p className="text-xs text-muted-foreground">4 KB • MQL5 Source File</p>
                   </div>
                 </div>

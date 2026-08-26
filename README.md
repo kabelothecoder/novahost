@@ -1,4 +1,4 @@
-# Nova Edge
+# NovaHost
 
 Mobile-first automated trading platform. Mentors create trading robots and sell
 licence keys; users enter a key, connect their broker account, and the robot
@@ -8,8 +8,8 @@ executes the mentor's signals on their account.
 
 | Path | What it is |
 |---|---|
-| `Nova Edge Android Version/` | Native Android app (Kotlin + Jetpack Compose) |
-| `Nova Edge Android Version/supabase/functions/` | Supabase Edge Functions (Deno) |
+| `NovaHost Android Version/` | Native Android app (Kotlin + Jetpack Compose) |
+| `NovaHost Android Version/supabase/functions/` | Supabase Edge Functions (Deno) |
 | `MetaHost Portal/lumin-dash/` | Mentor portal (React + Vite) — **this is what deploys to Vercel** |
 | `MetaHost Portal/metahost-landing/` | Marketing landing site (Next.js) |
 | `MetaHost iOS Version/` | iOS build (Vue + Capacitor) |
@@ -76,7 +76,7 @@ a phone.
 cd "MetaHost Portal/lumin-dash" && npm install && npm run dev
 
 # Android
-cd "Nova Edge Android Version" && ./gradlew assembleDebug
+cd "NovaHost Android Version" && ./gradlew assembleDebug
 ```
 
 Secrets live in files git ignores — `local.properties` (Android) and `.env`

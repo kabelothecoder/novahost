@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import android.content.Context
 import android.provider.Settings

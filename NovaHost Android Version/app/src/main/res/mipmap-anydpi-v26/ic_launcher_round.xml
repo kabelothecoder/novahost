@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive launcher icon.
+
+    The artwork is a photographic render carrying its own soft gradient ground,
+    so it goes in the BACKGROUND layer full bleed rather than being cut out into
+    the foreground. There is no alpha channel separating the head from its
+    backdrop, and a rectangle of baked in gradient floating inside the mask would
+    read as a sticker rather than an icon.
+
+    ic_launcher_art.png is cropped from novahost_mark.png so the head sits dead
+    centre and fills 62dp of the 108dp canvas, inside the 66dp circle that every
+    launcher mask is guaranteed to show. The bottom 12dp of that crop is edge
+    extended padding, which lands entirely in the bleed the mask discards.
+
+    The foreground is deliberately empty. Nothing needs to parallax over the top.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_art" />
+    <foreground android:drawable="@android:color/transparent" />
+</adaptive-icon>

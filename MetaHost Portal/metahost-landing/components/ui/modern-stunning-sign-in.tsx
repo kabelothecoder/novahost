@@ -63,7 +63,7 @@ export function SignIn1({ logo, title, subtitle, bottomText }: SignInProps) {
         <div>
           <input 
             type="email" 
-            placeholder="admin@novaedge.com" 
+            placeholder="admin@novahost.com" 
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required

@@ -14,8 +14,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['app_logo.png', 'robot_avatar.png', 'bg_loop.mp4'],
       manifest: {
-        name: 'Nova Edge',
-        short_name: 'Nova Edge',
+        name: 'NovaHost',
+        short_name: 'NovaHost',
         description: 'Premium AI-Powered Trading Platform',
         display: 'standalone',
         orientation: 'portrait',

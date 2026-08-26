@@ -59,7 +59,7 @@ export default function WebBuilder() {
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/60" />
               </div>
               <div className="text-[10px] text-muted-foreground font-mono bg-black/35 px-4 py-0.5 rounded-md border border-white/5">
-                my-awesome-ea-sales.novaedge.co
+                my-awesome-ea-sales.novahost.co
               </div>
               <Laptop className="w-4 h-4 text-muted-foreground" />
             </div>

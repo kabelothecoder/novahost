@@ -1,4 +1,4 @@
-﻿package com.novaedge.app.sdk
+﻿package com.novahost.app.sdk
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -19,19 +19,18 @@ data class SavedBotProfile(
 
 object TerminalPrefs {
     private const val PREFS_NAME = "secure_terminal_prefs"
+
+    /**
+     * The alias androidx.security's [MasterKeys.getOrCreate] uses internally. Named
+     * here so recovery can drop the key along with the file it no longer opens.
+     */
+    private const val MASTER_KEY_ALIAS = "_androidx_security_master_key_"
     private const val KEY_SERVER = "terminal_server"
     private const val KEY_ACCOUNT = "terminal_account"
     private const val KEY_TOKEN = "terminal_token"
     private const val KEY_VALIDATED_BOTS = "validated_bots_list"
-    private const val KEY_GLOW_MODE = "user_glow_mode"
-    private const val KEY_SEC_BG_COLOR = "secondary_bg_color"
-    private const val KEY_THEME_COLOR = "user_theme_color"
-    private const val KEY_IMMERSIVE_MODE = "immersive_mode"
-    private const val KEY_ROBOT_FONT = "robot_font_style"
-    private const val KEY_HOME_BUTTON_SHAPE = "home_button_shape"
-    private const val KEY_TRADE_CALCULATOR_ENABLED = "trade_calculator_enabled"
 
-    private fun getPrefs(context: Context): SharedPreferences {
+    private fun open(context: Context): SharedPreferences {
         val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
         return EncryptedSharedPreferences.create(
             PREFS_NAME,
@@ -40,6 +39,48 @@ object TerminalPrefs {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
+
+    /**
+     * Opens the encrypted store, rebuilding it if the ciphertext can no longer be
+     * authenticated.
+     *
+     * The failure mode this exists for: the master key lives in the Android
+     * Keystore and is bound to this install on this device, but the prefs FILE is
+     * an ordinary XML file that Android's auto-backup will happily carry across a
+     * reinstall or a device transfer. Restore the file without the key and every
+     * read throws AEADBadTagException ("Signature/MAC verification failed").
+     *
+     * That used to be fatal. This object is touched from MainViewModel's
+     * constructor, so the throw propagated out of ViewModelProvider.get() in
+     * MainActivity.onCreate() -- before setContent() -- and the activity's
+     * catch-all turned a crash into a permanently black screen that survived
+     * force-stops and could only be cleared by wiping app data.
+     *
+     * Recovery is to throw the undecryptable file away and start a fresh keyset.
+     * Nothing is lost that can be lost: the contents are broker credentials and a
+     * session token, all of which have to be re-entered after a restore anyway
+     * because they were never portable to begin with. Backup exclusion rules stop
+     * the file travelling in the first place -- this is the belt to that braces,
+     * since a key can also be dropped by a device passcode change or a keystore
+     * corruption that no manifest setting protects against.
+     */
+    private fun getPrefs(context: Context): SharedPreferences {
+        return try {
+            open(context)
+        } catch (e: Exception) {
+            android.util.Log.w(
+                "TerminalPrefs",
+                "Encrypted prefs unreadable (${e.javaClass.simpleName}); rebuilding the store", e
+            )
+            runCatching { context.deleteSharedPreferences(PREFS_NAME) }
+            runCatching {
+                java.security.KeyStore.getInstance("AndroidKeyStore")
+                    .apply { load(null) }
+                    .deleteEntry(MASTER_KEY_ALIAS)
+            }
+            open(context)
+        }
     }
 
     fun saveConfig(context: Context, config: TerminalConfig) {
@@ -85,63 +126,15 @@ object TerminalPrefs {
         }
     }
 
-    fun getGlowMode(context: Context): String {
-        return getPrefs(context).getString(KEY_GLOW_MODE, "MEDIUM") ?: "MEDIUM"
-    }
-
-    fun setGlowMode(context: Context, mode: String) {
-        getPrefs(context).edit().putString(KEY_GLOW_MODE, mode).apply()
-    }
-
-    fun getSecondaryBgColor(context: Context): Long? {
-        val prefs = getPrefs(context)
-        return if (prefs.contains(KEY_SEC_BG_COLOR)) prefs.getLong(KEY_SEC_BG_COLOR, 0L) else null
-    }
-
-    fun setSecondaryBgColor(context: Context, colorValue: Long) {
-        getPrefs(context).edit().putLong(KEY_SEC_BG_COLOR, colorValue).apply()
-    }
-
-    fun getThemeColorValue(context: Context): Long? {
-        val prefs = getPrefs(context)
-        return if (prefs.contains(KEY_THEME_COLOR)) prefs.getLong(KEY_THEME_COLOR, 0L) else null
-    }
-
-    fun setThemeColorValue(context: Context, colorValue: Long) {
-        getPrefs(context).edit().putLong(KEY_THEME_COLOR, colorValue).apply()
-    }
-
-    /** @description Persist the immersive (card-free) mode toggle. */
-    fun getImmersiveMode(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_IMMERSIVE_MODE, false)
-    }
-
-    fun setImmersiveMode(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_IMMERSIVE_MODE, enabled).apply()
-    }
-
-    /** @description Persist the user's chosen robot name font style. */
-    fun getRobotFontStyle(context: Context): String {
-        return getPrefs(context).getString(KEY_ROBOT_FONT, "DEFAULT_SYSTEM") ?: "DEFAULT_SYSTEM"
-    }
-
-    fun setRobotFontStyle(context: Context, style: String) {
-        getPrefs(context).edit().putString(KEY_ROBOT_FONT, style).apply()
-    }
-
-    fun getHomeButtonShape(context: Context): String {
-        return getPrefs(context).getString(KEY_HOME_BUTTON_SHAPE, "CIRCLE") ?: "CIRCLE"
-    }
-
-    fun setHomeButtonShape(context: Context, shape: String) {
-        getPrefs(context).edit().putString(KEY_HOME_BUTTON_SHAPE, shape).apply()
-    }
-
-    fun getTradeCalculatorEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_TRADE_CALCULATOR_ENABLED, true)
-    }
-
-    fun setTradeCalculatorEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_TRADE_CALCULATOR_ENABLED, enabled).apply()
-    }
+    /**
+     * The raw encrypted store, for [NovaPrefs] to lift the appearance values it
+     * inherited out of. Returns null when the store cannot be opened.
+     *
+     * Appearance no longer lives here -- theme colours, glow, shape and
+     * typography moved to [NovaPrefs] so there is one home for them. This is the
+     * only remaining reader of those keys and exists solely to carry existing
+     * installs across. Do not add new callers; do not add new appearance keys.
+     */
+    internal fun legacyAppearanceStore(context: Context): SharedPreferences? =
+        runCatching { getPrefs(context) }.getOrNull()
 }

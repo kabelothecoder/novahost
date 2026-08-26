@@ -1,6 +1,6 @@
-﻿# ProGuard rules for Nova Edge
+﻿# ProGuard rules for NovaHost
 -keep class cloud.metaapi.** { *; }
--keep class com.novaedge.** { *; }
+-keep class com.novahost.** { *; }
 -keepattributes Signature
 -keepattributes *Annotation*
 -dontwarn cloud.metaapi.**
