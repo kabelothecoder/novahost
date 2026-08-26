@@ -29,7 +29,10 @@ export default function QuickTrade() {
   const [targetId, setTargetId] = useState<string>("ALL");
   const [pair, setPair] = useState<string>("EURUSD");
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [volume, setVolume] = useState<string>("0.1");
+  // Blank by default. Pre-filling 0.1 meant the common path was the mentor
+  // silently overriding every subscriber's own sizing with a number picked for
+  // no particular account.
+  const [volume, setVolume] = useState<string>("");
   const [sl, setSl] = useState<string>("");
   const [tp, setTp] = useState<string>("");
   const [isSending, setIsSending] = useState(false);
@@ -69,8 +72,16 @@ export default function QuickTrade() {
   }, [user]);
 
   const handleSendSignal = async () => {
-    if (!pair || !volume || !sl || !tp) {
-      toast({ title: "Validation Error", description: "All fields are required.", variant: "destructive" });
+    // Pair and direction are the signal. Lot, stop and target are optional:
+    //
+    //  - Lot, because the subscriber's own Trading Symbols plan already decides
+    //    size -- their smart-lot figure, their manual size, or mentor-relative
+    //    scaling. Forcing a number here made the mentor guess on behalf of every
+    //    account, none of whose balances they know.
+    //  - SL and TP, because a mentor calling a level to watch is not always
+    //    placing a bracket, and an empty field beat inventing one.
+    if (!pair) {
+      toast({ title: "Pick a pair", description: "Choose the instrument to signal.", variant: "destructive" });
       return;
     }
 
@@ -79,8 +90,19 @@ export default function QuickTrade() {
       return;
     }
 
-    if (parseFloat(volume) <= 0 || parseFloat(volume) > 50) {
+    // Only validate what was actually filled in.
+    if (volume && (parseFloat(volume) <= 0 || parseFloat(volume) > 50)) {
       toast({ title: "Volume Error", description: "Lot size must be between 0.01 and 50.", variant: "destructive" });
+      return;
+    }
+
+    if (sl && parseFloat(sl) <= 0) {
+      toast({ title: "Stop loss", description: "Leave the stop blank, or enter a price above zero.", variant: "destructive" });
+      return;
+    }
+
+    if (tp && parseFloat(tp) <= 0) {
+      toast({ title: "Take profit", description: "Leave the target blank, or enter a price above zero.", variant: "destructive" });
       return;
     }
 
@@ -91,13 +113,15 @@ export default function QuickTrade() {
 
     setIsSending(true);
     try {
+      // Null, not zero, for anything left blank. Zero is a value the executor
+      // would act on; null is the absence the subscriber's own plan fills in.
       const payload = {
         ea_id: targetId === "ALL" ? "MASTER_OVERRIDE" : targetId,
         pair,
-        lot: parseFloat(volume),
+        lot: volume ? parseFloat(volume) : null,
         price: 0,
-        sl: parseFloat(sl),
-        tp: parseFloat(tp),
+        sl: sl ? parseFloat(sl) : null,
+        tp: tp ? parseFloat(tp) : null,
         type: side.toUpperCase()
       };
 
@@ -207,10 +231,14 @@ export default function QuickTrade() {
               </div>
 
               <div className="space-y-2">
-                <Label>Volume (Lots)</Label>
-                <Input 
+                <Label>
+                  Volume (Lots){" "}
+                  <span className="text-muted-foreground font-normal">— optional</span>
+                </Label>
+                <Input
                   type="number" step="0.01" min="0.01"
                   value={volume} onChange={(e) => setVolume(e.target.value)}
+                  placeholder="Leave blank — each trader's own size"
                   className="bg-white/5 backdrop-blur-md border-white/10"
                 />
               </div>
@@ -218,7 +246,7 @@ export default function QuickTrade() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-rose-500">Stop Loss</Label>
+                <Label className="text-rose-500">Stop Loss <span className="text-muted-foreground font-normal">— optional</span></Label>
                 <Input 
                   type="number" step="0.00001"
                   value={sl} onChange={(e) => setSl(e.target.value)}
@@ -228,7 +256,7 @@ export default function QuickTrade() {
               </div>
 
               <div className="space-y-2">
-                <Label className="text-emerald-500">Take Profit</Label>
+                <Label className="text-emerald-500">Take Profit <span className="text-muted-foreground font-normal">— optional</span></Label>
                 <Input 
                   type="number" step="0.00001"
                   value={tp} onChange={(e) => setTp(e.target.value)}

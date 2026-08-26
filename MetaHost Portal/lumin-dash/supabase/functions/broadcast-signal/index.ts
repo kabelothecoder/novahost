@@ -100,7 +100,10 @@ serve(async (req: Request) => {
       ea_id: targetEa,
       pair: cleanPair,
       side: (side || type || 'BUY').toUpperCase(),
-      lot: lot || 0.01,
+      // Null when the mentor left it blank, never a default. `lot || 0.01`
+      // turned "the subscriber decides" into "everybody trades one micro lot",
+      // which silently overrode every user's own sizing plan.
+      lot: (lot === undefined || lot === null || lot === '') ? null : Number(lot),
       sl,
       tp,
       // signal_id is uniquely indexed; suffix when fanning out to several bots
