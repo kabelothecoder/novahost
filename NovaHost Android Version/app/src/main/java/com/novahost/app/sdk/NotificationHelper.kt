@@ -36,10 +36,24 @@ import com.novahost.app.R
  */
 object NotificationHelper {
 
-    /** v2: the v1 channel was created with the default tone and cannot be re-sounded. */
-    private const val CHANNEL_ID = "trade_signals_v2"
+    /**
+     * v3: v1 shipped the default notification tone, and v2 shipped the system
+     * ALARM tone because no bundled asset existed yet. `res/raw/trade_alert.wav`
+     * now does, and a channel's sound is fixed at creation -- so a device that
+     * already registered v2 would keep the generic alarm forever without a new
+     * id. This is the bump the note below warns about, spent on the one thing it
+     * is worth spending on: the alert no longer sounds like anything else on the
+     * phone.
+     */
+    private const val CHANNEL_ID = "trade_signals_v3"
     private const val CHANNEL_NAME = "Trade alerts"
-    private const val LEGACY_CHANNEL_ID = "trade_signals_channel"
+
+    /**
+     * Every id this channel has ever used. All are deleted on init so a user is
+     * never left with several "Trade alerts" entries in system settings, one
+     * live and the rest dead but still holding their preferences.
+     */
+    private val LEGACY_CHANNEL_IDS = listOf("trade_signals_channel", "trade_signals_v2")
 
     /**
      * Drop an audio file at `res/raw/trade_alert.(ogg|mp3|wav)` and it becomes the
@@ -80,8 +94,10 @@ object NotificationHelper {
     fun init(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Retire v1. Harmless if it was never created.
-        runCatching { nm.deleteNotificationChannel(LEGACY_CHANNEL_ID) }
+        // Retire every earlier id. Harmless if one was never created.
+        LEGACY_CHANNEL_IDS.forEach { old ->
+            runCatching { nm.deleteNotificationChannel(old) }
+        }
 
         // Already registered: the user owns these settings now, leave them alone.
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return
