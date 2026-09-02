@@ -34,6 +34,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.novahost.app.R
 import com.novahost.app.ui.components.*
 import com.novahost.app.ui.theme.*
+import com.novahost.app.sdk.MetaAPIManager
+import com.novahost.app.ui.trade.ActiveRobotPanel
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import androidx.compose.runtime.getValue
@@ -306,102 +308,32 @@ fun DraggableFloatingAvatar(robotAvatarUrl: String?, onClick: () -> Unit) {
 fun RobotActiveDialog(
     robotName: String,
     adminName: String,
-    onDismiss: () -> Unit, 
+    onDismiss: () -> Unit,
     onStop: () -> Unit
 ) {
     val themeState = LocalNovaHostTheme.current
+    val status by MetaAPIManager.botStatus.collectAsState()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E1E),
+        containerColor = HomeCanvas,
         dragHandle = null
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "ACTIVE ROBOT", 
-                    color = themeState.primaryColor, 
-                    fontSize = 14.sp, 
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                )
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp).background(Color.Black.copy(alpha = 0.2f), CircleShape)
-                ) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(16.dp))
-                }
-            }
-
-            Spacer(Modifier.height(32.dp))
-
-            // Details
-            Surface(
-                color = Color.Black.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Robot:", color = Color.Gray, fontSize = 14.sp)
-                        Text(robotName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Account:", color = Color.Gray, fontSize = 14.sp)
-                        Text(adminName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Status:", color = Color.Gray, fontSize = 14.sp)
-                        Text("Running", color = Color(0xFF00E676), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Text("Powered by ", color = Color(0xFFEDEDED), fontSize = 10.sp)
-                Text("NovaHost", color = themeState.primaryColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Button(
-                onClick = {
-                    onStop()
-                    onDismiss()
-                },
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = themeState.primaryColor),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("STOP ROBOT", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            }
-            
-            Spacer(Modifier.height(16.dp))
-        }
+        // One shared panel with the floating bubble. This used to be a second,
+        // separate implementation of the same card -- which is how it ended up
+        // printing the SYSTEM_ADMIN placeholder as an account name and hardcoding
+        // the status text to "Running" whatever the robot was actually doing.
+        ActiveRobotPanel(
+            robotName = robotName,
+            accountLabel = adminName,
+            status = status,
+            accent = themeState.primaryColor,
+            onStop = {
+                onStop()
+                onDismiss()
+            },
+            onDismiss = onDismiss
+        )
     }
 }
+

@@ -63,3 +63,6 @@ yarn-error.log*
 
 # Parked nested-repo git dirs (temporary, restored after the monorepo commit)
 .git_parked/
+
+# Upload-key coordinates for the release signing config. Never commit.
+keystore.properties

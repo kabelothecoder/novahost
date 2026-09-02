@@ -34,8 +34,49 @@ android {
         buildConfig = true
     }
 
+    // Release signing.
+    //
+    // The upload key is read from `keystore.properties` at the repo root (which
+    // is gitignored) or, failing that, from environment variables so CI can
+    // sign without a file on disk. Nothing about the key is committed.
+    //
+    // Absent entirely, `storeFile` stays null and the release buildType below
+    // simply does not attach a signing config -- so a fresh checkout can still
+    // run `assembleRelease` to check that the build and R8 rules are sound. It
+    // just produces an unsigned artifact, which the Play Console will reject.
+    signingConfigs {
+        release {
+            def keystoreProps = new java.util.Properties()
+            def keystoreFile = rootProject.file("keystore.properties")
+            if (keystoreFile.exists()) {
+                keystoreFile.withInputStream { keystoreProps.load(it) }
+            }
+
+            def resolvedStore = keystoreProps.getProperty("storeFile")
+                    ?: System.getenv("NOVAHOST_STORE_FILE")
+
+            if (resolvedStore) {
+                storeFile = file(resolvedStore)
+                storePassword = keystoreProps.getProperty("storePassword")
+                        ?: System.getenv("NOVAHOST_STORE_PASSWORD")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                        ?: System.getenv("NOVAHOST_KEY_ALIAS")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                        ?: System.getenv("NOVAHOST_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Attached only when a keystore actually resolved. Wiring it
+            // unconditionally makes every release build fail on a machine that
+            // has no key, which is the wrong failure for a developer who only
+            // wanted to check that R8 does not break the app.
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig = signingConfigs.release
+            }
+
             minifyEnabled true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

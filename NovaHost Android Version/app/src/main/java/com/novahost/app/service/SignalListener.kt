@@ -244,9 +244,23 @@ object SignalListener {
      * The feed is where a user already looks to see what the robot is doing, so
      * that is where a refusal belongs.
      */
-    private fun drop(pair: String, reason: String) {
-        android.util.Log.d("NovaHost", "PULSE: $pair dropped -- $reason")
-        MetaAPIManager.addLog(">> $pair skipped: $reason")
+    private fun drop(signal: TradeSignal, reason: String) {
+        android.util.Log.d("NovaHost", "PULSE: ${signal.pair} dropped -- $reason")
+        MetaAPIManager.addLog(">> ${signal.pair} skipped: $reason")
+
+        // Recorded, not just logged. A trade the user's own rules refused is
+        // something they chose, and it should be visible as a decision in the
+        // feed rather than buried in a terminal line they will never scroll to.
+        TradeFeed.record(
+            TradeFeed.TradeEvent(
+                id = signal.id ?: signal.signal_id ?: reason,
+                pair = signal.pair,
+                side = signal.action,
+                orderType = signal.order_type,
+                phase = TradeFeed.Phase.SKIPPED,
+                message = reason.replaceFirstChar { it.uppercase() }
+            )
+        )
     }
 
     private suspend fun execute(context: Context, signal: TradeSignal) {
@@ -269,7 +283,7 @@ object SignalListener {
         if (activeEaId.isNotEmpty() && signalEaId.isNotEmpty() && activeEaId != signalEaId) {
             val runningName = prefs.getString("display_name", null)
             drop(
-                signal.pair,
+                signal,
                 "it is for another robot" + (runningName?.let { " (this licence runs $it)" } ?: "")
             )
             return
@@ -306,11 +320,27 @@ object SignalListener {
         }
 
         if (volume == null) {
-            drop(signal.pair, "it is not switched on in your trading symbols")
+            drop(signal, "it is not switched on in your trading symbols")
             return
         }
 
         _activeSignal.value = ActiveSignal(signal.pair, System.currentTimeMillis())
+
+        // Everything the UI needs to render this trade, carried on the event
+        // rather than flattened into a log line. The takeover reads this.
+        TradeFeed.begin(
+            TradeFeed.TradeEvent(
+                id = signalId,
+                pair = signal.pair,
+                side = signal.action,
+                volume = volume,
+                sl = signal.sl,
+                tp = signal.tp,
+                orderType = signal.order_type,
+                openPrice = signal.open_price,
+                phase = TradeFeed.Phase.SENDING
+            )
+        )
         MetaAPIManager.addLog(">> Signal: ${signal.action} ${signal.pair} @ $volume lots")
 
         // 4. EXECUTE
@@ -337,8 +367,15 @@ object SignalListener {
         // execution that failed is worse than silence: the user believes they
         // are in a position they do not hold.
         tradeResult
-            .onSuccess {
+            .onSuccess { msg ->
                 MetaAPIManager.addLog(">> Order accepted: ${signal.pair}")
+                TradeFeed.settle {
+                    it.copy(
+                        phase = TradeFeed.Phase.FILLED,
+                        code = "EXECUTED",
+                        message = TradeFeed.describe("EXECUTED", msg)
+                    )
+                }
                 NotificationHelper.showTradeNotification(
                     context = context,
                     pair = signal.pair,
@@ -349,10 +386,25 @@ object SignalListener {
             .onFailure { err ->
                 android.util.Log.e("NovaHost", "PULSE_ERROR: execution failed - ${err.message}")
                 MetaAPIManager.addLog(">> Order rejected: ${err.message}")
+
+                // The executor's own code where we have one. It is what turns
+                // "the order could not be placed" into something the user can
+                // act on -- switch the symbol back on, close a position, top up.
+                val rejection = err as? MetaAPIManager.TradeRejected
+                val code = rejection?.code
+                val reason = TradeFeed.describe(code, rejection?.message ?: err.message)
+
+                TradeFeed.settle {
+                    it.copy(
+                        phase = TradeFeed.Phase.REJECTED,
+                        code = code,
+                        message = reason
+                    )
+                }
                 NotificationHelper.showTradeFailedNotification(
                     context = context,
                     pair = signal.pair,
-                    reason = err.message ?: "Trade could not be placed."
+                    reason = reason
                 )
             }
 

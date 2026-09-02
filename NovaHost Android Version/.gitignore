@@ -13,3 +13,6 @@ captures/
 *.aab
 *.jks
 *.keystore
+
+# Upload-key coordinates for the release signing config. Never commit.
+keystore.properties

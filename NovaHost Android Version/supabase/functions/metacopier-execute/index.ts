@@ -43,7 +43,7 @@ function isPending(orderType: string): boolean {
 /**
  * The order comment MetaTrader shows against the position.
  *
- * Format is `<robot>-NovaHost`, e.g. `Quantum Breaker EA-NovaHost`, so anyone
+ * Format is `<robot>-NovaHost`, e.g. `QuantumBreaker-NovaHost`, so anyone
  * reading the trade history can tell at a glance which positions were placed by
  * automation and which robot placed them.
  *
@@ -51,28 +51,82 @@ function isPending(orderType: string): boolean {
  * the licence, and a device that could choose its own comment could attribute
  * its trades to somebody else's robot.
  *
+ * MetaTrader shows this behind an `API|<requestId>|` prefix that MetaCopier
+ * adds itself -- `API|255|QuantumBreaker-NovaHost`. That prefix is NOT ours and
+ * cannot be removed. Their schema documents it as prepended by the
+ * open-position endpoint, and their modify endpoint accepts only volume, open
+ * price, take profit and stop loss, so it cannot be rewritten afterwards
+ * either. Everything after the second `|` is the part we control, and this
+ * function is all of it.
+ *
  * The suffix is protected and the robot name is what gets shortened -- losing
  * the tail of a long robot name is survivable, losing "-NovaHost" defeats the
  * point of having a comment at all.
  *
- * The budget is 23, not the 31 MetaTrader allows. Per MetaCopier's schema, an
- * `API|YOUR_REQUEST_ID|` prefix of 5-8 characters is prepended to the comment
- * when opening a position, and the broker's 31-character limit applies to the
- * whole string. Sizing to 31 here meant the broker did the trimming instead,
- * from the right -- which is precisely where "-NovaHost" lives.
+ * The budget is 23, not the 31 MetaTrader allows, because that prefix is 5-8
+ * characters and the broker's 31-character limit applies to the whole string.
+ * Sizing to 31 here meant the broker did the trimming instead, from the right
+ * -- which is precisely where "-NovaHost" lives.
  */
 const COMMENT_SUFFIX = '-NovaHost'
 const COMMENT_MAX = 23
+
+/**
+ * Words a robot name can lose without becoming a different robot.
+ *
+ * "Quantum Breaker EA" and "Quantum Breaker" are the same product to the person
+ * reading their trade history, so " EA" is the first thing spent when the name
+ * does not fit -- ahead of any letter of the name itself.
+ */
+const COMMENT_NOISE = /[\s_-]+(EA|BOT|ROBOT|V\d+(\.\d+)*)$/i
+
+/**
+ * Fits a robot name into [room] characters, cheapest loss first.
+ *
+ * The ladder matters more than any one rung. A mid-word cut is what the first
+ * live trades actually showed -- `Quantum Breake-NovaHost` -- and that reads as
+ * a broken string rather than a name, which is the one thing a comment exists
+ * to avoid. So words are kept whole: a noise word goes first, then the spaces
+ * between the words that remain, then whole words off the tail. Cutting into a
+ * word happens only when a single unbreakable word is still too long.
+ *
+ * Closing the spaces before dropping a word is what keeps the name intact at
+ * the sizes that actually occur. "Quantum Breaker AI" does not fit in 14 and
+ * neither does "Quantum Breaker", but "QuantumBreaker" does -- and that is
+ * still legibly the robot, where "Quantum" alone has lost half its identity.
+ */
+function fitName(name: string, room: number): string {
+  if (name.length <= room) return name
+
+  // " EA", " Bot", " v2" -- present in most robot names, meaningful in none.
+  const base = name.replace(COMMENT_NOISE, '').trim() || name
+  const words = base.split(' ').filter(Boolean)
+
+  // Longest first, so the result keeps as many whole words as will fit. Within
+  // a given number of words the spaced form is tried before the squeezed one:
+  // both are readable, but only one of them is what the mentor typed.
+  for (let n = words.length; n > 0; n--) {
+    const kept = words.slice(0, n)
+    const spaced = kept.join(' ')
+    if (spaced.length <= room) return spaced
+    const squeezed = kept.join('')
+    if (squeezed.length <= room) return squeezed
+  }
+
+  // One word, longer than the budget. Nothing left to spend but letters.
+  return (words[0] ?? base).slice(0, room)
+}
 
 function tradeComment(license: Record<string, unknown>): string {
   const ea = license.expert_advisors as { name?: string; display_name?: string } | null
   const raw = (ea?.display_name || ea?.name || 'NovaHost Bot').toString()
 
-  // Strip what MetaTrader will not carry cleanly in a comment field.
-  const cleaned = raw.replace(/[^\w \-.]/g, '').trim() || 'NovaHost Bot'
+  // Strip what MetaTrader will not carry cleanly in a comment field, and
+  // collapse runs of whitespace so a stray double space cannot spend budget
+  // that a letter of the name could have used.
+  const cleaned = raw.replace(/[^\w \-.]/g, '').replace(/\s+/g, ' ').trim() || 'NovaHost Bot'
 
-  const room = COMMENT_MAX - COMMENT_SUFFIX.length
-  return cleaned.slice(0, room).trim() + COMMENT_SUFFIX
+  return fitName(cleaned, COMMENT_MAX - COMMENT_SUFFIX.length) + COMMENT_SUFFIX
 }
 
 /**
