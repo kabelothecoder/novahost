@@ -63,12 +63,24 @@ function validatePayfastSignature(
   signatureToMatch: string,
   passphrase: string
 ): boolean {
+  // EVERY field Payfast sent is hashed, including the empty ones -- only
+  // `signature` itself is dropped.
+  //
+  // This is the opposite of the outgoing checkout signature, where we build the
+  // payload ourselves and omit blanks entirely. Here the payload is Payfast's,
+  // and its ITN carries a dozen empty fields (m_payment_id, item_description,
+  // custom_str4/5, custom_int1-5, name_first, name_last). Payfast's own PHP
+  // sample walks the whole POST body, so `item_description=` is part of the
+  // string it hashed. Skipping blanks produced a different string and therefore
+  // a different digest, and every genuine callback was rejected as forged.
+  //
+  // Verified against a real sandbox ITN (pf_payment_id 3362362): keeping the
+  // empties reproduces Payfast's 63f226684b82ff329e3df50c64d566dc exactly,
+  // dropping them yields 2f88ccc7d3ad931aaa9d00b030e4a92e.
   const parts = [];
   for (const [key, value] of pairs) {
     if (key === "signature") continue;
-    if (value !== undefined && value !== null && value !== "") {
-      parts.push(key + "=" + payfastEncode(value));
-    }
+    parts.push(key + "=" + payfastEncode(value ?? ""));
   }
 
   let pfOutput = parts.join("&");
