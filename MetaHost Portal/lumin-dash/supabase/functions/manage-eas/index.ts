@@ -1,5 +1,4 @@
-
-3import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,7 +35,7 @@ Deno.serve(async (req) => {
         detectSessionInUrl: false
       }
     });
-    
+
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       console.error('manage-eas: Missing Authorization header');
@@ -48,6 +47,12 @@ Deno.serve(async (req) => {
       console.error('manage-eas: Auth failed', { authErr, hasUser: !!userData?.user });
       return new Response(JSON.stringify({ error: 'Unauthorized', details: authErr?.message }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
+
+    // The mentor who owns everything created in this request. Writes go through
+    // the service-role client, where auth.uid() is NULL -- so the column default
+    // cannot fill this in and it MUST be set explicitly. Omitting it produced
+    // ownerless robots that the portal (which filters on user_id) could not see.
+    const ownerId = userData.user.id;
 
     const { action, name } = await req.json().catch(() => ({}));
 
@@ -61,18 +66,21 @@ Deno.serve(async (req) => {
 
     const code = toCode(name);
 
-    // Upsert product by code
+    // Look up an existing robot BELONGING TO THIS MENTOR. Matching on code alone
+    // is cross-tenant: two mentors naming a robot the same thing would silently
+    // share one record, and the second would inherit the first's licences.
     const existing = await admin
       .from('expert_advisors')
       .select('id, code, name')
       .eq('code', code)
+      .eq('user_id', ownerId)
       .maybeSingle();
 
     let product = existing.data;
     if (!product) {
       const { data: created, error: createErr } = await admin
         .from('expert_advisors')
-        .insert({ code, name, user_id: userData.user.id })
+        .insert({ code, name, display_name: name.trim(), user_id: ownerId })
         .select('id, code, name')
         .maybeSingle();
 

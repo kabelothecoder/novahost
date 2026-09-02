@@ -2452,24 +2452,103 @@ private fun ExecuteReviewSheet(
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Reads the picked screenshot into the data URL the edge function expects.
+ * Reads the picked screenshot, shrinks it, and returns the data URL the edge
+ * function expects.
  *
- * Capped rather than unbounded: a modern phone screenshot is a couple of
- * megabytes, base64 inflates it by a third, and an OOM on a 108MP camera roll
- * pick would take the whole app down on the one screen users pay for.
+ * The previous version base64'd the file's raw bytes. A phone screenshot is
+ * commonly 2-8 MB, base64 inflates it by a third, so the request body reached
+ * ~10 MB and was uploaded over whatever mobile connection the user happened to
+ * have. On a typical link that upload takes well over a minute, the socket
+ * stalls, and Ktor surfaces it as `Connect timeout has expired` against
+ * analyze-chart -- which reads as "the server is down" when it is really "we
+ * asked the phone to upload ten megabytes".
+ *
+ * Downscaling is free accuracy-wise: the vision model resizes anything larger
+ * than [MAX_EDGE] on its long edge before reading it, so pixels above that are
+ * paid for in upload time and discarded on arrival. 1568px keeps every candle
+ * and price label legible while turning a 10 MB body into a few hundred KB.
+ *
+ * Decoding is two-pass -- bounds first, then a subsampled decode -- so the full
+ * bitmap is never held in memory. That is what makes a 108MP camera-roll pick
+ * safe rather than an OOM on the one screen users pay for.
+ *
+ * It also makes the MIME type honest. The data URL has always claimed
+ * `image/jpeg`; screenshots are PNG, so the label was a lie the vision endpoint
+ * had to tolerate. Re-encoding to JPEG here means the declared type is now what
+ * is actually sent.
  */
 private suspend fun encodeChart(context: android.content.Context, uri: Uri): String? =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val bytes = stream.readBytes()
-                if (bytes.size > MAX_CHART_BYTES) return@withContext null
-                "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+            // Pass 1: dimensions only, no pixels allocated.
+            val bounds = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                android.util.Log.e("NovaHost", "[Scanner] not a decodable image")
+                return@withContext null
+            }
+
+            // Pass 2: decode subsampled. inSampleSize only honours powers of two,
+            // so aim within 2x of the target and let the exact scale below
+            // finish the job.
+            var sample = 1
+            while (bounds.outWidth / sample > MAX_EDGE * 2 ||
+                   bounds.outHeight / sample > MAX_EDGE * 2) {
+                sample *= 2
+            }
+
+            val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(
+                    stream,
+                    null,
+                    android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                )
+            } ?: return@withContext null
+
+            val longEdge = maxOf(decoded.width, decoded.height)
+            val scaled = if (longEdge > MAX_EDGE) {
+                val ratio = MAX_EDGE.toFloat() / longEdge
+                android.graphics.Bitmap.createScaledBitmap(
+                    decoded,
+                    (decoded.width * ratio).toInt().coerceAtLeast(1),
+                    (decoded.height * ratio).toInt().coerceAtLeast(1),
+                    true
+                ).also { if (it !== decoded) decoded.recycle() }
+            } else {
+                decoded
+            }
+
+            val out = java.io.ByteArrayOutputStream()
+            scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+            scaled.recycle()
+
+            val bytes = out.toByteArray()
+            android.util.Log.i(
+                "NovaHost",
+                "[Scanner] chart ${bounds.outWidth}x${bounds.outHeight} -> " +
+                    "${bytes.size / 1024}KB JPEG (sample=$sample)"
+            )
+            "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        } catch (e: OutOfMemoryError) {
+            // Subsampling makes this unlikely, but a pathological image should
+            // fail as a refused scan, not as a dead app.
+            android.util.Log.e("NovaHost", "[Scanner] out of memory decoding chart", e)
+            null
         } catch (e: Exception) {
             android.util.Log.e("NovaHost", "[Scanner] could not read chart", e)
             null
         }
     }
 
-private const val MAX_CHART_BYTES = 8 * 1024 * 1024
+/**
+ * Long-edge cap, in pixels. Matches the size the vision model downsamples to
+ * internally, so anything larger costs upload time and buys no detail.
+ */
+private const val MAX_EDGE = 1568
+
+/** High enough that thin candle wicks and axis labels survive re-encoding. */
+private const val JPEG_QUALITY = 85
