@@ -20,12 +20,16 @@ import {
 /**
  * Where the Android APK is served from.
  *
- * Set VITE_APK_URL in the Vercel project (and .env.local for local dev). Until
- * it is set the download control renders disabled, not as a link to "#".
- * This is the primary conversion control on the site: a button that looks live
- * and silently does nothing is worse than one that admits it is not ready.
+ * Defaults to the signed release build in the `downloads` bucket on the
+ * NovaHost Supabase project. `VITE_APK_URL` overrides it (set in the Vercel
+ * project) so the file can be moved without a code change. If both are somehow
+ * empty the download control renders disabled rather than linking to "#" --
+ * a button that looks live and silently does nothing is worse than one that
+ * admits it is not ready.
  */
-const APK_URL: string = import.meta.env.VITE_APK_URL ?? "";
+const APK_URL: string =
+  import.meta.env.VITE_APK_URL ??
+  "https://epulmnfbxjmaimefhofp.supabase.co/storage/v1/object/public/downloads/novahost.apk";
 
 /**
  * The art direction, in one line: the product's own robot mark has a
