@@ -394,18 +394,27 @@ object SignalListener {
                 val code = rejection?.code
                 val reason = TradeFeed.describe(code, rejection?.message ?: err.message)
 
+                // A signal that arrived while the broker was still finishing its
+                // connection is not a failure the user needs woken for -- the
+                // feed line is enough, and the next signal places normally. It
+                // reads as SKIPPED ("never sent"), not REJECTED ("broker said
+                // no"). Every other rejection still raises a notification.
+                val stillConnecting = code == "ACCOUNT_CONNECTING"
+
                 TradeFeed.settle {
                     it.copy(
-                        phase = TradeFeed.Phase.REJECTED,
+                        phase = if (stillConnecting) TradeFeed.Phase.SKIPPED else TradeFeed.Phase.REJECTED,
                         code = code,
                         message = reason
                     )
                 }
-                NotificationHelper.showTradeFailedNotification(
-                    context = context,
-                    pair = signal.pair,
-                    reason = reason
-                )
+                if (!stillConnecting) {
+                    NotificationHelper.showTradeFailedNotification(
+                        context = context,
+                        pair = signal.pair,
+                        reason = reason
+                    )
+                }
             }
 
         // Long enough for the bubble to finish its animation, short enough that a

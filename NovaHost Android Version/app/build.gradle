@@ -77,7 +77,13 @@ android {
                 signingConfig = signingConfigs.release
             }
 
-            minifyEnabled true
+            // R8 is OFF for the direct-download release. The keep rules in
+            // proguard-rules.pro cover MetaAPI and com.novahost.** but NOT
+            // kotlinx.serialization, ktor or supabase-kt -- and this build ships
+            // straight to users with no QA pass, where a stripped @Serializable
+            // serializer surfaces as "the app can't reach the server". Turn this
+            // back on once the keep rules are complete and there is a test cycle.
+            minifyEnabled false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

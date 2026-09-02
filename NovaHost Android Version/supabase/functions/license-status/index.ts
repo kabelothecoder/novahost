@@ -93,6 +93,12 @@ Deno.serve(async (req: Request) => {
     const accountId = metadata.metacopier_account_id
     const linked = typeof accountId === 'string' && accountId.trim().length > 0
 
+    // What metacopier-connect's verify step last saw: 'connected' once the
+    // broker session is up, 'connecting' while it is still coming up. Absent on
+    // licences linked before this was recorded -- the app treats absent as
+    // "assume connected", the pre-existing behaviour.
+    const metacopierStatus = (metadata.metacopier_status as string) ?? null
+
     return json({
       success: true,
       active: true,
@@ -103,6 +109,7 @@ Deno.serve(async (req: Request) => {
       broker_server: (metadata.broker_server as string) ?? null,
       platform: (metadata.platform as string) ?? null,
       connected_at: (metadata.connected_at as string) ?? null,
+      metacopier_status: metacopierStatus,
       reason: linked ? 'ready' : 'no_account',
       message: linked
         ? 'Trading account linked.'

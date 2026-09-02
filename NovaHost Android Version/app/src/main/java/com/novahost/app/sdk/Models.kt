@@ -295,6 +295,13 @@ data class LicenseStatusResponse(
     val broker_server: String? = null,
     val platform: String? = null,
     val connected_at: String? = null,
+    /**
+     * What `metacopier-connect`'s verify step last recorded: `"connected"` once
+     * the broker session is live, `"connecting"` while it is still coming up,
+     * null on links made before this was tracked. Null is treated as
+     * "assume connected" -- the behaviour that predates it.
+     */
+    val metacopier_status: String? = null,
     val reason: String? = null,
     val message: String? = null,
     val error: String? = null

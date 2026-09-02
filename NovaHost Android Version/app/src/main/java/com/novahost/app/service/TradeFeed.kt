@@ -141,6 +141,18 @@ object TradeFeed {
                 fromServer ?: "Your robot is not permitted to trade this symbol."
             "SYMBOL_DISABLED" ->
                 fromServer ?: "Your broker has this symbol closed for trading right now."
+            "ACCOUNT_CONNECTING" ->
+                fromServer ?: "Your broker was still connecting when this signal arrived. Newer signals will go through once it is up."
+            "ACCOUNT_DISCONNECTED", "ACCOUNT_IS_NOT_CONNTECTED", "ACCOUNT_NOT_CONNECTED" ->
+                fromServer ?: "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
+            "ACCOUNT_WRONG_CREDENTIALS" ->
+                fromServer ?: "Your broker rejected the saved login. Reconnect with your trading (master) password."
+            "ACCOUNT_READONLY" ->
+                fromServer ?: "This account can't place orders -- it's linked with an investor (read-only) password, or the broker disabled trading on it."
+            "MARKET_CLOSED" ->
+                fromServer ?: "The market for this symbol is closed right now."
+            "BROKER_REJECTION", "BROKER_REJECTED" ->
+                fromServer ?: "Your broker refused the order without giving a reason. Check the symbol's trading hours and your free margin."
             "BAD_VOLUME" ->
                 fromServer ?: "The lot size falls outside what your broker accepts for this symbol."
             "INVALID_STOPS" ->

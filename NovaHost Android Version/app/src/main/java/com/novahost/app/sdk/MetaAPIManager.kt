@@ -186,6 +186,13 @@ object MetaAPIManager {
                     _isSynchronized.value = true
                     _isConnected.value = true
                     addLog(">> Trading account linked (${status.broker_server ?: "broker"})")
+                    // The broker session can still be coming up for a minute
+                    // after a reconnect. START is allowed -- the executor holds
+                    // any signal that lands before the session is live rather
+                    // than failing it -- but the terminal says so plainly.
+                    if (status.metacopier_status == "connecting") {
+                        addLog(">> Broker still connecting -- the first signal or two may be held until it's up")
+                    }
                     addLog(">> Trade engine activated")
                     true
                 }
@@ -405,10 +412,22 @@ object MetaAPIManager {
             // substring check for "error" on the raw body, which misfired on any
             // payload that merely contained that word.
             if (httpResponse.status.value in 200..299 && parsed.success && parsed.account_id != null) {
-                _isConnected.value = true
-                _isSynchronized.value = true
-                addLog(">> Trading account linked ($cleanServer)")
-                android.util.Log.i("NovaHost", "[BrokerConn] Connected via MetaCopier (${parsed.platform ?: platform})")
+                if (parsed.code == "CONNECTING") {
+                    // The account is registered and bound to the licence, but the
+                    // broker session is still coming up. Report it as linked so
+                    // the flow can advance -- but do NOT claim isConnected: that
+                    // green light is probeLinkStatus's to give once the session
+                    // is actually up, and a signal sent before then is held by
+                    // metacopier-execute, not placed.
+                    _isSynchronized.value = true
+                    addLog(">> Account linked ($cleanServer) -- broker still connecting, give it a minute")
+                    android.util.Log.i("NovaHost", "[BrokerConn] Linked, broker connecting (${parsed.platform ?: platform})")
+                } else {
+                    _isConnected.value = true
+                    _isSynchronized.value = true
+                    addLog(">> Trading account linked ($cleanServer)")
+                    android.util.Log.i("NovaHost", "[BrokerConn] Connected via MetaCopier (${parsed.platform ?: platform})")
+                }
                 Result.success(parsed.account_id)
             } else {
                 // Deliberately does NOT clear isConnected. A rejected *new*

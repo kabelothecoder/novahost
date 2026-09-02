@@ -523,6 +523,126 @@ async function countOpenPositions(
   }
 }
 
+/**
+ * An account's live broker link and margin state, from `/information`.
+ *
+ * Used for two things the executor could not previously tell apart: whether the
+ * broker session is actually up *before* an order is spent finding out, and --
+ * on a bare `[BROKER_REJECTION]` -- which of a read-only login, no margin or a
+ * closed symbol was the real cause.
+ *
+ * Every field degrades to "don't know" rather than throwing. A null `connected`
+ * means the question could not be answered, and callers treat that as "proceed",
+ * never as "disconnected" -- a flaky probe must not block a trade.
+ */
+interface AccountState {
+  connected: boolean | null
+  wrongCredentials: boolean
+  investorPassword: boolean
+  tradingDisabled: boolean
+  freeMargin: number | null
+}
+
+async function readAccountState(accountId: string, apiKey: string): Promise<AccountState> {
+  const unknown: AccountState = {
+    connected: null, wrongCredentials: false, investorPassword: false,
+    tradingDisabled: false, freeMargin: null,
+  }
+  try {
+    const res = await fetch(
+      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/information`,
+      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' }, signal: AbortSignal.timeout(6000) }
+    )
+    if (!res.ok) {
+      console.warn(`[metacopier-execute] account information unavailable ${res.status}`)
+      return unknown
+    }
+    const info = await res.json() as Record<string, unknown>
+    const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
+    return {
+      connected: typeof info.connected === 'boolean' ? info.connected : null,
+      wrongCredentials: info.wrongCredentials === true,
+      investorPassword: info.isInvestorPassword === true,
+      tradingDisabled: info.tradingDisabled === true || info.tradeDisabled === true,
+      freeMargin: num(info.freeMargin),
+    }
+  } catch (e) {
+    console.warn(`[metacopier-execute] account information threw: ${(e as Error).message}`)
+    return unknown
+  }
+}
+
+/**
+ * Turns a bare `[BROKER_REJECTION]` into the specific thing that was wrong.
+ *
+ * MetaCopier collapses a whole class of broker refusals -- no margin, a
+ * read-only login, a symbol the broker has closed, a size outside the book's
+ * limits -- into one token with no reason attached. The reason is on
+ * `/information` and `/symbols/{symbol}`, which the hot path has no cause to
+ * read until an order has already been refused. Best-effort: any failure here
+ * just leaves the generic message in place.
+ */
+async function explainRejection(
+  accountId: string,
+  brokerSymbol: string,
+  lots: number,
+  apiKey: string,
+): Promise<{ code: string; message: string } | null> {
+  const state = await readAccountState(accountId, apiKey)
+
+  if (state.connected === false) {
+    return {
+      code: 'ACCOUNT_DISCONNECTED',
+      message: 'Your trading account is not connected to the broker right now. Reconnect it in Broker Setup and try again.',
+    }
+  }
+  if (state.wrongCredentials) {
+    return {
+      code: 'ACCOUNT_WRONG_CREDENTIALS',
+      message: 'Your broker rejected the saved login. Reconnect the account with the trading (master) password.',
+    }
+  }
+  if (state.investorPassword || state.tradingDisabled) {
+    return {
+      code: 'ACCOUNT_READONLY',
+      message: 'This account cannot place orders -- it is linked with an investor (read-only) password, or the broker has trading disabled on it.',
+    }
+  }
+
+  try {
+    const res = await fetch(
+      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/symbols/${encodeURIComponent(brokerSymbol)}`,
+      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' }, signal: AbortSignal.timeout(6000) },
+    )
+    if (res.ok) {
+      const spec = await res.json() as Record<string, unknown>
+      const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
+      const min = n(spec.minimalVolume)
+      const max = n(spec.maximalVolume)
+      if (spec.disabled === true) {
+        return { code: 'MARKET_CLOSED', message: `Your broker has ${brokerSymbol} closed for trading right now.` }
+      }
+      if (min !== null && lots < min) {
+        return { code: 'INVALID_VOLUME', message: `${lots} lots is below your broker's minimum of ${min} for ${brokerSymbol}.` }
+      }
+      if (max !== null && lots > max) {
+        return { code: 'INVALID_VOLUME', message: `${lots} lots is above your broker's maximum of ${max} for ${brokerSymbol}.` }
+      }
+    }
+  } catch (e) {
+    console.warn(`[metacopier-execute] symbol spec threw: ${(e as Error).message}`)
+  }
+
+  if (state.freeMargin !== null && state.freeMargin <= 0) {
+    return {
+      code: 'INSUFFICIENT_MARGIN',
+      message: 'Your account has no free margin. Close an open position or add funds, then try again.',
+    }
+  }
+
+  return null
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS })
@@ -908,6 +1028,47 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // ---- Pre-flight: is the broker session actually up? --------------------
+    //
+    // MetaCopier accepts an order the instant an account is *registered*, well
+    // before the MT4/MT5 session behind it has connected -- and a signal that
+    // lands in that window is refused with `[ACCOUNT_IS_NOT_CONNTECTED]`, which
+    // reads to the subscriber as "the broker refused the trade". One
+    // `/information` read here turns that first minute after a reconnect from a
+    // failed trade into a clearly-labelled skipped one.
+    //
+    // Only a definite `connected: false` short-circuits. A read that fails or is
+    // ambiguous falls straight through to the order attempt, which surfaces the
+    // real error rather than blocking a trade on a flaky probe.
+    const link = await readAccountState(account_id, METACOPIER_API_KEY)
+    if (link.connected === false) {
+      if (link.wrongCredentials) {
+        return await finish('failed', 409, {
+          success: false,
+          code: 'ACCOUNT_WRONG_CREDENTIALS',
+          error: 'Your broker rejected the saved login. Reconnect the account with the trading (master) password.',
+        }, { account_id, connected: false, wrong_credentials: true })
+      }
+
+      // "Still coming up" and "been down for an hour" call for different words.
+      // A link made in the last few minutes, or one metacopier-connect last saw
+      // as `connecting`, is the reconnect window -- hold the signal quietly. Any
+      // older disconnection is a real fault the user needs to act on.
+      const linkedAt = Date.parse(String(metadata?.connected_at ?? '')) || 0
+      const stillConnecting =
+        metadata?.metacopier_status === 'connecting' ||
+        (linkedAt > 0 && Date.now() - linkedAt < 5 * 60 * 1000)
+
+      return await finish(stillConnecting ? 'skipped' : 'failed', 409, {
+        success: false,
+        code: stillConnecting ? 'ACCOUNT_CONNECTING' : 'ACCOUNT_DISCONNECTED',
+        error: stillConnecting
+          ? 'Your broker was still connecting when this signal arrived, so it was not placed. ' +
+            'Newer signals will go through once the connection is up.'
+          : "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again.",
+      }, { account_id, connected: false, metacopier_status: metadata?.metacopier_status ?? null })
+    }
+
     let placed: string | null = null
     const attempted: string[] = []
     let lastDetail = ''
@@ -1000,7 +1161,15 @@ Deno.serve(async (req: Request) => {
       let code = codes[0] ?? 'BROKER_REJECTED'
       let message = 'Trade could not be placed with the broker.'
 
-      if (hit('SYMBOL')) {
+      // Connection state first -- it is the most common cause and the most
+      // actionable, and MetaCopier spells its token `[ACCOUNT_IS_NOT_CONNTECTED]`
+      // (their typo, "CONNTECTED"). The previous check looked for `NOT_CONNECTED`
+      // and missed it on every live account, so every reconnect-window failure
+      // fell through to the catch-all "Trade could not be placed with the broker".
+      if (hit('CONNTECT') || hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
+        code = 'ACCOUNT_DISCONNECTED'
+        message = "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
+      } else if (hit('SYMBOL')) {
         code = 'UNKNOWN_SYMBOL'
         // By this point the account's own symbol list has been read and searched,
         // so this is no longer "we ran out of guesses" -- it is "your broker does
@@ -1039,9 +1208,21 @@ Deno.serve(async (req: Request) => {
       } else if (hit('DISABLED') || hit('PROHIBIT') || hit('CLOSED') || hit('MARKET')) {
         code = 'TRADING_PROHIBITED'
         message = `Trading ${symbolTried} is not permitted on this account right now -- the market may be closed, or the account may be read-only.`
-      } else if (hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
-        code = 'ACCOUNT_DISCONNECTED'
-        message = 'Your trading account is not connected to the broker. Reconnect it and try again.'
+      } else if (hit('BROKER_REJECT') || code === 'BROKER_REJECTED') {
+        // MetaCopier's catch-all for a broker refusal with no reason attached.
+        // Ask `/information` and `/symbols` what it actually was -- read-only
+        // login, no margin, a closed market, a size outside the book's limits --
+        // rather than handing the subscriber a token they cannot act on.
+        const explained = await explainRejection(account_id, symbolTried, effectiveLots, METACOPIER_API_KEY)
+        if (explained) {
+          code = explained.code
+          message = explained.message
+        } else {
+          code = 'BROKER_REJECTED'
+          message =
+            `Your broker refused the order on ${symbolTried} without giving a reason. ` +
+            `Check the symbol's trading hours and your free margin.`
+        }
       }
 
       return await finish('failed', 502, {
