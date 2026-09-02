@@ -91,9 +91,9 @@ fun EA_InventoryList(
     val borderBrush = if(themeState.isGlossTheme) Brush.linearGradient(listOf(primaryColor, secondaryColor)) else Brush.linearGradient(listOf(primaryColor, primaryColor))
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("CONNECTED ROBOTS:", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        
-        Spacer(Modifier.height(16.dp))
+        // No heading here. The only caller is the Asset Hub sheet, which already
+        // prints "CONNECTED ROBOTS" in the accent as its own title -- the two
+        // stacked twelve dp apart and read as a rendering fault.
 
         // Three different empty screens, because they need three different
         // sentences. The old code had one -- "no active licenses found" -- and

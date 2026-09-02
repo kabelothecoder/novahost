@@ -1,4 +1,4 @@
-﻿import { useRef } from "react";
+import { useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import {
@@ -11,6 +11,16 @@ import {
   Download,
   Activity,
 } from "lucide-react";
+
+/**
+ * Where the Android APK is served from.
+ *
+ * Set VITE_APK_URL in the Vercel project (and .env.local for local dev). Until
+ * it is set the download controls render as disabled, not as links to "#".
+ * This is the primary conversion control on the site: a button that looks live
+ * and silently does nothing is worse than one that admits it is not ready.
+ */
+const APK_URL: string = import.meta.env.VITE_APK_URL ?? "";
 
 // ─── Animation Variants ──────────────────────────────────────────────────────
 
@@ -589,20 +599,28 @@ export default function Landing() {
             custom={0.2}
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
-            <a
-              href="#"
-              className="inline-flex items-center gap-3 px-8 py-4 rounded-full bg-gray-950 text-white font-semibold text-sm hover:bg-gray-800 transition-all duration-200 shadow-xl shadow-gray-900/20 group"
-            >
-              <Download size={18} className="group-hover:-translate-y-0.5 transition-transform duration-200" />
-              Download for Android (.apk)
-            </a>
-            <a
-              href="#"
-              className="inline-flex items-center gap-3 px-8 py-4 rounded-full border-2 border-gray-900 text-gray-900 font-semibold text-sm hover:bg-gray-950 hover:text-white transition-all duration-200"
-            >
-              <Smartphone size={18} />
-              Download for iOS
-            </a>
+            {/*
+              The iOS button that used to sit beside this one has been removed.
+              iOS is not in scope, and advertising a download for a platform we
+              do not ship produces refund requests, not signups.
+            */}
+            {APK_URL ? (
+              <a
+                href={APK_URL}
+                className="inline-flex items-center gap-3 px-8 py-4 rounded-full bg-gray-950 text-white font-semibold text-sm hover:bg-gray-800 transition-all duration-200 shadow-xl shadow-gray-900/20 group"
+              >
+                <Download size={18} className="group-hover:-translate-y-0.5 transition-transform duration-200" />
+                Download for Android (.apk)
+              </a>
+            ) : (
+              <span
+                aria-disabled="true"
+                className="inline-flex items-center gap-3 px-8 py-4 rounded-full bg-gray-200 text-gray-500 font-semibold text-sm cursor-not-allowed select-none"
+              >
+                <Download size={18} />
+                Android download coming shortly
+              </span>
+            )}
           </motion.div>
         </div>
 
@@ -648,7 +666,7 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-950 text-white text-[10px] font-black">
-              MH
+              NH
             </span>
             <span className="text-sm font-bold text-gray-900">NovaHost</span>
           </div>

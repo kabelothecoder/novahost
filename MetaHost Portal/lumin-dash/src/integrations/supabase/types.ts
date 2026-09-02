@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      broker_accounts: {
+        Row: {
+          account_id: string
+          balance: number | null
+          equity: number | null
+          id: string
+          platform: string | null
+          server: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          balance?: number | null
+          equity?: number | null
+          id?: string
+          platform?: string | null
+          server?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          balance?: number | null
+          equity?: number | null
+          id?: string
+          platform?: string | null
+          server?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       device_activations: {
         Row: {
           activated_at: string
@@ -49,62 +85,185 @@ export type Database = {
           },
         ]
       }
+      expert_advisors: {
+        Row: {
+          accent_color: string | null
+          avatar_url: string | null
+          background_video_url: string | null
+          code: string
+          created_at: string
+          description: string | null
+          display_name: string | null
+          id: string
+          name: string
+          symbols: Json | null
+          tts_script: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          accent_color?: string | null
+          avatar_url?: string | null
+          background_video_url?: string | null
+          code: string
+          created_at?: string
+          description?: string | null
+          display_name?: string | null
+          id?: string
+          name: string
+          symbols?: Json | null
+          tts_script?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          accent_color?: string | null
+          avatar_url?: string | null
+          background_video_url?: string | null
+          code?: string
+          created_at?: string
+          description?: string | null
+          display_name?: string | null
+          id?: string
+          name?: string
+          symbols?: Json | null
+          tts_script?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      itn_logs: {
+        Row: {
+          created_at: string | null
+          id: string
+          payload: Json
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          payload: Json
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          payload?: Json
+        }
+        Relationships: []
+      }
+      license_symbol_config: {
+        Row: {
+          broker_symbol: string | null
+          created_at: string
+          enabled: boolean
+          id: string
+          license_id: string
+          lot: number
+          max_trades: number
+          smart_lot: boolean
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          broker_symbol?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          license_id: string
+          lot?: number
+          max_trades?: number
+          smart_lot?: boolean
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          broker_symbol?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          license_id?: string
+          lot?: number
+          max_trades?: number
+          smart_lot?: boolean
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "license_symbol_config_license_id_fkey"
+            columns: ["license_id"]
+            isOneToOne: false
+            referencedRelation: "licenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       licenses: {
         Row: {
+          allowed_symbols: Json | null
           created_at: string
+          ea_id: string
           expires_at: string | null
           id: string
+          is_master: boolean | null
           issued_at: string
           license_key: string
           max_devices: number
           metadata: Json | null
+          owner_email: string | null
           owner_id: string
           plan_id: string
           product_id: string
-          ea_id: string | null
-          allowed_symbols: Json | null
-          owner_email: string | null
           status: string
           updated_at: string
           user_id: string | null
         }
         Insert: {
+          allowed_symbols?: Json | null
           created_at?: string
+          ea_id: string
           expires_at?: string | null
           id?: string
+          is_master?: boolean | null
           issued_at?: string
           license_key: string
           max_devices?: number
           metadata?: Json | null
+          owner_email?: string | null
           owner_id: string
           plan_id: string
           product_id: string
-          ea_id?: string | null
-          allowed_symbols?: Json | null
-          owner_email?: string | null
           status?: string
           updated_at?: string
           user_id?: string | null
         }
         Update: {
+          allowed_symbols?: Json | null
           created_at?: string
+          ea_id?: string
           expires_at?: string | null
           id?: string
+          is_master?: boolean | null
           issued_at?: string
           license_key?: string
           max_devices?: number
           metadata?: Json | null
+          owner_email?: string | null
           owner_id?: string
           plan_id?: string
           product_id?: string
-          ea_id?: string | null
-          allowed_symbols?: Json | null
-          owner_email?: string | null
           status?: string
           updated_at?: string
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "licenses_ea_id_fkey"
+            columns: ["ea_id"]
+            isOneToOne: false
+            referencedRelation: "expert_advisors"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "licenses_plan_id_fkey"
             columns: ["plan_id"]
@@ -115,13 +274,6 @@ export type Database = {
           {
             foreignKeyName: "licenses_product_id_fkey"
             columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "expert_advisors"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "licenses_ea_id_fkey"
-            columns: ["ea_id"]
             isOneToOne: false
             referencedRelation: "expert_advisors"
             referencedColumns: ["id"]
@@ -169,54 +321,6 @@ export type Database = {
           },
         ]
       }
-      expert_advisors: {
-        Row: {
-          code: string
-          created_at: string
-          description: string | null
-          id: string
-          name: string
-          display_name: string | null
-          avatar_url: string | null
-          symbols: Json | null
-          tts_script: string | null
-          accent_color: string | null
-          background_video_url: string | null
-          updated_at: string
-          user_id: string | null
-        }
-        Insert: {
-          code: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          name: string
-          display_name?: string | null
-          avatar_url?: string | null
-          symbols?: Json | null
-          tts_script?: string | null
-          accent_color?: string | null
-          background_video_url?: string | null
-          updated_at?: string
-          user_id?: string | null
-        }
-        Update: {
-          code?: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          name?: string
-          display_name?: string | null
-          avatar_url?: string | null
-          symbols?: Json | null
-          tts_script?: string | null
-          accent_color?: string | null
-          background_video_url?: string | null
-          updated_at?: string
-          user_id?: string | null
-        }
-        Relationships: []
-      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -224,6 +328,7 @@ export type Database = {
           display_name: string | null
           full_name: string | null
           id: string
+          license_credits: number | null
           phone: string | null
           updated_at: string
         }
@@ -233,6 +338,7 @@ export type Database = {
           display_name?: string | null
           full_name?: string | null
           id: string
+          license_credits?: number | null
           phone?: string | null
           updated_at?: string
         }
@@ -242,8 +348,197 @@ export type Database = {
           display_name?: string | null
           full_name?: string | null
           id?: string
+          license_credits?: number | null
           phone?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      signal_deliveries: {
+        Row: {
+          claimed_at: string
+          device_id: string | null
+          id: string
+          license_id: string
+          signal_id: string
+        }
+        Insert: {
+          claimed_at?: string
+          device_id?: string | null
+          id?: string
+          license_id: string
+          signal_id: string
+        }
+        Update: {
+          claimed_at?: string
+          device_id?: string | null
+          id?: string
+          license_id?: string
+          signal_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_deliveries_license_id_fkey"
+            columns: ["license_id"]
+            isOneToOne: false
+            referencedRelation: "licenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_deliveries_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "signals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signal_logs: {
+        Row: {
+          created_at: string | null
+          ea_id: string | null
+          id: string
+          license_id: string | null
+          license_key: string | null
+          raw_data: Json | null
+          status: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          ea_id?: string | null
+          id?: string
+          license_id?: string | null
+          license_key?: string | null
+          raw_data?: Json | null
+          status?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          ea_id?: string | null
+          id?: string
+          license_id?: string | null
+          license_key?: string | null
+          raw_data?: Json | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_logs_license_id_fkey"
+            columns: ["license_id"]
+            isOneToOne: false
+            referencedRelation: "licenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signals: {
+        Row: {
+          created_at: string | null
+          ea_id: string | null
+          id: string
+          lot: number | null
+          pair: string | null
+          price: number | null
+          side: string | null
+          signal_id: string | null
+          sl: number | null
+          status: string | null
+          tp: number | null
+          type: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          ea_id?: string | null
+          id?: string
+          lot?: number | null
+          pair?: string | null
+          price?: number | null
+          side?: string | null
+          signal_id?: string | null
+          sl?: number | null
+          status?: string | null
+          tp?: number | null
+          type?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          ea_id?: string | null
+          id?: string
+          lot?: number | null
+          pair?: string | null
+          price?: number | null
+          side?: string | null
+          signal_id?: string | null
+          sl?: number | null
+          status?: string | null
+          tp?: number | null
+          type?: string | null
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          created_at: string | null
+          device_bound_at: string | null
+          device_id: string | null
+          email: string
+          has_scanner: boolean
+          id: string
+          is_lifetime: boolean
+          is_premium: boolean | null
+          subscription_expiry: string | null
+          token: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          device_bound_at?: string | null
+          device_id?: string | null
+          email: string
+          has_scanner?: boolean
+          id?: string
+          is_lifetime?: boolean
+          is_premium?: boolean | null
+          subscription_expiry?: string | null
+          token?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          device_bound_at?: string | null
+          device_id?: string | null
+          email?: string
+          has_scanner?: boolean
+          id?: string
+          is_lifetime?: boolean
+          is_premium?: boolean | null
+          subscription_expiry?: string | null
+          token?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      symbol_mappings: {
+        Row: {
+          created_at: string | null
+          id: string
+          normalized_symbol: string
+          raw_symbol: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          normalized_symbol: string
+          raw_symbol: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          normalized_symbol?: string
+          raw_symbol?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -274,12 +569,55 @@ export type Database = {
         }
         Relationships: []
       }
+      user_credits: {
+        Row: {
+          credits: number
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          credits?: number
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          credits?: number
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      deduct_credits_and_generate_license: {
+        Args: {
+          p_allowed_symbols: Json
+          p_is_master?: boolean
+          p_license_key: string
+          p_max_devices: number
+          p_metadata: Json
+          p_plan_id: string
+          p_product_id: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      generate_license_secure: {
+        Args: {
+          p_email: string
+          p_max_devices?: number
+          p_mentor_id: string
+          p_robot_id: string
+        }
+        Returns: Json
+      }
+      get_dashboard_stats: { Args: never; Returns: Json }
     }
     Enums: {
       [_ in never]: never

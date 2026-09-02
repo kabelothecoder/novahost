@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Key, Download, Copy, Eye, Bot, Zap, Coins, Plus, Loader2, Mail } from "lucide-react";
+import { Key, Download, Copy, Eye, Bot, Coins, Plus, Loader2, Mail } from "lucide-react";
+import { LicenseKeyCard } from "@/components/LicenseKeyCard";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -20,6 +21,9 @@ interface Product {
   id: string;
   code: string;
   name: string;
+  description: string | null;
+  avatar_url: string | null;
+  accent_color: string | null;
 }
 
 interface GeneratedKey {
@@ -31,8 +35,9 @@ interface GeneratedKey {
   licenseKey: string;
   createdAt: string;
   status: "active" | "pending" | "expired";
-  robotType: string;
-  primaryColor: string;
+  accentColor: string | null;
+  artUrl: string | null;
+  description: string | null;
 }
 
 const AVAILABLE_SYMBOLS = [
@@ -40,186 +45,6 @@ const AVAILABLE_SYMBOLS = [
   "NAS100", "US30", "SPX500", "BTCUSD", "ETHUSD", "VIX"
 ];
 
-// ─── Robot type / color derivation helpers ────────────────────────────────────
-
-const ROBOT_TYPES = ["SMC", "Trend", "Grid", "Scalper", "Hedger", "Arbitrage"];
-const ROBOT_COLORS = [
-  "#ef4444", // red
-  "#3b82f6", // blue
-  "#8b5cf6", // violet
-  "#10b981", // emerald
-  "#f59e0b", // amber
-  "#ec4899", // pink
-];
-
-function deriveRobotMeta(name: string): { robotType: string; primaryColor: string } {
-  const idx = Math.abs(name.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % ROBOT_TYPES.length;
-  return { robotType: ROBOT_TYPES[idx], primaryColor: ROBOT_COLORS[idx] };
-}
-
-// ─── Matrix Rain Canvas ───────────────────────────────────────────────────────
-
-function MatrixRain({ color = "#ef4444" }: { color?: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const W = canvas.width = canvas.offsetWidth;
-    const H = canvas.height = canvas.offsetHeight;
-    const cols = Math.floor(W / 14);
-    const drops: number[] = Array(cols).fill(1);
-    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノABCDEF";
-
-    let raf: number;
-    const draw = () => {
-      ctx.fillStyle = "rgba(0,0,0,0.15)";
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = color;
-      ctx.font = "12px 'Courier New', monospace";
-
-      for (let i = 0; i < drops.length; i++) {
-        const ch = chars[Math.floor(Math.random() * chars.length)];
-        ctx.fillStyle = color;
-        ctx.globalAlpha = Math.random() * 0.7 + 0.3;
-        ctx.fillText(ch, i * 14, drops[i] * 14);
-        ctx.globalAlpha = 1;
-        if (drops[i] * 14 > H && Math.random() > 0.975) drops[i] = 0;
-        drops[i]++;
-      }
-      raf = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(raf);
-  }, [color]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 w-full h-full rounded-2xl opacity-40 pointer-events-none"
-      style={{ display: "block" }}
-    />
-  );
-}
-
-// ─── Robot Preview Card ───────────────────────────────────────────────────────
-
-interface RobotPreviewProps {
-  eaName: string;
-  licenseKey: string;
-  robotType: string;
-  primaryColor: string;
-  onCopy: () => void;
-  onSendEmail: () => void;
-}
-
-function RobotPreviewCard({ eaName, licenseKey, robotType, primaryColor, onCopy, onSendEmail }: RobotPreviewProps) {
-  return (
-    <div className="mt-8 animate-in zoom-in slide-in-from-bottom-6 duration-500">
-      {/* Soft Glass Preview Card */}
-      <div
-        className="relative overflow-hidden rounded-2xl border p-6 glass-card"
-        style={{
-          background: `linear-gradient(135deg, ${primaryColor}18 0%, ${primaryColor}08 100%)`,
-          borderColor: `${primaryColor}40`,
-          boxShadow: `0 0 40px ${primaryColor}30, inset 0 1px 0 ${primaryColor}20`,
-        }}
-      >
-        {/* Matrix Rain backdrop */}
-        <MatrixRain color={primaryColor} />
-
-        {/* Content layer */}
-        <div className="relative z-10 space-y-5">
-          {/* Robot identity header */}
-          <div className="flex items-center gap-4">
-            <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center shadow-lg shrink-0 glass-card"
-              style={{
-                background: `linear-gradient(135deg, ${primaryColor}60, ${primaryColor}30)`,
-                border: `1px solid ${primaryColor}50`,
-                boxShadow: `0 0 20px ${primaryColor}40`,
-              }}
-            >
-              <Bot className="w-7 h-7" style={{ color: primaryColor }} />
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: primaryColor }}>
-                Robot Identity Locked
-              </p>
-              <h3 className="text-xl font-bold text-white">{eaName}</h3>
-              <div className="flex items-center gap-2 mt-0.5">
-                <Zap className="w-3 h-3" style={{ color: primaryColor }} />
-                <span className="text-xs text-white/60 font-mono">{robotType} Strategy</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-white/10" />
-
-          {/* The key pill */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: primaryColor }}>
-              Encrypted License Key — click to copy
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div
-                onClick={onCopy}
-                className="flex-1 flex items-center justify-between cursor-pointer group rounded-xl px-5 py-3 transition-all duration-300 glass-btn"
-                style={{
-                  background: `linear-gradient(90deg, ${primaryColor}25, ${primaryColor}15)`,
-                  border: `1px solid ${primaryColor}50`,
-                  boxShadow: `0 0 30px ${primaryColor}30`,
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 50px ${primaryColor}50`;
-                  (e.currentTarget as HTMLDivElement).style.borderColor = primaryColor;
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 30px ${primaryColor}30`;
-                  (e.currentTarget as HTMLDivElement).style.borderColor = `${primaryColor}50`;
-                }}
-              >
-                <code className="text-sm sm:text-lg font-mono font-bold text-white tracking-widest break-all">
-                  {licenseKey}
-                </code>
-                <div
-                  className="ml-4 p-2 rounded-lg shrink-0 transition-all duration-300 group-hover:scale-110"
-                  style={{ background: `${primaryColor}30` }}
-                >
-                  <Copy className="w-5 h-5" style={{ color: primaryColor }} />
-                </div>
-              </div>
-
-              {/* Email Send Button */}
-              <Button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onSendEmail(); }}
-                className="rounded-xl px-6 py-6 h-auto flex items-center justify-center gap-2 shadow-lg transition-all duration-300 hover:scale-105 shrink-0"
-                style={{
-                  background: `linear-gradient(135deg, ${primaryColor}80, ${primaryColor}60)`,
-                  borderColor: primaryColor,
-                  color: "#fff"
-                }}
-              >
-                <Mail className="w-5 h-5" />
-                <span>Email Key</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Footer hint */}
-          <p className="text-xs text-white/40 text-center font-mono tracking-wide">
-            ⚡ Paste this key into your NovaHost Mobile App to activate
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
@@ -262,7 +87,7 @@ export default function GenerateKey() {
     (async () => {
       const { data, error } = await supabase
         .from("expert_advisors")
-        .select("id, code, name")
+        .select("id, code, name, description, avatar_url, accent_color")
         .eq("user_id", userId)
         .order("name", { ascending: true });
       if (error) { toast({ title: "Error", description: "Failed to load products", variant: "destructive" }); return; }
@@ -303,7 +128,6 @@ export default function GenerateKey() {
     // Derive robot metadata from selected EA
     const selectedProduct = productOptions.find(p => p.code === formData.ea);
     const eaDisplayName = selectedProduct?.name ?? formData.ea;
-    const { robotType, primaryColor } = deriveRobotMeta(eaDisplayName);
 
     const { data: rpcResponse, error } = await supabase.functions.invoke("generate-license", {
       body: {
@@ -312,8 +136,10 @@ export default function GenerateKey() {
         username: formData.username,
         is_master: false, // Explicitly false for new keys
         metadata: {
-          robot_type: robotType,
-          primary_color: primaryColor,
+          // The robot own accent, not a hash of its name. `robot_type` was also
+          // written here — a strategy word chosen by hashing the display name,
+          // stored on every licence and read by nothing.
+          primary_color: selectedProduct?.accent_color ?? null,
           product_id: selectedProduct?.id,
           avatar: eaDisplayName,
           name: eaDisplayName,
@@ -336,8 +162,9 @@ export default function GenerateKey() {
       licenseKey: rpcResponse.license.license_key,
       createdAt: new Date(rpcResponse.license.issued_at).toLocaleString(),
       status: rpcResponse.license.status || 'active',
-      robotType,
-      primaryColor,
+      accentColor: selectedProduct?.accent_color ?? null,
+      artUrl: selectedProduct?.avatar_url ?? null,
+      description: selectedProduct?.description ?? null,
     };
 
     setRecentKeys(prev => [newKey, ...prev]);
@@ -517,7 +344,7 @@ export default function GenerateKey() {
             </div>
 
             {productOptions.length === 0 && (
-              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-sm flex items-start gap-3 animate-pulse">
+              <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm">
                 <Bot className="w-5 h-5 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold text-amber-600 dark:text-amber-400">No Expert Advisors Found</p>
@@ -537,16 +364,48 @@ export default function GenerateKey() {
             </Button>
           </form>
 
-          {/* Robot Preview Card with Matrix Rain */}
+          {/*
+            The screenshot artefact. Actions sit below the card, never inside
+            it, so a mentor's screenshot is the robot and the key and nothing
+            else.
+          */}
           {lastKey && (
-            <RobotPreviewCard
-              eaName={lastKey.eaName}
-              licenseKey={lastKey.licenseKey}
-              robotType={lastKey.robotType}
-              primaryColor={lastKey.primaryColor}
-              onCopy={() => copyKey(lastKey.licenseKey)}
-              onSendEmail={() => triggerEmailModal(lastKey)}
-            />
+            <div className="mt-8 max-w-lg space-y-3">
+              <LicenseKeyCard
+                robotName={lastKey.eaName}
+                description={lastKey.description}
+                artUrl={lastKey.artUrl}
+                accentColor={lastKey.accentColor}
+                licenseKey={lastKey.licenseKey}
+              />
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => copyKey(lastKey.licenseKey)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy key
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => triggerEmailModal(lastKey)}
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  Email key
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Paste this key into the NovaHost app to activate.
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -566,7 +425,7 @@ export default function GenerateKey() {
                 <div 
                   key={key.id} 
                   className="p-5 rounded-2xl border border-white/10 bg-black/40 flex flex-col justify-between space-y-4"
-                  style={{ borderLeft: `4px solid ${key.primaryColor}` }}
+                  style={{ borderLeft: `4px solid ${key.accentColor ?? "hsl(var(--border))"}` }}
                 >
                   <div className="space-y-2">
                     <div className="flex items-start justify-between gap-2">
@@ -633,7 +492,7 @@ export default function GenerateKey() {
                           <div className="flex items-center gap-2">
                             <div
                               className="w-2 h-2 rounded-full shrink-0"
-                              style={{ background: key.primaryColor, boxShadow: `0 0 6px ${key.primaryColor}` }}
+                              style={{ background: key.accentColor ?? "hsl(var(--muted-foreground))" }}
                             />
                             {key.eaName}
                           </div>

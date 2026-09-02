@@ -96,7 +96,7 @@ export default function UpdatePassword() {
                 placeholder="Enter your new password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
-                className={`focus:ring-2 focus:ring-accent pr-10 ${errors.password ? 'border-destructive' : ''}`}
+                className={`pr-10 ${errors.password ? 'border-destructive' : ''}`}
                 aria-describedby={errors.password ? 'password-error' : undefined}
               />
               <Button
@@ -122,7 +122,7 @@ export default function UpdatePassword() {
                 placeholder="Confirm your new password"
                 value={formData.confirmPassword}
                 onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                className={`focus:ring-2 focus:ring-accent pr-10 ${errors.confirmPassword ? 'border-destructive' : ''}`}
+                className={`pr-10 ${errors.confirmPassword ? 'border-destructive' : ''}`}
                 aria-describedby={errors.confirmPassword ? 'confirmPassword-error' : undefined}
               />
               <Button

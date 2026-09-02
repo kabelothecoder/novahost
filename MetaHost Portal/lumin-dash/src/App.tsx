@@ -15,6 +15,7 @@ import KeyStats from "@/pages/KeyStats";
 import Profile from "@/pages/Profile";
 import Settings from "@/pages/Settings";
 import QuickTrade from "@/pages/QuickTrade";
+import NormalTrade from "@/pages/NormalTrade";
 import HostingTutorial from "@/pages/HostingTutorial";
 import WebBuilder from "@/pages/WebBuilder";
 import Feedback from "@/pages/Feedback";
@@ -106,6 +107,7 @@ function AppRoutes() {
         <Route path="license-details/:licenseId" element={<LicenseDetails />} />
         <Route path="manage" element={<ManageEAs />} />
         <Route path="dispatcher/quick-trade" element={<QuickTrade />} />
+        <Route path="dispatcher/normal-trade" element={<NormalTrade />} />
         <Route path="tutorial" element={<HostingTutorial />} />
         <Route path="reactivate" element={<ReActivateKey />} />
         <Route path="stats" element={<KeyStats />} />

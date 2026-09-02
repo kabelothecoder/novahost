@@ -682,30 +682,58 @@ fun NeonStealthCard(
 }
 
 // ============================================================
-// GlassDepthCard — Heavy blur with layered depth
+// GlassDepthCard — translucent surface with layered depth
 // ============================================================
+/**
+ * A frosted card.
+ *
+ * The blur used to sit on this Box's own modifier chain, which is not what a
+ * frosted surface is. `Modifier.blur` blurs the node it is applied to *and
+ * everything drawn inside it* -- it cannot sample what is behind the node --
+ * so every card rendered through here smeared its own contents to mush. In the
+ * Connected Robots sheet that meant the robot art, the name and the licence key
+ * were all illegible, and the card read as an empty grey slab.
+ *
+ * It shipped because `Modifier.blur` is a no-op below API 31, so on an older
+ * handset the card looked correct and on Android 12+ it did not.
+ *
+ * Depth now comes from what actually survives on an opaque sheet: a translucent
+ * fill, a top-lit sheen, a hairline that fades from lit edge to shadowed edge,
+ * and the shadow that was already here. Content is drawn unblurred on top.
+ */
 @Composable
 fun GlassDepthCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val shape = RoundedCornerShape(24.dp)
     Box(
         modifier = modifier
             .shadow(
                 elevation = 32.dp,
-                shape = RoundedCornerShape(24.dp),
+                shape = shape,
                 ambientColor = Color.Black,
                 spotColor = Color.Black
             )
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .blur(40.dp) // Simulated heavy blur
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.07f))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.06f),
+                        Color.Transparent
+                    )
+                )
+            )
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.2f), Color.Transparent)
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.22f),
+                        Color.White.copy(alpha = 0.05f)
+                    )
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = shape
             )
     ) {
         Column(

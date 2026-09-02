@@ -2,148 +2,176 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Clean light-themed admin dashboard design system */
+/*
+ * NovaHost portal design system.
+ *
+ * Two rules govern everything below:
+ *
+ *   1. Surfaces are neutral. Every background, border and text colour is a pure
+ *      grey (zero saturation). Depth comes from lightness steps and 1px
+ *      borders, never from gradients, glows or blur.
+ *   2. Colour is semantic. The blue accent marks the one primary action on a
+ *      screen; green and red mean long and short. Nothing is coloured for
+ *      decoration, so when something is coloured it means something.
+ *
+ * Both themes are first-class: no component may hardcode a colour, because
+ * anything hardcoded is broken in the other theme.
+ */
 
 @layer base {
   :root {
-    /* Base colors - clean whites and grays */
-    --background: 220 20% 97%;
-    --foreground: 220 13% 18%;
+    /* Surfaces — neutral greys, lightest to darkest */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 9%;
 
-    /* Card system */
     --card: 0 0% 100%;
-    --card-foreground: 220 13% 18%;
+    --card-foreground: 0 0% 9%;
 
-    /* Popover system */
     --popover: 0 0% 100%;
-    --popover-foreground: 220 13% 18%;
+    --popover-foreground: 0 0% 9%;
 
-    /* Primary - modern blue */
-    --primary: 221 83% 53%;
+    /* Recessed surfaces — table headers, inset panels, hover states */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+
+    --accent: 0 0% 94%;
+    --accent-foreground: 0 0% 9%;
+
+    /* Brand accent — reserved for the single primary action per screen */
+    --primary: 212 80% 45%;
     --primary-foreground: 0 0% 100%;
-    --primary-glow: 221 83% 68%;
+    /* Tint for selected nav rows and focus surfaces */
+    --primary-muted: 212 80% 96%;
+    /* Hover state for accent-coloured text/links. Named "glow" for backwards
+       compatibility with pages not yet converted; it no longer glows. */
+    --primary-glow: 212 80% 38%;
 
-    /* Secondary - soft gray */
-    --secondary: 220 14% 94%;
-    --secondary-foreground: 220 13% 18%;
+    /* Semantic — direction of a trade. Never decorative. */
+    --long: 142 68% 32%;
+    --long-foreground: 0 0% 100%;
+    --short: 0 70% 45%;
+    --short-foreground: 0 0% 100%;
 
-    /* Muted - subtle grays */
-    --muted: 220 14% 94%;
-    --muted-foreground: 220 9% 46%;
-
-    /* Accent - soft blue */
-    --accent: 215 100% 96%;
-    --accent-foreground: 221 83% 53%;
-
-    /* Status colors */
-    --success: 142 71% 45%;
+    /* Semantic — state of a thing */
+    --success: 142 68% 32%;
     --success-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
+    --warning: 32 85% 42%;
     --warning-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --destructive: 0 70% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Borders and inputs */
-    --border: 220 13% 89%;
-    --input: 220 13% 89%;
-    --ring: 221 83% 53%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 212 80% 45%;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
-    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(220 14% 98%));
-    --gradient-success: linear-gradient(135deg, hsl(142 71% 45%), hsl(142 71% 55%));
-    --gradient-warning: linear-gradient(135deg, hsl(38 92% 50%), hsl(38 92% 60%));
-    
-    /* Shadows */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-card: 0 4px 12px -1px rgba(0, 0, 0, 0.03), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
-    --shadow-hover: 0 12px 24px -4px rgba(0, 0, 0, 0.06), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
-    
-    /* Animations */
-    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-bounce: all 0.2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    /* Elevation — barely there. Borders do most of the separating. */
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.04);
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.05);
+    --shadow-popover: 0 4px 16px -2px hsl(0 0% 0% / 0.10), 0 2px 6px -2px hsl(0 0% 0% / 0.06);
+
+    /* Glass material — see the .glass rule below for when it may be used. */
+    --glass-bg: rgba(255, 255, 255, 0.66);
+    --glass-bg-strong: rgba(255, 255, 255, 0.86);
+    --glass-border: rgba(255, 255, 255, 0.7);
+    --glass-highlight: rgba(255, 255, 255, 0.9);
+    --shadow-glass: 0 8px 32px -8px rgba(0, 0, 0, 0.16);
+
+    /* Ambient ground the chrome is translucent against. Static: the previous
+       version panned for 30s on a loop behind every page. */
+    --backdrop: radial-gradient(
+        60rem 40rem at 12% -10%,
+        hsl(212 80% 45% / 0.07),
+        transparent 60%
+      ),
+      radial-gradient(50rem 34rem at 100% 0%, hsl(262 70% 55% / 0.05), transparent 55%);
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Sidebar reads as chrome: flush white, separated by a hairline only */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 32%;
+    --sidebar-primary: 212 80% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 95%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 212 80% 45%;
   }
 
   .dark {
-    /* Modern dark background with subtle blue tint */
-    --background: 220 27% 5%;
-    --foreground: 210 40% 98%;
+    /* Neutral near-black. No blue tint — the trading desks it sits beside
+       (Binance, Kraken, Coinbase) are all achromatic, and a tinted grey makes
+       real green/red P&L harder to read. */
+    --background: 0 0% 7%;
+    --foreground: 0 0% 96%;
 
-    /* Card with glassmorphism effect */
-    --card: 220 25% 8%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 96%;
 
-    --popover: 220 25% 8%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 96%;
 
-    /* Modern vibrant primary colors */
-    --primary: 221 83% 65%;
-    --primary-foreground: 220 27% 5%;
-    --primary-glow: 221 83% 75%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 60%;
 
-    /* Enhanced secondary with better contrast */
-    --secondary: 220 22% 12%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 96%;
 
-    /* Improved muted colors */
-    --muted: 220 22% 12%;
-    --muted-foreground: 215 20% 70%;
+    --accent: 0 0% 16%;
+    --accent-foreground: 0 0% 96%;
 
-    /* Modern accent with blue tint */
-    --accent: 220 22% 15%;
-    --accent-foreground: 210 40% 98%;
+    --primary: 212 85% 62%;
+    --primary-foreground: 0 0% 7%;
+    --primary-muted: 212 60% 16%;
+    --primary-glow: 212 85% 72%;
 
-    /* Status colors for dark mode */
-    --success: 142 71% 55%;
-    --success-foreground: 220 27% 5%;
-    --warning: 38 92% 60%;
-    --warning-foreground: 220 27% 5%;
-    --destructive: 0 84% 65%;
-    --destructive-foreground: 210 40% 98%;
+    --long: 142 66% 50%;
+    --long-foreground: 0 0% 7%;
+    --short: 0 82% 62%;
+    --short-foreground: 0 0% 7%;
 
-    /* Modern borders with subtle glow */
-    --border: 220 22% 15%;
-    --input: 220 22% 12%;
-    --ring: 221 83% 65%;
+    --success: 142 66% 50%;
+    --success-foreground: 0 0% 7%;
+    --warning: 38 92% 58%;
+    --warning-foreground: 0 0% 7%;
+    --destructive: 0 82% 62%;
+    --destructive-foreground: 0 0% 7%;
 
-    /* Enhanced gradients for dark mode */
-    --gradient-primary: linear-gradient(135deg, hsl(221 83% 65%), hsl(221 83% 75%));
-    --gradient-card: linear-gradient(145deg, hsl(220 25% 8%), hsl(220 22% 12%));
-    --gradient-success: linear-gradient(135deg, hsl(142 71% 55%), hsl(142 71% 65%));
-    --gradient-warning: linear-gradient(135deg, hsl(38 92% 60%), hsl(38 92% 70%));
-    
-    /* Modern shadows with glow effects */
-    --shadow-sm: 0 1px 2px 0 hsl(221 83% 65% / 0.1);
-    --shadow-card: 0 4px 6px -1px hsl(221 83% 65% / 0.1), 0 2px 4px -1px hsl(221 83% 65% / 0.06);
-    --shadow-hover: 0 10px 20px -5px hsl(221 83% 65% / 0.15), 0 4px 8px -2px hsl(221 83% 65% / 0.1);
+    --border: 0 0% 16%;
+    --input: 0 0% 18%;
+    --ring: 212 85% 62%;
 
-    /* Sidebar with modern dark styling */
-    --sidebar-background: 220 30% 4%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 221 83% 65%;
-    --sidebar-primary-foreground: 220 27% 5%;
-    --sidebar-accent: 220 25% 8%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 22% 12%;
-    --sidebar-ring: 221 83% 65%;
+    /* On dark, shadows read as smudges. Borders carry the separation. */
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.4);
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.5);
+    --shadow-popover: 0 8px 24px -4px hsl(0 0% 0% / 0.7);
+
+    /* On dark the panel is a dark veil, not a white one. A white film over a
+       near-black ground greys the whole surface and kills the art underneath. */
+    --glass-bg: rgba(24, 24, 24, 0.55);
+    --glass-bg-strong: rgba(18, 18, 18, 0.86);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-highlight: rgba(255, 255, 255, 0.16);
+    --shadow-glass: 0 8px 32px -8px rgba(0, 0, 0, 0.6);
+
+    --backdrop: radial-gradient(
+        60rem 40rem at 12% -10%,
+        hsl(212 85% 62% / 0.10),
+        transparent 60%
+      ),
+      radial-gradient(50rem 34rem at 100% 0%, hsl(262 70% 60% / 0.07), transparent 55%);
+
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 63%;
+    --sidebar-primary: 212 85% 62%;
+    --sidebar-primary-foreground: 0 0% 7%;
+    --sidebar-accent: 0 0% 13%;
+    --sidebar-accent-foreground: 0 0% 96%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 212 85% 62%;
   }
 }
 
@@ -154,39 +182,110 @@
 
   body {
     @apply bg-background text-foreground;
-  }
-}
-
-@layer utilities {
-  .animated-bg {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    opacity: 0.22;
-    background:
-      radial-gradient(600px circle at 20% 10%, hsl(var(--primary) / 0.25), transparent 40%),
-      radial-gradient(700px circle at 80% 50%, hsl(var(--accent-foreground) / 0.12), transparent 45%),
-      radial-gradient(900px circle at 50% 120%, hsl(var(--primary-glow) / 0.12), transparent 50%);
-    filter: blur(40px);
-    animation: subtle-pan 30s ease-in-out infinite alternate;
+    /* Layered over the background colour, not replacing it — a transparent body
+       would borrow whatever the host paints. Fixed so it does not slide under
+       scrolling content. */
+    background-image: var(--backdrop);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
-  @keyframes subtle-pan {
-    0% { transform: translateY(0) scale(1); }
-    100% { transform: translateY(-8%) scale(1.05); }
+  /* Money, lot sizes and counts must not reflow as digits change. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 
 @layer components {
-  .glass-card {
-    @apply bg-white/80 dark:bg-black/40 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.03)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)];
+  /*
+   * Glass is a material, not a decoration.
+   *
+   * The rule is the one the Android app already follows (CLAUDE.md §4): glass
+   * over art, flat card over a flat ground. A translucent panel earns its blur
+   * only when there is something behind it worth half-seeing — mentor art, the
+   * page an overlay covers, the ambient backdrop the chrome floats on. Over a
+   * plain surface it is a card that costs contrast for nothing, which is what
+   * the whole portal used to be.
+   *
+   * So: `.glass` on the licence card and the chrome. Data cards, tables and
+   * numbers stay flat.
+   */
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-glass), inset 0 1px 0 var(--glass-highlight);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
   }
-  
+
+  /*
+   * For surfaces that must stay readable over arbitrary content — dialogs,
+   * popovers, menus. Same material, far less transparent, because a menu you
+   * can read the page through is a menu you cannot read.
+   */
+  .glass-overlay {
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-popover);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  /*
+   * Compatibility shims for pages not yet converted. `glass-modal` maps to the
+   * real overlay material; `glass-card` stays deliberately flat, because the
+   * places it is used are plain data panels on plain grounds — exactly the case
+   * the rule above says must not be glass.
+   */
+  .glass-card,
+  .glass-panel {
+    @apply bg-card border border-border shadow-card;
+  }
+
   .glass-modal {
-    @apply bg-white/20 dark:bg-[#111]/80 backdrop-blur-2xl border border-white/30 dark:border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.1)] dark:shadow-[0_0_40px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.05)];
+    @apply glass-overlay;
   }
-  
+
   .glass-btn {
-    @apply bg-white/20 dark:bg-white/10 border border-white/30 dark:border-white/20 backdrop-blur-md shadow-sm hover:bg-white/30 dark:hover:bg-white/20 transition-all duration-300;
+    @apply bg-secondary text-secondary-foreground border border-border hover:bg-accent transition-colors;
+  }
+
+  /* Was a 30s panning radial-gradient wash. The ambient ground now lives on
+     `body` as a static layer instead. */
+  .animated-bg {
+    display: none;
+  }
+
+  /* Section label above a group of rows — the small uppercase key used by
+     Supabase, WorkOS and Grok to segment a dense sidebar or page. */
+  .section-label {
+    @apply text-[11px] font-medium uppercase tracking-wider text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  /*
+   * `animate-fade-in` and `animate-enter` are referenced in 14 files but the
+   * keyframes were never defined, so they have always been no-ops. Defining
+   * them as one short opacity fade makes page transitions deliberate without
+   * reintroducing per-element staggered entrances.
+   */
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .animate-fade-in,
+  .animate-enter {
+    animation: fade-in 150ms ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-enter {
+      animation: none;
+    }
   }
 }

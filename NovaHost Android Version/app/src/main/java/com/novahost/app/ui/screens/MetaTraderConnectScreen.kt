@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.novahost.app.sdk.MetaAPIManager
+import com.novahost.app.sdk.SymbolPlanStore
 import com.novahost.app.sdk.TerminalConfig
 import com.novahost.app.sdk.TerminalPrefs
 import androidx.compose.ui.platform.LocalContext
@@ -289,8 +290,12 @@ fun MetaTraderConnectScreen(
                                 try {
                                     val symbolSuffix = viewModel.getSymbolSuffix()
 
-                                    // accountType dropped: MetaCopier does not use it,
-                                    // and the list was broker-specific.
+                                    // accountType is sent after all. MetaCopier does not
+                                    // key off it, but the SUFFIX it implies is the
+                                    // difference between an order for XAUUSD and one for
+                                    // XAUUSD.m, and a micro book only lists the second.
+                                    // Both travel to the licence so the executor can name
+                                    // instruments the way this broker does.
                                     val success = MetaAPIManager.testBrokerConnection(
                                         context = context,
                                         server = server,
@@ -298,6 +303,7 @@ fun MetaTraderConnectScreen(
                                         passwordRaw = password,
                                         platform = selectedPlatform.lowercase(),
                                         symbolSuffix = symbolSuffix,
+                                        accountType = viewModel.accountType.value,
                                         onPhase = { phase ->
                                             linkState = LinkState.Working(phase, startedAt)
                                         }
@@ -324,6 +330,43 @@ fun MetaTraderConnectScreen(
                                             platform = selectedPlatform,
                                             account = linkedAccount
                                         )
+
+                                        // ---- Learn this broker's spelling now ----
+                                        //
+                                        // The account has just come up, so its
+                                        // Market Watch is readable for the first
+                                        // time. Asking here means the mapping is
+                                        // already in place before the first signal
+                                        // arrives, on a screen the user is on
+                                        // anyway -- rather than being discovered
+                                        // by a rejected order later.
+                                        //
+                                        // It matters because canonical names are
+                                        // frequently not what the book carries:
+                                        // one live account lists gold as `Gold`,
+                                        // the Nasdaq as `.USTECH.` and the Dow as
+                                        // `.US30.`, none of which is guessable.
+                                        //
+                                        // Deliberately not awaited into the link
+                                        // state and deliberately silent on
+                                        // failure: the account IS connected, and
+                                        // turning a symbol-list hiccup into a
+                                        // failed connection would be a lie. The
+                                        // executor still resolves names on its
+                                        // own, and Trading Symbols has a MATCH
+                                        // button for a second attempt.
+                                        launch {
+                                            SymbolPlanStore.discover(context)
+                                                .onSuccess { found ->
+                                                    android.util.Log.i(
+                                                        "NovaHost",
+                                                        "[Connect] broker symbols: " +
+                                                            "${found.matched.size} matched, " +
+                                                            "${found.unmatched.size} not offered"
+                                                    )
+                                                    SymbolPlanStore.sync(context)
+                                                }
+                                        }
                                     }.onFailure { error ->
                                         // Show the server's own reason. It already
                                         // distinguishes a broker rejection from a

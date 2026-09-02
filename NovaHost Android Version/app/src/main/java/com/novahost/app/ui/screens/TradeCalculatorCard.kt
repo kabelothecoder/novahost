@@ -3,6 +3,7 @@ package com.novahost.app.ui.screens
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.novahost.app.sdk.FxRates
 import com.novahost.app.ui.scanner.ScanCard
 import com.novahost.app.ui.scanner.ScanSectionLabel
 import com.novahost.app.ui.theme.HomeBorderSubtle
@@ -42,6 +44,7 @@ import com.novahost.app.ui.theme.HomeTextFaint
 import com.novahost.app.ui.theme.ScanSurfaceRaised
 import com.novahost.app.ui.theme.ScanTextBright
 import com.novahost.app.ui.theme.ScanTextTrace
+import com.novahost.app.ui.theme.ScanWarnText
 import com.novahost.app.ui.theme.ScanWell
 import java.util.Locale
 
@@ -71,6 +74,29 @@ fun TradeCalculatorCard(
     accent: Color,
     terminalBalance: Double,
     onPerTradeRiskPercent: (Double) -> Unit,
+    /**
+     * The balance the sizing should actually use.
+     *
+     * Reported alongside the risk percent because a percentage on its own does
+     * not size anything. Without this the scanner took the risk figure from this
+     * card and the balance from somewhere else -- the linked terminal, or a
+     * hardcoded $10,000 when nothing was linked -- so the card could show
+     * "risking R15.55 of R1,555" while the plan two screens later sized a
+     * position risking $100 of $10,000. Same flow, same tap, two different
+     * accounts, and nothing on screen admitting it.
+     *
+     * Optional so the other caller (Trading Symbols) is unaffected.
+     */
+    onBalance: (Double) -> Unit = {},
+    /**
+     * The currency to render money in, and units of it per 1 USD.
+     *
+     * Reported so the plan and review screens print the same currency the user
+     * typed their balance in. Sizing stays in USD either way -- this is display
+     * only, which is why the rate travels with the code rather than being
+     * re-fetched wherever a figure happens to be formatted.
+     */
+    onCurrency: (String, Double) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -88,33 +114,71 @@ fun TradeCalculatorCard(
     var riskText by remember { mutableStateOf(prefs.getString("calc_risk_pct", "1") ?: "1") }
     var tradesText by remember { mutableStateOf(prefs.getString("calc_trades", "1") ?: "1") }
 
+    /**
+     * What the typed balance is denominated in.
+     *
+     * This card used to assume dollars everywhere, and the assumption was
+     * invisible: the pip value below is a USD figure, so a trader typing their
+     * R1,500 balance had it treated as $1,500 and every suggested lot came out
+     * about sixteen times too large. Nothing on screen said "dollars", so there
+     * was nothing to disagree with.
+     */
+    var currency by remember {
+        mutableStateOf(
+            (prefs.getString("calc_currency", "USD") ?: "USD")
+                .takeIf { it in FxRates.SUPPORTED } ?: "USD"
+        )
+    }
+
+    // Units of [currency] per 1 USD. Refetched when the picker moves; cached and
+    // fallback-backed by FxRates, so this never blocks the card from rendering.
+    var fx by remember { mutableStateOf<FxRates.Quote?>(null) }
+    LaunchedEffect(currency) { fx = FxRates.usdTo(context, currency) }
+
+    val rate = fx?.rate?.takeIf { it > 0.0 } ?: 1.0
+    val symbol = when (currency) { "ZAR" -> "R"; "EUR" -> "€"; else -> "$" }
+
     val balance = balanceText.toDoubleOrNull()?.takeIf { it > 0.0 } ?: terminalBalance
     val totalRiskPercent = riskText.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 0.0
     // Zero trades is not a plan, and dividing by it is not a number.
     val trades = tradesText.toIntOrNull()?.coerceIn(1, 20) ?: 1
 
     val perTradePercent = if (trades > 0) totalRiskPercent / trades else totalRiskPercent
+    // Shown in the user's own currency -- what they recognise as their balance.
     val totalRiskAmount = balance * totalRiskPercent / 100.0
     val perTradeAmount = totalRiskAmount / trades
+
+    // Sized in dollars, because that is what the pip value is denominated in.
+    // The conversion happens here, once, rather than being left for whoever
+    // reads the number next.
+    val balanceUsd = balance / rate
+    val perTradeAmountUsd = perTradeAmount / rate
 
     // A 20-pip stop and a $10 standard-lot pip. Named on screen rather than
     // hidden, because a lot size quoted off an assumption the user cannot see
     // is a number they will size a real position with and not know why.
     val stopPips = 20.0
     val pipValuePerLot = 10.0
-    val suggestedLot = if (perTradeAmount > 0.0) {
-        maxOf(0.01, perTradeAmount / (stopPips * pipValuePerLot))
+    val suggestedLot = if (perTradeAmountUsd > 0.0) {
+        maxOf(0.01, perTradeAmountUsd / (stopPips * pipValuePerLot))
     } else 0.0
 
-    LaunchedEffect(balanceText, riskText, tradesText, perTradePercent, suggestedLot) {
+    LaunchedEffect(balanceText, riskText, tradesText, currency, rate, perTradePercent, suggestedLot) {
         prefs.edit().apply {
             putString("calc_balance", balanceText)
             putString("calc_risk_pct", riskText)
             putString("calc_trades", tradesText)
+            putString("calc_currency", currency)
             putFloat("smart_lot_size", suggestedLot.toFloat())
             putFloat("smart_risk_pct", perTradePercent.toFloat())
         }.apply()
         onPerTradeRiskPercent(perTradePercent)
+        // Reported in USD, not in the display currency. TradePlanner sizes
+        // against a dollar pip value, so handing it a rand balance is the same
+        // bug this card just stopped making -- one conversion, at the boundary,
+        // and everything downstream stays in one unit.
+        onBalance(balanceUsd)
+        onCurrency(currency, rate)
     }
 
     ScanCard(
@@ -130,10 +194,55 @@ fun TradeCalculatorCard(
             }
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
+
+        // Placed above the balance field, not beside it: the currency changes
+        // what the number below it means, so it has to be read first.
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FxRates.SUPPORTED.forEach { code ->
+                val selected = code == currency
+                val shape = RoundedCornerShape(999.dp)
+                Box(
+                    modifier = Modifier
+                        .clip(shape)
+                        .then(
+                            if (selected) Modifier
+                                .background(accent.copy(alpha = 0.16f))
+                                .border(1.dp, accent.copy(alpha = 0.48f), shape)
+                            else Modifier
+                                .background(ScanWell)
+                                .border(1.dp, HomeBorderSubtle, shape)
+                        )
+                        .clickable { currency = code }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        code,
+                        color = if (selected) ScanTextBright else HomeTextDim,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            // The rate is doing real work on every figure below, so it is shown
+            // rather than applied invisibly. "est." means the network was down
+            // and a fallback is standing in.
+            if (currency != "USD") {
+                Text(
+                    text = "1 USD = " + String.format(Locale.US, "%.2f", rate) + " " + currency +
+                        (if (fx?.isEstimate == true) " est." else ""),
+                    color = if (fx?.isEstimate == true) ScanWarnText else ScanTextTrace,
+                    fontSize = 9.sp,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
 
         CalcField(
-            label = "ACCOUNT BALANCE ($)",
+            label = "ACCOUNT BALANCE (" + symbol + ")",
             value = balanceText,
             onValue = { balanceText = it.filter { ch -> ch.isDigit() || ch == '.' } },
             placeholder = if (terminalBalance > 0.0) {
@@ -172,14 +281,14 @@ fun TradeCalculatorCard(
             CalcReadout(
                 label = "RISK / TRADE",
                 value = String.format(Locale.US, "%.2f%%", perTradePercent),
-                sub = "$" + String.format(Locale.US, "%,.0f", perTradeAmount),
+                sub = symbol + String.format(Locale.US, "%,.0f", perTradeAmount),
                 valueColor = accent,
                 modifier = Modifier.weight(1f)
             )
             CalcReadout(
                 label = "TOTAL AT RISK",
-                value = "$" + String.format(Locale.US, "%,.0f", totalRiskAmount),
-                sub = String.format(Locale.US, "%.2f%% of %,.0f", totalRiskPercent, balance),
+                value = symbol + String.format(Locale.US, "%,.0f", totalRiskAmount),
+                sub = String.format(Locale.US, "%.2f%% of ", totalRiskPercent) + symbol + String.format(Locale.US, "%,.0f", balance),
                 valueColor = ScanTextBright,
                 modifier = Modifier.weight(1f)
             )

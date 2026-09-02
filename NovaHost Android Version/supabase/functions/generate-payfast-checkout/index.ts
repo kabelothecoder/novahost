@@ -53,22 +53,56 @@ const PRICES = {
 
 type ProductKey = keyof typeof PRICES;
 
-function generatePayfastSignature(data: Record<string, string>, passphrase: string): string {
-  const sortedKeys = Object.keys(data).sort();
+/**
+ * Percent-encoding that matches PHP's `urlencode`, which is what Payfast hashes.
+ *
+ * This one character class is why nobody has ever completed an R599 or R349
+ * purchase. `encodeURIComponent` leaves `! ' ( ) *` unescaped; PHP escapes all
+ * five. Two of the three item names below contain "(once-off)", so the app and
+ * the scanner were signed over `...Scanner+(once-off)` while the browser
+ * submitted `...Scanner+%28once-off%29`, and Payfast answered every one of them
+ * with "Generated signature does not match submitted signature".
+ *
+ * Payfast's own checkout page confirms it: signing with this encoder is
+ * accepted, signing with the bare `encodeURIComponent` is refused.
+ *
+ * "NovaHost Device Reactivation" has no parentheses -- which is the entire
+ * reason the R150 device moves are the only payments that have gone through
+ * recently, and why this looked like a product problem rather than a bug.
+ */
+function payfastEncode(value: string): string {
+  return encodeURIComponent(value.trim())
+    .replace(/%20/g, "+")
+    .replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
 
+/**
+ * Payfast checkout signature.
+ *
+ * The pairs are hashed in the order they appear in Payfast's attributes
+ * description -- merchant_id, merchant_key, return_url, cancel_url, notify_url,
+ * ... email_address, ... amount, item_name, ... custom_str1..5 -- which is the
+ * order [payload] below is declared in. JavaScript preserves string-key
+ * insertion order, so `Object.keys` reproduces it exactly.
+ *
+ * NOT sorted. Payfast's docs are explicit that the alphabetical ordering
+ * belongs to their API signature format and must not be used here. The sandbox
+ * turns out to normalise the order before hashing and accepts either, but the
+ * documented order is what production is entitled to expect and it costs
+ * nothing to send.
+ */
+function generatePayfastSignature(data: Record<string, string>, passphrase: string): string {
   const parts = [];
-  for (const key of sortedKeys) {
+  for (const key of Object.keys(data)) {
     if (data[key] !== undefined && data[key] !== null && data[key] !== "") {
-      const encodedValue = encodeURIComponent(data[key].trim()).replace(/%20/g, "+");
-      parts.push(`${key}=${encodedValue}`);
+      parts.push(`${key}=${payfastEncode(data[key])}`);
     }
   }
 
   let pfOutput = parts.join("&");
 
   if (passphrase) {
-    const encodedPassphrase = encodeURIComponent(passphrase.trim()).replace(/%20/g, "+");
-    pfOutput += `&passphrase=${encodedPassphrase}`;
+    pfOutput += `&passphrase=${payfastEncode(passphrase)}`;
   }
 
   return crypto.createHash("md5").update(pfOutput).digest("hex");
@@ -84,6 +118,44 @@ serve(async (req: Request) => {
       status,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
+
+  // Going live is four Supabase secrets, and three of them are easy to forget.
+  // Without this guard a production deploy with a missing secret still builds a
+  // perfectly well-formed checkout -- just with merchant_id="" -- and Payfast
+  // answers with a generic error on ITS page, after the user has already left
+  // the app. That reads as "the app is broken" to 250 people at once, and there
+  // is nothing in our logs to say why. Fail here instead, loudly and by name.
+  if (ENV !== "sandbox") {
+    const missing = [
+      !MERCHANT_ID && "PAYFAST_MERCHANT_ID",
+      !MERCHANT_KEY && "PAYFAST_MERCHANT_KEY",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      console.error(
+        `[payfast] ENVIRONMENT=${ENV} but these secrets are unset: ${missing.join(", ")}`,
+      );
+      return json(
+        {
+          error: "Payments are not configured on the server. Please contact support.",
+          code: "PAYFAST_NOT_CONFIGURED",
+          missing,
+        },
+        503,
+      );
+    }
+
+    // Not fatal: Payfast passphrases are optional, and an account that has none
+    // must sign with none. But an account that HAS one and is missing it here
+    // fails every signature, so make the choice visible in the logs.
+    if (!PASSPHRASE) {
+      console.warn(
+        "[payfast] PAYFAST_PASSPHRASE is unset -- signing without a passphrase. " +
+          "If a passphrase is set on the Payfast account, every payment will be " +
+          "refused with a signature mismatch.",
+      );
+    }
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -157,8 +229,11 @@ serve(async (req: Request) => {
       cancel_url: `${supabaseUrl}/functions/v1/payment-redirect?status=cancel`,
       notify_url: `${supabaseUrl}/functions/v1/payfast-webhook`,
       email_address: email,
-      item_name: price.item_name,
+      // amount BEFORE item_name. This object's declaration order IS the
+      // signature order (see generatePayfastSignature), and Payfast's
+      // attributes description puts the transaction amount ahead of its name.
       amount: price.amount,
+      item_name: price.item_name,
       custom_str1: price.custom_str1,
       custom_str2: androidId,
       custom_str3: cleanEmail,
@@ -166,17 +241,21 @@ serve(async (req: Request) => {
 
     payload.signature = generatePayfastSignature(payload, PASSPHRASE);
 
-    const finalUrl = new URL(PAYFAST_URL);
-    for (const [key, value] of Object.entries(payload)) {
-      finalUrl.searchParams.append(key, value);
-    }
+    // Built with the same encoder the signature was hashed with, rather than
+    // through URLSearchParams. The two disagree on exactly the characters that
+    // broke this -- URLSearchParams escapes parentheses, encodeURIComponent did
+    // not -- and a checkout URL whose encoding differs from its own signature is
+    // the failure this function just came out of. One encoder, both places.
+    const query = Object.entries(payload)
+      .map(([key, value]) => `${key}=${payfastEncode(value)}`)
+      .join("&");
 
     return json({
       route,
       product,
       amount: price.amount,
       item_name: price.item_name,
-      checkout_url: finalUrl.toString(),
+      checkout_url: `${PAYFAST_URL}?${query}`,
     });
 
   } catch (err) {

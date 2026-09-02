@@ -27,7 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.QueryStats
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -115,6 +117,14 @@ data class HomeActions(
     val onAssetHub: () -> Unit,
     val onSettings: () -> Unit,
     val onScanner: () -> Unit,
+    /**
+     * The MetaTrader connection screen.
+     *
+     * Only the nav drawer reached it before, which put the one screen that
+     * fixes an unlinked broker behind a menu the user has no reason to open
+     * while the header is telling them the broker is not linked.
+     */
+    val onTerminal: () -> Unit,
     val onAddKey: () -> Unit,
     val onRobotSelected: (LicenseRecord) -> Unit
 )
@@ -163,63 +173,87 @@ private fun ClassicCoreLayout(
             glow = state.glow
         )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 32.dp)
+        // Measured from the container, not from LocalConfiguration: the app
+        // draws edge to edge, so the configuration height and the height left
+        // for content after system-bar insets are two different numbers.
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = HomeTopChromeInset - HomeGutter, top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            val viewportHeight = maxHeight
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    // Claim at least one viewport so the weighted spacers below
+                    // have something to divide. Without a min height the scroll
+                    // container hands this column an infinite maxHeight, every
+                    // weight resolves to zero, and a hero whose widgets are all
+                    // hidden stacks against the status bar with half the screen
+                    // left empty underneath it.
+                    .heightIn(min = viewportHeight)
+                    .padding(horizontal = 22.dp)
+                    .padding(bottom = 32.dp)
             ) {
-                HomeStatusPill(
-                    text = if (state.brokerConnected) "BROKER LINKED" else state.linkLabel,
-                    connected = state.brokerConnected
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = HomeTopChromeInset - HomeGutter, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HomeStatusPill(
+                        text = if (state.brokerConnected) "BROKER LINKED" else state.linkLabel,
+                        connected = state.brokerConnected
+                    )
+                    Spacer(Modifier.weight(1f))
+                    HomeSettingsButton(onClick = actions.onSettings)
+                }
+
+                Spacer(Modifier.height(28.dp))
+
+                // Centres the hero in whatever room the widget stack leaves it.
+                // The pair collapses to zero the moment the content is taller
+                // than the viewport, so a full widget stack scrolls exactly as
+                // it did before -- this only moves the hero when there is dead
+                // space to absorb.
                 Spacer(Modifier.weight(1f))
-                HomeSettingsButton(onClick = actions.onSettings)
+
+                // Pinned: robot hero.
+                HeroAvatar(state = state, artMode = arrangement.artMode, size = 132.dp)
+
+                Spacer(Modifier.height(18.dp))
+
+                MentorCredit(state.mentorName, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = state.robotName,
+                    color = HomeTextBright,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(28.dp))
+
+                // Pinned: ignition.
+                IgnitionRow(
+                    isRunning = state.isRunning,
+                    isConnecting = state.isConnecting,
+                    accent = state.accent,
+                    glow = state.glow,
+                    onToggleRun = actions.onToggleRun,
+                    onQuotes = actions.onQuotes,
+                    onAssetHub = actions.onAssetHub
+                )
+
+                Spacer(Modifier.height(16.dp))
+                PoweredByFooter()
+                Spacer(Modifier.height(28.dp))
+
+                Spacer(Modifier.weight(1f))
+
+                WidgetStack(arrangement = arrangement, state = state, actions = actions, glass = false)
             }
-
-            Spacer(Modifier.height(28.dp))
-
-            // Pinned: robot hero.
-            HeroAvatar(state = state, artMode = arrangement.artMode, size = 132.dp)
-
-            Spacer(Modifier.height(18.dp))
-
-            MentorCredit(state.mentorName, modifier = Modifier.fillMaxWidth(), align = TextAlign.Center)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = state.robotName,
-                color = HomeTextBright,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(28.dp))
-
-            // Pinned: ignition.
-            IgnitionRow(
-                isRunning = state.isRunning,
-                isConnecting = state.isConnecting,
-                accent = state.accent,
-                glow = state.glow,
-                onToggleRun = actions.onToggleRun,
-                onQuotes = actions.onQuotes,
-                onAssetHub = actions.onAssetHub
-            )
-
-            Spacer(Modifier.height(16.dp))
-            PoweredByFooter()
-            Spacer(Modifier.height(28.dp))
-
-            WidgetStack(arrangement = arrangement, state = state, actions = actions, glass = false)
         }
     }
 }
@@ -275,10 +309,15 @@ private fun FocusEngineLayout(
                 )
             }
 
+            // The allowance is the chrome this column has to leave room for:
+            // ~30.dp for the settings row above it, and ~101.dp for the
+            // captioned nav row and its bottom padding below. Under-count it and
+            // Focus Engine -- a screen whose whole argument is that it fits on
+            // one screen -- starts scrolling.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = viewportHeight - 100.dp),
+                    .heightIn(min = viewportHeight - 140.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -318,14 +357,20 @@ private fun FocusEngineLayout(
                 )
             }
 
+            // Settings is already the gear in the top-right corner of this same
+            // screen, so it is not repeated here -- two identical gears one
+            // above the other told the user nothing about either. Its slot goes
+            // to Symbols, which is otherwise reachable only from the Quotes
+            // button on the ignition row that this layout does not draw.
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 46.dp),
-                horizontalArrangement = Arrangement.spacedBy(26.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.Top
             ) {
+                QuietIcon(Icons.Rounded.QueryStats, "Symbols", actions.onQuotes)
                 QuietIcon(Icons.Rounded.DocumentScanner, "Scanner", actions.onScanner)
-                QuietIcon(Icons.Rounded.Memory, "Asset Hub", actions.onAssetHub)
-                QuietIcon(Icons.Rounded.Settings, "Settings", actions.onSettings)
+                QuietIcon(Icons.Rounded.SyncAlt, "MetaTrader", actions.onTerminal)
+                QuietIcon(Icons.Rounded.Memory, "Robots", actions.onAssetHub)
             }
 
             // Every optional widget is hidden by default here, but the user may
@@ -768,18 +813,46 @@ private fun HeroAvatar(
     }
 }
 
+/**
+ * One destination in Focus Engine's bottom row.
+ *
+ * Captioned, and on a 48.dp tap target rather than the 22.dp glyph itself. Four
+ * unlabelled low-alpha glyphs are not a navigation bar -- the user has to tap
+ * one to find out where it goes, which is how a duplicate settings gear sat
+ * here unnoticed. The caption stays faint enough not to compete with the
+ * ignition, which is still the only bright thing on the screen.
+ */
 @Composable
 private fun QuietIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit
 ) {
-    Icon(
-        imageVector = icon,
-        contentDescription = label,
-        tint = Color.White.copy(alpha = 0.34f),
-        modifier = Modifier.size(22.dp).clickable(onClick = onClick)
-    )
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = label.uppercase(),
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp,
+            maxLines = 1,
+            textAlign = TextAlign.Center
+        )
+    }
 }
 
 /**

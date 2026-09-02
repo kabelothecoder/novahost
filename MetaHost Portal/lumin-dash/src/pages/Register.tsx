@@ -1,14 +1,79 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AuthLayout } from '@/components/AuthLayout';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { TermsModal } from '@/components/TermsModal';
-import { Eye, EyeOff } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from '@/hooks/use-toast';
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { AuthLayout } from "@/components/AuthLayout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { TermsModal } from "@/components/TermsModal";
+import { Eye, EyeOff } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+
+interface FieldProps {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  autoComplete?: string;
+  optional?: boolean;
+}
+
+/**
+ * One field, ten times over. Each of these was previously spelled out in full,
+ * so the label, the error paragraph, the aria wiring and the invalid styling
+ * had to be kept in step by hand across every one of them.
+ */
+function Field({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+  type = "text",
+  placeholder,
+  autoComplete,
+  optional,
+}: FieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>
+        {label}
+        {optional && <span className="ml-1 font-normal text-muted-foreground">— optional</span>}
+      </Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(error && "border-destructive")}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error && (
+        <p id={`${id}-error`} className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <p className="section-label">{title}</p>
+      {children}
+    </div>
+  );
+}
+
 export default function Register() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
@@ -17,95 +82,84 @@ export default function Register() {
   const [termsModalOpen, setTermsModalOpen] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [formData, setFormData] = useState({
-    fullName: '',
-    displayName: '',
-    email: '',
-    phone: '',
-    password: '',
-    confirmPassword: '',
-    instagramLink: '',
-    tiktokLink: '',
-    telegramGroupLink: '',
-    whatsappGroupLink: ''
+    fullName: "",
+    displayName: "",
+    email: "",
+    phone: "",
+    password: "",
+    confirmPassword: "",
+    instagramLink: "",
+    tiktokLink: "",
+    telegramGroupLink: "",
+    whatsappGroupLink: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    const isValidUrl = (url: string) => {
-      try {
-        return /^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/.test(url);
-      } catch {
-        return false;
-      }
-    };
+    const isValidUrl = (url: string) =>
+      /^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/.test(url);
 
-    // Required fields
-    if (!formData.fullName.trim()) newErrors.fullName = 'Full name is required';
-    if (!formData.displayName.trim()) newErrors.displayName = 'Display name is required';
-    if (!formData.email.trim()) newErrors.email = 'Email is required';
-    if (!formData.phone.trim()) newErrors.phone = 'Phone is required';
-    if (!formData.password) newErrors.password = 'Password is required';
-    if (!formData.confirmPassword) newErrors.confirmPassword = 'Confirm password is required';
+    if (!formData.fullName.trim()) newErrors.fullName = "Full name is required";
+    if (!formData.displayName.trim()) newErrors.displayName = "Display name is required";
+    if (!formData.email.trim()) newErrors.email = "Email is required";
+    if (!formData.phone.trim()) newErrors.phone = "Phone is required";
+    if (!formData.password) newErrors.password = "Password is required";
+    if (!formData.confirmPassword) newErrors.confirmPassword = "Confirm password is required";
 
-    // Instagram (Required)
     if (!formData.instagramLink.trim()) {
-      newErrors.instagramLink = 'Instagram link is required';
+      newErrors.instagramLink = "Instagram link is required";
     } else if (!isValidUrl(formData.instagramLink)) {
-      newErrors.instagramLink = 'Please enter a valid URL';
+      newErrors.instagramLink = "Please enter a valid URL";
     }
 
-    // TikTok (Required)
     if (!formData.tiktokLink.trim()) {
-      newErrors.tiktokLink = 'TikTok link is required';
+      newErrors.tiktokLink = "TikTok link is required";
     } else if (!isValidUrl(formData.tiktokLink)) {
-      newErrors.tiktokLink = 'Please enter a valid URL';
+      newErrors.tiktokLink = "Please enter a valid URL";
     }
 
-    // Telegram (Optional)
     if (formData.telegramGroupLink.trim() && !isValidUrl(formData.telegramGroupLink)) {
-      newErrors.telegramGroupLink = 'Please enter a valid URL';
+      newErrors.telegramGroupLink = "Please enter a valid URL";
     }
 
-    // WhatsApp (Optional)
     if (formData.whatsappGroupLink.trim() && !isValidUrl(formData.whatsappGroupLink)) {
-      newErrors.whatsappGroupLink = 'Please enter a valid URL';
+      newErrors.whatsappGroupLink = "Please enter a valid URL";
     }
 
-    // Email format
     if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Invalid email format';
+      newErrors.email = "Invalid email format";
     }
 
-    // Phone regex
     if (formData.phone && !/^\+?\d{9,15}$/.test(formData.phone)) {
-      newErrors.phone = 'Phone must be 9-15 digits, optionally starting with +';
+      newErrors.phone = "Phone must be 9-15 digits, optionally starting with +";
     }
 
-    // Password minimum 8 characters
     if (formData.password && formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
+      newErrors.password = "Password must be at least 8 characters";
     }
 
-    // Password confirmation
     if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
+      newErrors.confirmPassword = "Passwords do not match";
     }
 
-    // Terms agreement
     if (!agreeToTerms) {
-      newErrors.terms = 'You must agree to the Terms & Conditions';
+      newErrors.terms = "You must agree to the Terms & Conditions";
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
+
     setIsLoading(true);
     try {
       const redirectUrl = `${window.location.origin}/`;
-      
+
       const { error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -118,194 +172,248 @@ export default function Register() {
             instagramLink: formData.instagramLink.trim(),
             tiktokLink: formData.tiktokLink.trim(),
             telegramGroupLink: formData.telegramGroupLink.trim() || null,
-            whatsappGroupLink: formData.whatsappGroupLink.trim() || null
-          }
-        }
+            whatsappGroupLink: formData.whatsappGroupLink.trim() || null,
+          },
+        },
       });
-      
+
       if (error) throw error;
-      
+
       toast({
-        title: "Success",
-        description: "Account created, check your inbox to verify"
+        title: "Account created",
+        description: "Check your inbox to verify your email.",
       });
-      navigate('/login');
-    } catch (error: any) {
+      navigate("/login");
+    } catch (error) {
       toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive"
+        title: "Could not create account",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
   };
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    if (errors[field]) {
-      setErrors(prev => ({
-        ...prev,
-        [field]: ''
-      }));
-    }
+
+  const set = (field: keyof typeof formData) => (value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
   };
-  return <AuthLayout>
-      <div className="space-y-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground">Create Account</h2>
-          <p className="text-muted-foreground mt-1">Join today</p>
+
+  return (
+    <AuthLayout wide>
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-lg font-semibold">Create your account</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Set up your mentor portal and start issuing licences.
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="fullName">Full Name</Label>
-            <Input id="fullName" type="text" placeholder="Enter your full name" value={formData.fullName} onChange={e => handleInputChange('fullName', e.target.value)} className={`focus:ring-2 focus:ring-accent ${errors.fullName ? 'border-destructive' : ''}`} aria-describedby={errors.fullName ? 'fullName-error' : undefined} />
-            {errors.fullName && <p id="fullName-error" className="text-sm text-destructive">{errors.fullName}</p>}
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <Section title="About you">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                id="fullName"
+                label="Full name"
+                autoComplete="name"
+                placeholder="Jane Mokoena"
+                value={formData.fullName}
+                error={errors.fullName}
+                onChange={set("fullName")}
+              />
+              <Field
+                id="displayName"
+                label="Display name"
+                autoComplete="nickname"
+                placeholder="How subscribers see you"
+                value={formData.displayName}
+                error={errors.displayName}
+                onChange={set("displayName")}
+              />
+              <Field
+                id="email"
+                label="Email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={formData.email}
+                error={errors.email}
+                onChange={set("email")}
+              />
+              <Field
+                id="phone"
+                label="Phone"
+                type="tel"
+                autoComplete="tel"
+                placeholder="+27123456789"
+                value={formData.phone}
+                error={errors.phone}
+                onChange={set("phone")}
+              />
+            </div>
+          </Section>
 
-          <div className="space-y-2">
-            <Label htmlFor="displayName">Display Name</Label>
-            <Input id="displayName" type="text" placeholder="Enter your display name" value={formData.displayName} onChange={e => handleInputChange('displayName', e.target.value)} className={`focus:ring-2 focus:ring-accent ${errors.displayName ? 'border-destructive' : ''}`} aria-describedby={errors.displayName ? 'displayName-error' : undefined} />
-            {errors.displayName && <p id="displayName-error" className="text-sm text-destructive">{errors.displayName}</p>}
-          </div>
+          <Section title="Onboarding channels">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                id="instagramLink"
+                label="Instagram"
+                type="url"
+                placeholder="https://instagram.com/you"
+                value={formData.instagramLink}
+                error={errors.instagramLink}
+                onChange={set("instagramLink")}
+              />
+              <Field
+                id="tiktokLink"
+                label="TikTok"
+                type="url"
+                placeholder="https://tiktok.com/@you"
+                value={formData.tiktokLink}
+                error={errors.tiktokLink}
+                onChange={set("tiktokLink")}
+              />
+              <Field
+                id="telegramGroupLink"
+                label="Telegram group"
+                type="url"
+                optional
+                placeholder="https://t.me/yourgroup"
+                value={formData.telegramGroupLink}
+                error={errors.telegramGroupLink}
+                onChange={set("telegramGroupLink")}
+              />
+              <Field
+                id="whatsappGroupLink"
+                label="WhatsApp group"
+                type="url"
+                optional
+                placeholder="https://chat.whatsapp.com/…"
+                value={formData.whatsappGroupLink}
+                error={errors.whatsappGroupLink}
+                onChange={set("whatsappGroupLink")}
+              />
+            </div>
+          </Section>
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" placeholder="Enter your email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className={`focus:ring-2 focus:ring-accent ${errors.email ? 'border-destructive' : ''}`} aria-describedby={errors.email ? 'email-error' : undefined} />
-            {errors.email && <p id="email-error" className="text-sm text-destructive">{errors.email}</p>}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
-            <Input id="phone" type="tel" placeholder="+1234567890" value={formData.phone} onChange={e => handleInputChange('phone', e.target.value)} className={`focus:ring-2 focus:ring-accent ${errors.phone ? 'border-destructive' : ''}`} aria-describedby={errors.phone ? 'phone-error' : undefined} />
-            {errors.phone && <p id="phone-error" className="text-sm text-destructive">{errors.phone}</p>}
-          </div>
-
-          <div className="pt-2 pb-1 border-t border-border/50">
-            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              Onboarding Channels
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="instagramLink">Instagram Link <span className="text-destructive">*</span></Label>
-                <Input 
-                  id="instagramLink" 
-                  type="url" 
-                  placeholder="https://instagram.com/yourprofile" 
-                  value={formData.instagramLink} 
-                  onChange={e => handleInputChange('instagramLink', e.target.value)} 
-                  className={`focus:ring-2 focus:ring-accent ${errors.instagramLink ? 'border-destructive' : ''}`} 
-                  aria-describedby={errors.instagramLink ? 'instagramLink-error' : undefined} 
-                />
-                {errors.instagramLink && <p id="instagramLink-error" className="text-sm text-destructive">{errors.instagramLink}</p>}
+          <Section title="Security">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    placeholder="At least 8 characters"
+                    value={formData.password}
+                    onChange={(e) => set("password")(e.target.value)}
+                    className={cn("pr-10", errors.password && "border-destructive")}
+                    aria-invalid={Boolean(errors.password)}
+                    aria-describedby={errors.password ? "password-error" : undefined}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full w-10 text-muted-foreground"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                {errors.password && (
+                  <p id="password-error" className="text-xs text-destructive">
+                    {errors.password}
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="tiktokLink">TikTok Link <span className="text-destructive">*</span></Label>
-                <Input 
-                  id="tiktokLink" 
-                  type="url" 
-                  placeholder="https://tiktok.com/@yourprofile" 
-                  value={formData.tiktokLink} 
-                  onChange={e => handleInputChange('tiktokLink', e.target.value)} 
-                  className={`focus:ring-2 focus:ring-accent ${errors.tiktokLink ? 'border-destructive' : ''}`} 
-                  aria-describedby={errors.tiktokLink ? 'tiktokLink-error' : undefined} 
-                />
-                {errors.tiktokLink && <p id="tiktokLink-error" className="text-sm text-destructive">{errors.tiktokLink}</p>}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="telegramGroupLink">Telegram Group Link <span className="text-muted-foreground text-xs">(Optional)</span></Label>
-                <Input 
-                  id="telegramGroupLink" 
-                  type="url" 
-                  placeholder="https://t.me/yourgroup" 
-                  value={formData.telegramGroupLink} 
-                  onChange={e => handleInputChange('telegramGroupLink', e.target.value)} 
-                  className={`focus:ring-2 focus:ring-accent ${errors.telegramGroupLink ? 'border-destructive' : ''}`} 
-                  aria-describedby={errors.telegramGroupLink ? 'telegramGroupLink-error' : undefined} 
-                />
-                {errors.telegramGroupLink && <p id="telegramGroupLink-error" className="text-sm text-destructive">{errors.telegramGroupLink}</p>}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="whatsappGroupLink">WhatsApp Group Link <span className="text-muted-foreground text-xs">(Optional)</span></Label>
-                <Input 
-                  id="whatsappGroupLink" 
-                  type="url" 
-                  placeholder="https://chat.whatsapp.com/yourgroup" 
-                  value={formData.whatsappGroupLink} 
-                  onChange={e => handleInputChange('whatsappGroupLink', e.target.value)} 
-                  className={`focus:ring-2 focus:ring-accent ${errors.whatsappGroupLink ? 'border-destructive' : ''}`} 
-                  aria-describedby={errors.whatsappGroupLink ? 'whatsappGroupLink-error' : undefined} 
-                />
-                {errors.whatsappGroupLink && <p id="whatsappGroupLink-error" className="text-sm text-destructive">{errors.whatsappGroupLink}</p>}
+              <div className="space-y-1.5">
+                <Label htmlFor="confirmPassword">Confirm password</Label>
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    placeholder="Repeat it"
+                    value={formData.confirmPassword}
+                    onChange={(e) => set("confirmPassword")(e.target.value)}
+                    className={cn("pr-10", errors.confirmPassword && "border-destructive")}
+                    aria-invalid={Boolean(errors.confirmPassword)}
+                    aria-describedby={
+                      errors.confirmPassword ? "confirmPassword-error" : undefined
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full w-10 text-muted-foreground"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                {errors.confirmPassword && (
+                  <p id="confirmPassword-error" className="text-xs text-destructive">
+                    {errors.confirmPassword}
+                  </p>
+                )}
               </div>
             </div>
-          </div>
+          </Section>
 
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
-              <Input id="password" type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} className={`focus:ring-2 focus:ring-accent pr-10 ${errors.password ? 'border-destructive' : ''}`} aria-describedby={errors.password ? 'password-error' : undefined} />
-              <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </Button>
-            </div>
-            {errors.password && <p id="password-error" className="text-sm text-destructive">{errors.password}</p>}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword">Confirm Password</Label>
-            <div className="relative">
-              <Input id="confirmPassword" type={showConfirmPassword ? 'text' : 'password'} placeholder="Confirm your password" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} className={`focus:ring-2 focus:ring-accent pr-10 ${errors.confirmPassword ? 'border-destructive' : ''}`} aria-describedby={errors.confirmPassword ? 'confirmPassword-error' : undefined} />
-              <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
-                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </Button>
-            </div>
-            {errors.confirmPassword && <p id="confirmPassword-error" className="text-sm text-destructive">{errors.confirmPassword}</p>}
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2">
-              <Checkbox id="terms" checked={agreeToTerms} onCheckedChange={checked => {
-              setAgreeToTerms(checked as boolean);
-              if (errors.terms) {
-                setErrors(prev => ({
-                  ...prev,
-                  terms: ''
-                }));
-              }
-            }} aria-describedby={errors.terms ? 'terms-error' : undefined} />
+          <div className="space-y-2 border-t border-border pt-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="terms"
+                checked={agreeToTerms}
+                onCheckedChange={(checked) => {
+                  setAgreeToTerms(checked as boolean);
+                  if (errors.terms) setErrors((prev) => ({ ...prev, terms: "" }));
+                }}
+                aria-describedby={errors.terms ? "terms-error" : undefined}
+              />
               <label htmlFor="terms" className="text-sm text-muted-foreground">
-                I agree to{' '}
-                <button type="button" onClick={() => setTermsModalOpen(true)} className="text-primary hover:underline">
-                  Terms & Conditions
+                I agree to the{" "}
+                <button
+                  type="button"
+                  onClick={() => setTermsModalOpen(true)}
+                  className="text-primary hover:underline"
+                >
+                  Terms &amp; Conditions
                 </button>
               </label>
             </div>
-            {errors.terms && <p id="terms-error" className="text-sm text-destructive">{errors.terms}</p>}
+            {errors.terms && (
+              <p id="terms-error" className="text-xs text-destructive">
+                {errors.terms}
+              </p>
+            )}
           </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full h-12 rounded-xl bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90 font-bold text-primary-foreground transition-all duration-200">
-            {isLoading ? 'Creating Account...' : 'Create Account'}
+          <Button type="submit" disabled={isLoading} className="w-full">
+            {isLoading ? "Creating account…" : "Create account"}
           </Button>
         </form>
 
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">
-            Already have an account?{' '}
-            <Link to="/login" className="text-primary hover:underline">
-              Sign In
-            </Link>
-          </p>
-        </div>
+        <p className="text-center text-sm text-muted-foreground">
+          Already have an account?{" "}
+          <Link to="/login" className="text-primary hover:underline">
+            Sign in
+          </Link>
+        </p>
       </div>
 
       <TermsModal open={termsModalOpen} onOpenChange={setTermsModalOpen} />
-    </AuthLayout>;
+    </AuthLayout>
+  );
 }

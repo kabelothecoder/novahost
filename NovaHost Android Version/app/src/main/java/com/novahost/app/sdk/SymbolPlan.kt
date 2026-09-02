@@ -39,7 +39,22 @@ data class SymbolConfig(
     /** How many positions on this symbol may be open at once. */
     val maxTrades: Int = SymbolPlanStore.DEFAULT_TRADES,
     /** True when the size comes from the trade calculator rather than the stepper. */
-    val smartLot: Boolean = true
+    val smartLot: Boolean = true,
+    /**
+     * What THIS user's broker calls the instrument, e.g. `XAUUSD` -> `Gold`.
+     *
+     * NovaHost trades canonical names because that is what the mentor picks and
+     * what the licence allows. Brokers rarely agree: one live account lists gold
+     * as `Gold`, the Nasdaq as `.USTECH.` and the Dow as `.US30.`, and an order
+     * naming a symbol the broker does not carry is rejected outright.
+     *
+     * Blank means "not set", and the server falls back to its own discovery. It
+     * is not something the user should normally have to fill in -- [discover]
+     * reads the broker's real symbol list and pre-fills this -- but it stays
+     * editable, because the one account whose spelling nothing predicts is the
+     * account that would otherwise be stuck.
+     */
+    val brokerSymbol: String = ""
 )
 
 /**
@@ -95,7 +110,12 @@ data class SymbolPlan(
 object SymbolPlanStore {
 
     private const val PREFS = "metahost_prefs"
-    private const val KEY_PLAN = "symbol_plan"
+
+    /**
+     * The pre-licence plan key, kept only so an existing install can be migrated
+     * off it. Nothing writes here any more -- see [planKey].
+     */
+    private const val KEY_PLAN_LEGACY = "symbol_plan"
 
     /** The mentor's allowance. Read-only from this object -- see the class doc. */
     private const val KEY_ROBOT_ALLOWANCE = "allowed_symbols"
@@ -127,6 +147,52 @@ object SymbolPlanStore {
             .distinct()
 
     /**
+     * Bumped whenever the stored allowance actually changes.
+     *
+     * The allowance lives in SharedPreferences, which nothing can observe, so a
+     * screen built from it has no way to know it went stale. Screens collect
+     * this and re-read.
+     */
+    private val _allowanceRevision = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val allowanceRevision: kotlinx.coroutines.flow.StateFlow<Int> = _allowanceRevision
+
+    /**
+     * Records a new allowance handed down by the server.
+     *
+     * The allowance used to be written exactly once, during licence activation,
+     * and never again. A mentor who added a symbol to their robot updated the
+     * database, the licence and the portal -- and every handset in the field
+     * carried on offering the old list forever, because nothing ever asked
+     * again. The only cure was re-activating the licence, which nobody would
+     * think to do and nothing prompted.
+     *
+     * `claim-signals` now carries it on every poll, so this is called roughly
+     * every twenty seconds. It writes only on a real change, and returns whether
+     * it wrote so the caller can say so in the terminal feed.
+     *
+     * An empty or absent list is ignored rather than applied. "The server told
+     * us nothing" and "the robot allows nothing" are different statements, and
+     * treating the first as the second would empty the Trading Symbols screen
+     * and stop the robot trading on a transient response.
+     */
+    fun updateAllowance(context: Context, incoming: List<String>?): Boolean {
+        val next = incoming
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            ?: return false
+
+        if (next.isEmpty()) return false
+        if (next == robotAllowance(context)) return false
+
+        prefs(context).edit().putString(KEY_ROBOT_ALLOWANCE, next.joinToString(",")).apply()
+        _allowanceRevision.value += 1
+
+        android.util.Log.i("NovaHost", "[SymbolPlan] allowance updated -> ${next.joinToString(",")}")
+        return true
+    }
+
+    /**
      * The stored plan, reconciled against the current allowance.
      *
      * Reconciling on read rather than on write is deliberate: the allowance can
@@ -134,8 +200,57 @@ object SymbolPlanStore {
      * refreshes, and a plan holding a symbol that is no longer permitted would
      * otherwise keep sizing trades the server will reject.
      */
+    /**
+     * Where this licence's plan is stored.
+     *
+     * The plan used to live under one device-wide key, which quietly assumed a
+     * handset only ever holds one licence. It does not -- the vault lets a user
+     * switch between keys, and a single device in this project has activated
+     * four. Everything in the plan is licence-specific: the symbols come from
+     * that robot's allowance, and `brokerSymbol` is the spelling used by the
+     * broker account bound to that licence.
+     *
+     * So a switch carried the previous licence's answers into the new one. Gold
+     * saved as `Gold` for a Trade245 licence went on being sent as `Gold` after
+     * a switch to a licence on a broker that lists `XAUUSD` -- an order rejected
+     * on arrival, recovered only by the fallback chain, and only after burning
+     * one signal.
+     *
+     * Falls back to the legacy key when there is no licence yet, so an install
+     * mid-activation still has somewhere coherent to read and write.
+     */
+    private fun planKey(context: Context): String {
+        val licence = prefs(context).getString("license_key", null)?.trim()?.uppercase()
+        return if (licence.isNullOrBlank()) KEY_PLAN_LEGACY else "symbol_plan:$licence"
+    }
+
+    /**
+     * Moves a pre-licence plan onto the active licence, once.
+     *
+     * The legacy entry is REMOVED after being adopted, and that removal is the
+     * point rather than tidiness: leaving it would let the next licence adopt
+     * the same plan too, which is precisely the bleed this change exists to
+     * stop. The first licence to look keeps the settings, everything after it
+     * starts clean.
+     */
+    private fun migrateLegacyPlan(context: Context, key: String) {
+        if (key == KEY_PLAN_LEGACY) return
+
+        val p = prefs(context)
+        val legacy = p.getString(KEY_PLAN_LEGACY, null)
+        if (legacy.isNullOrBlank()) return
+
+        p.edit().putString(key, legacy).remove(KEY_PLAN_LEGACY).apply()
+        android.util.Log.i("NovaHost", "[SymbolPlan] migrated device plan onto $key")
+    }
+
     fun load(context: Context): SymbolPlan {
-        val raw = prefs(context).getString(KEY_PLAN, null)
+        val key = planKey(context)
+        if (prefs(context).getString(key, null).isNullOrBlank()) {
+            migrateLegacyPlan(context, key)
+        }
+
+        val raw = prefs(context).getString(key, null)
         val stored = if (raw.isNullOrBlank()) {
             SymbolPlan()
         } else {
@@ -154,8 +269,10 @@ object SymbolPlanStore {
 
     fun save(context: Context, plan: SymbolPlan) {
         prefs(context).edit()
-            .putString(KEY_PLAN, json.encodeToString(SymbolPlan.serializer(), plan))
-            // The scanner's TradePlanner still reads these two directly.
+            .putString(planKey(context), json.encodeToString(SymbolPlan.serializer(), plan))
+            // The scanner's TradePlanner still reads these two directly, and they
+            // stay device-wide on purpose: they describe whichever licence is
+            // active, and they are rewritten on every save.
             .putFloat(KEY_SMART_LOT, plan.smartLotSize.toFloat())
             .putFloat(KEY_SMART_RISK, perTradeRiskPercent(plan).toFloat())
             .apply()
@@ -245,7 +362,9 @@ object SymbolPlanStore {
         val enabled: Boolean,
         val lot: Double,
         val max_trades: Int,
-        val smart_lot: Boolean
+        val smart_lot: Boolean,
+        /** Null rather than "" when unset -- see [SymbolConfig.brokerSymbol]. */
+        val broker_symbol: String? = null
     )
 
     @Serializable
@@ -300,7 +419,8 @@ object SymbolPlanStore {
                         enabled = it.enabled,
                         lot = it.lot,
                         max_trades = it.maxTrades,
-                        smart_lot = it.smartLot
+                        smart_lot = it.smartLot,
+                        broker_symbol = it.brokerSymbol.trim().ifBlank { null }
                     )
                 }
             )
@@ -327,6 +447,127 @@ object SymbolPlanStore {
             }
         } catch (e: Exception) {
             android.util.Log.w("NovaHost", "[SymbolPlan] sync failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    // ── Broker symbol discovery ────────────────────────────────────────────
+
+    @Serializable
+    private data class MappingDto(
+        val symbol: String,
+        val current: String? = null,
+        val suggested: String? = null,
+        val confidence: String? = null,
+        val current_is_valid: Boolean? = null
+    )
+
+    @Serializable
+    private data class DiscoverResponse(
+        val success: Boolean = false,
+        val code: String? = null,
+        val error: String? = null,
+        val broker_symbols: List<String> = emptyList(),
+        val mappings: List<MappingDto> = emptyList()
+    )
+
+    /**
+     * What the broker's own symbol list said, after it was applied to the plan.
+     *
+     * [unmatched] is the part that matters to the user: those are instruments
+     * their robot is allowed to trade and their broker does not appear to carry
+     * under any name, which is the one case that still needs a human.
+     */
+    data class Discovery(
+        /** Every name the broker lists, for the picker. */
+        val brokerSymbols: List<String>,
+        /** Canonical symbols that were resolved to a broker name. */
+        val matched: List<String>,
+        /** Canonical symbols the broker does not appear to offer. */
+        val unmatched: List<String>
+    )
+
+    /**
+     * Reads the instrument list off the user's own broker and fills in the names.
+     *
+     * This is the difference between asking someone to know that their broker
+     * spells the Nasdaq `.USTECH.` and simply telling them. `broker-symbols`
+     * returns the account's real Market Watch plus a best match for each symbol
+     * on the licence; this applies those matches, saves, and hands back what
+     * could not be resolved.
+     *
+     * A name the user has already set is never overwritten. Discovery fills
+     * blanks and reports conflicts -- it does not overrule a person who has
+     * looked at their own terminal.
+     *
+     * Failure is not fatal: the plan is untouched and the server still falls
+     * back to its own discovery at execution time, so a user who never opens
+     * this screen still trades.
+     */
+    suspend fun discover(context: Context): Result<Discovery> {
+        val licenseKey = prefs(context).getString("license_key", null)
+        if (licenseKey.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("No licence key on this device."))
+        }
+
+        return try {
+            val response = SupabaseSetup.client.httpClient.post(
+                "${BuildConfig.SUPABASE_URL}/functions/v1/broker-symbols"
+            ) {
+                header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                // The broker is queried live, so this is slower than a plain
+                // database read and must not be cut off mid-answer.
+                timeout { requestTimeoutMillis = 30_000 }
+                setBody(mapOf("license_key" to licenseKey.trim().uppercase()))
+            }
+
+            val parsed = json.decodeFromString<DiscoverResponse>(response.body<String>())
+
+            if (response.status.value !in 200..299 || !parsed.success) {
+                val reason = parsed.error ?: "Could not read your broker's symbols."
+                android.util.Log.w("NovaHost", "[SymbolPlan] discover: ${parsed.code} $reason")
+                return Result.failure(Exception(reason))
+            }
+
+            val plan = load(context)
+            val byCanonical = parsed.mappings.associateBy { it.symbol }
+
+            val applied = plan.symbols.map { cfg ->
+                val hit = byCanonical[cfg.symbol]
+                // Only ever fills a blank. `current` is what the server already
+                // holds, which is either a previous discovery or this user's own
+                // typing -- neither is ours to replace with a fresh guess.
+                val resolved = when {
+                    cfg.brokerSymbol.isNotBlank() -> cfg.brokerSymbol
+                    !hit?.current.isNullOrBlank() -> hit.current
+                    !hit?.suggested.isNullOrBlank() -> hit.suggested
+                    else -> ""
+                }
+                cfg.copy(brokerSymbol = resolved ?: "")
+            }
+
+            val updated = plan.copy(symbols = applied)
+            save(context, updated)
+
+            val matched = applied.filter { it.brokerSymbol.isNotBlank() }.map { it.symbol }
+            val unmatched = applied.filter { it.brokerSymbol.isBlank() }.map { it.symbol }
+
+            android.util.Log.i(
+                "NovaHost",
+                "[SymbolPlan] discovered ${matched.size}/${applied.size} broker symbols"
+            )
+
+            Result.success(
+                Discovery(
+                    brokerSymbols = parsed.broker_symbols,
+                    matched = matched,
+                    unmatched = unmatched
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("NovaHost", "[SymbolPlan] discover failed: ${e.message}")
             Result.failure(e)
         }
     }

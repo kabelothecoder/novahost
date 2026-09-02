@@ -62,6 +62,54 @@ object MetaAPIManager {
 
     val botStatus = MutableStateFlow(BotStatus.IDLE)
 
+    /**
+     * Whether the user has the robot switched on, remembered across a process
+     * death.
+     *
+     * [botStatus] is in-memory and starts IDLE. `NovaHostPulseService` is a
+     * foreground service with the default START_STICKY behaviour, so when
+     * Android reclaims the process it recreates the service on its own -- the
+     * notification comes back reading "Monitoring live trading signals", the
+     * realtime channel resubscribes, and every arriving signal is then dropped
+     * by the RUNNING gate in [com.novahost.app.service.SignalListener], because
+     * nothing restored the flag the user set.
+     *
+     * That is the worst shape a failure in this product can take: the app says
+     * it is trading, is genuinely connected, and will never place an order
+     * again until someone thinks to press STOP and START. Nothing on the screen
+     * suggests pressing anything.
+     *
+     * Written by ignition, read by the service when it comes back up.
+     */
+    private const val KEY_BOT_RUNNING = "bot_running"
+
+    fun persistRunState(context: android.content.Context, running: Boolean) {
+        context.getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_BOT_RUNNING, running)
+            .apply()
+    }
+
+    /**
+     * Puts [botStatus] back where the user left it after a process restart.
+     *
+     * Only ever promotes IDLE to RUNNING: a status already set in this process
+     * is the live truth and outranks anything on disk. Returns true when the
+     * robot should be considered running.
+     */
+    fun restoreRunState(context: android.content.Context): Boolean {
+        val wasRunning = context
+            .getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean(KEY_BOT_RUNNING, false)
+
+        if (wasRunning && botStatus.value == BotStatus.IDLE) {
+            botStatus.value = BotStatus.RUNNING
+            addLog(">> Robot resumed after restart")
+            android.util.Log.i("NovaHost", "PULSE: run state restored -- RUNNING")
+        }
+        return wasRunning
+    }
+
     private val _isSynchronized = MutableStateFlow(false)
     val isSynchronized: StateFlow<Boolean> = _isSynchronized
 
@@ -277,7 +325,18 @@ object MetaAPIManager {
         accountId: String,
         passwordRaw: String,
         platform: String = "mt5",
+        /**
+         * What this broker appends to instrument names -- `.m`, `.pro`, or empty.
+         *
+         * This parameter existed and was ignored. The screen computed it, passed
+         * it in, and the request built below left it out, so it never reached
+         * the licence and the executor sent bare `XAUUSD` to micro accounts
+         * whose book only lists `XAUUSD.m`. Every one of those orders was
+         * rejected by the broker, which is invisible from the handset.
+         */
         symbolSuffix: String = "",
+        /** The account type as the user picked it, e.g. "Micro — Bonus". */
+        accountType: String? = null,
         onPhase: (LinkPhase) -> Unit = {}
     ): Result<String> {
         return try {
@@ -313,7 +372,9 @@ object MetaAPIManager {
                 account_number = cleanAccount,
                 password = cleanPassword,
                 server = cleanServer,
-                platform = platform.uppercase()
+                platform = platform.uppercase(),
+                symbol_suffix = symbolSuffix.trim(),
+                account_type = accountType?.trim()
             )
 
             val httpResponse = SupabaseSetup.client.httpClient.post(
@@ -444,6 +505,52 @@ object MetaAPIManager {
     }
 
     // ── Trade execution (MetaCopier) ─────────────────────────────
+
+    /**
+     * A trade the server refused, carrying the reason in a form code can read.
+     *
+     * A bare `Exception(message)` forced every caller to match on prose, so
+     * nobody did, and every distinct refusal -- no account linked, symbol off,
+     * position cap, unknown symbol at the broker -- reached the user as the same
+     * undifferentiated failure.
+     */
+    class TradeRejected(
+        val code: String,
+        override val message: String,
+        val details: String? = null
+    ) : Exception(message)
+
+    /**
+     * Asks the server whether this device would actually be able to trade, and
+     * stops short of proving it with real money.
+     *
+     * Everything the executor does runs: the licence is authorised, the trading
+     * account resolved, the symbol plan applied, the size capped and the broker
+     * symbol worked out. Only the order is withheld.
+     *
+     * This exists because the pipeline's failures were all silent ones. A device
+     * with no broker account linked, a symbol switched off, a licence bound to a
+     * different mentor's robot -- all of them look identical from the home
+     * screen to a quiet market, and the difference only became visible when a
+     * signal that mattered failed to trade.
+     */
+    suspend fun verifyExecutionPath(
+        context: android.content.Context,
+        pair: String
+    ): Result<String> = executeTrade(
+        context = context,
+        pair = pair,
+        side = "BUY",
+        // The smallest lot any broker accepts. Nothing is placed, but the size
+        // still travels through the cap and the broker's own volume rules, so it
+        // has to be a size that could legitimately be sent.
+        volume = SymbolPlanStore.MIN_LOT,
+        sl = 0.0,
+        tp = 0.0,
+        signalId = null,
+        dryRun = true
+    )
+
     /**
      * Places a market order through metacopier-execute.
      *
@@ -458,7 +565,21 @@ object MetaAPIManager {
         volume: Double,
         sl: Double? = 0.0,
         tp: Double? = 0.0,
-        signalId: String? = null
+        signalId: String? = null,
+        /** MARKET / LIMIT / STOP. Null keeps the historic market-order behaviour. */
+        orderType: String? = null,
+        /** Where a pending order waits. Ignored unless [orderType] is LIMIT or STOP. */
+        openPrice: Double? = null,
+        /** Seconds until the broker cancels an unfilled pending order. */
+        pendingExpirySeconds: Int? = null,
+        /**
+         * Exercises the whole path without opening a position.
+         *
+         * Used by [verifyExecutionPath] so a user, or whoever is helping them,
+         * can find out whether this device would actually trade -- rather than
+         * discovering the answer the next time the mentor calls a setup.
+         */
+        dryRun: Boolean = false
     ): Result<String> {
         return try {
             val licenseKey = context
@@ -476,7 +597,11 @@ object MetaAPIManager {
                 volume = volume,
                 sl = sl,
                 tp = tp,
-                signal_id = signalId
+                signal_id = signalId,
+                order_type = orderType,
+                open_price = openPrice,
+                pending_expiry_seconds = pendingExpirySeconds,
+                dry_run = dryRun
             )
 
             val response: io.ktor.client.statement.HttpResponse =
@@ -498,12 +623,17 @@ object MetaAPIManager {
             // A 2xx with success=false is still a failure -- never report a
             // trade as placed unless the broker actually accepted it.
             if (response.status.value in 200..299 && parsed.success) {
-                android.util.Log.i("NovaHost", "[Trade] ${parsed.message}")
+                android.util.Log.i("NovaHost", "[Trade] ${parsed.code ?: "OK"} ${parsed.message}")
                 Result.success(parsed.message ?: "Trade sent.")
             } else {
-                val reason = parsed.error ?: "Execution failed (${response.status.value})"
-                android.util.Log.e("NovaHost", "[Trade] $reason ${parsed.details ?: ""}")
-                Result.failure(Exception(reason))
+                // The code is carried into the message so it survives into the
+                // terminal feed and the failure notification. A user reporting
+                // "Order rejected: NO_ACCOUNT_LINKED" can be helped; one
+                // reporting "Order rejected" cannot.
+                val code = parsed.code ?: "HTTP_${response.status.value}"
+                val reason = parsed.error ?: "Execution failed ($code)"
+                android.util.Log.e("NovaHost", "[Trade] $code: $reason ${parsed.details ?: ""}")
+                Result.failure(TradeRejected(code, reason, parsed.details))
             }
         } catch (e: Exception) {
             android.util.Log.e("NovaHost", "[Trade] Execution failed", e)
@@ -511,26 +641,76 @@ object MetaAPIManager {
         }
     }
 
-    // ── Heartbeat Pulse ──────────────────────────────────────────
-    fun startHeartbeatPulse(context: android.content.Context, deviceId: String) {
-        managerScope.launch {
-            val prefs = context.getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
-            val licenseKey = prefs.getString("license_key", null) ?: return@launch
+    /**
+     * Asks the server for any signals this device has not yet taken.
+     *
+     * Every signal returned has been claimed server-side against this licence:
+     * no other handset on the same key will receive it, and polling again will
+     * not produce it a second time. That makes the caller's contract strict --
+     * act on each one exactly once, because anything ignored here is gone.
+     *
+     * See `claim-signals` for why the pull path exists: realtime broadcast has
+     * no acknowledgement and no replay, so it cannot be the only way a trade
+     * arrives.
+     */
+    suspend fun claimSignals(context: android.content.Context): Result<ClaimSignalsResponse> {
+        return try {
+            val prefs = context
+                .getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+            val licenseKey = prefs.getString("license_key", null)
 
-            while (true) {
-                try {
-                    SupabaseSetup.client
-                        .from("device_activations")
-                        .update(mapOf("last_seen_at" to java.time.Instant.now().toString())) {
-                            filter {
-                                eq("device_id", deviceId)
-                            }
-                        }
-                } catch (e: Exception) {
-                    android.util.Log.e("NovaHost", "Heartbeat pulse failed", e)
-                }
-                kotlinx.coroutines.delay(60000) // Pulse every 60 seconds
+            if (licenseKey.isNullOrBlank()) {
+                return Result.failure(IllegalStateException("No licence key on this device."))
             }
+
+            val response: io.ktor.client.statement.HttpResponse =
+                SupabaseSetup.client.httpClient.post(
+                    "${BuildConfig.SUPABASE_URL}/functions/v1/claim-signals"
+                ) {
+                    header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                    header(io.ktor.http.HttpHeaders.ContentType, io.ktor.http.ContentType.Application.Json)
+                    header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                    // Short by design. This runs on a timer, and a poll still
+                    // hanging when the next one is due is a poll worth abandoning.
+                    timeout { requestTimeoutMillis = 20_000 }
+                    setBody(
+                        mapOf(
+                            "license_key" to licenseKey.trim().uppercase(),
+                            "device_id" to DeviceSecurityHelper.getDeviceId(context)
+                        )
+                    )
+                }
+
+            val parsed = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                .decodeFromString<ClaimSignalsResponse>(response.body<String>())
+
+            if (response.status.value in 200..299 && parsed.success) {
+                Result.success(parsed)
+            } else {
+                Result.failure(
+                    Exception(parsed.error ?: "Could not fetch signals (${response.status.value})")
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
+
+    // ── Heartbeat ────────────────────────────────────────────────
+    //
+    // There is no client-side heartbeat any more, and there should not be one.
+    //
+    // `startHeartbeatPulse` used to live here: a 60-second timer writing
+    // `device_activations.last_seen_at`. Two things were wrong with it. It was
+    // never called from anywhere, so the portal's "terminals online" figure was
+    // really "validated a licence recently", which only happens when the app is
+    // opened. And it filtered on `device_id` alone, so a handset that had
+    // activated four keys pulsed all four rows -- one phone counted as four live
+    // terminals, including on robots the user had moved off months earlier.
+    //
+    // `claim-signals` now does it, correctly scoped to the licence, on the same
+    // request that polls for work. That is a stronger guarantee than a separate
+    // timer could give: a device is marked alive exactly when it is asking for
+    // signals, so "online" in the portal means "will act on your call" instead
+    // of "has the app installed".
 }

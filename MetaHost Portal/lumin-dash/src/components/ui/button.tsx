@@ -5,13 +5,20 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:scale-[1.02] active:scale-[0.98]",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // Pill on the commit actions only. Full pills read as inflated on the
+        // toolbar and in-table controls this portal is dense with, so ghost,
+        // outline and secondary stay on the base radius.
+        default: "rounded-full bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+          "rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        // Trade direction. The only saturated blocks on a dispatch screen —
+        // reserve them for the actual buy/sell commit, nothing else.
+        long: "rounded-full bg-long text-long-foreground hover:bg-long/90",
+        short: "rounded-full bg-short text-short-foreground hover:bg-short/90",
         outline:
           "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
         secondary:

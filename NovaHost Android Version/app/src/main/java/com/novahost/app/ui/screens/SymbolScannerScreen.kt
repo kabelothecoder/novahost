@@ -10,6 +10,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,7 +67,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +79,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.novahost.app.navigation.Routes
 import com.novahost.app.sdk.ForexRepository
 import com.novahost.app.sdk.MetaAPIManager
@@ -109,6 +115,28 @@ import kotlinx.coroutines.launch
  */
 enum class ScanStage { INPUT, SCANNING, SCORE, PLAN, CONTEXT }
 
+/**
+ * Where a running scan actually is.
+ *
+ * These are the pipeline's real phases, not a loading animation's script. The
+ * scanning screen used to cycle four labels on a 4.2-second loop regardless of
+ * what the app was doing, which on a slow network meant it claimed to be
+ * "scoring confluence" while it was still waiting on the first response -- and
+ * looped back to "reading the chart" on a scan that had already finished
+ * reading.
+ *
+ * Two of the four are network calls and two are local arithmetic that completes
+ * in microseconds. That is honest: the wait really is almost all [READING], and
+ * a progress display that pretends the last two steps take time is the same
+ * class of lie as a confluence check that scores data it never received.
+ */
+enum class ScanPhase(val label: String, val detail: String) {
+    PRICING("Pricing the symbol", "asking your broker where it is trading"),
+    READING("Reading the chart", "the model is looking at your screenshot"),
+    SIZING("Measuring the stop", "turning the entry and stop into lots"),
+    SCORING("Scoring confluence", "running the five checks on this device")
+}
+
 @Composable
 fun SymbolScannerScreen(
     navController: NavController,
@@ -126,19 +154,66 @@ fun SymbolScannerScreen(
     val balance by MetaAPIManager.balance.collectAsState()
     val livePrices by ForexRepository.livePrices.collectAsState()
     val calendar by ForexRepository.economicCalendar.collectAsState()
+    // Whether the calendar was read at all, not whether it came back empty. The
+    // event check and the event guardrail both need the difference -- see
+    // ConfluenceEngine.eventCheck.
+    val calendarAvailable by ForexRepository.calendarAvailable.collectAsState()
 
-    // The robot's own symbol list is the watchlist. Falling back to a fixed set
-    // rather than an empty rail: a scanner with nothing to scan is a dead end,
-    // and an unactivated install has no robot yet.
+    /**
+     * The robot's symbols, narrowed to the ones this subscriber actually trades.
+     *
+     * Three sources, most specific first:
+     *
+     *  1. `SymbolPlanStore.load().selected` -- the symbols ticked on Trading
+     *     Symbols. Scanning one the user switched off is a dead end: the
+     *     executor answers SYMBOL_DISABLED and the scan is spent.
+     *  2. `robotAllowance` -- the mentor's allowance, for an install that has
+     *     not opened the Trading Symbols screen yet.
+     *  3. A fixed pair, only when there is no robot at all.
+     *
+     * It used to read `branding.allowedSymbols`, which is hydrated once in
+     * MainActivity from a raw prefs string and never refreshed -- so the rail
+     * showed EUR/USD, XAU/USD and GBP/JPY on installs whose licence actually
+     * permits NAS100, XAUUSD, US30 and EURUSD. Three of those four are not
+     * tradeable on any licence in the system, so a scan of them could only ever
+     * end in a rejection.
+     */
     val symbols = remember(branding.allowedSymbols) {
-        branding.allowedSymbols.takeIf { it.isNotEmpty() } ?: listOf("EUR/USD", "XAU/USD", "GBP/JPY")
+        val plan = com.novahost.app.sdk.SymbolPlanStore.load(context)
+        val enabled = plan.selected.map { it.symbol }.filter { it.isNotBlank() }
+        when {
+            enabled.isNotEmpty() -> enabled
+            else -> com.novahost.app.sdk.SymbolPlanStore.robotAllowance(context)
+                .takeIf { it.isNotEmpty() }
+                ?: branding.allowedSymbols.takeIf { it.isNotEmpty() }
+                ?: listOf("XAUUSD")
+        }
     }
 
     var stage by remember { mutableStateOf(ScanStage.INPUT) }
     var symbol by remember { mutableStateOf(symbols.first()) }
     var mode by remember { mutableStateOf(ScanMode.DAY) }
+    // Remembered across scans: a trader reads one way, and re-picking it on
+    // every scan would be the app forgetting who they are.
+    var strategy by remember {
+        mutableStateOf(
+            ScanStrategy.from(
+                context.getSharedPreferences("nova_appearance", android.content.Context.MODE_PRIVATE)
+                    .getString("scan_strategy", null)
+            )
+        )
+    }
     var preset by remember { mutableStateOf(AllocationPreset.Default) }
     var riskPercent by remember { mutableStateOf(1.0) }
+    /**
+     * The balance the plan is sized against, reported by the calculator card.
+     *
+     * Zero until the card first reports, which it does on composition.
+     */
+    var sizingBalance by remember { mutableStateOf(0.0) }
+    /** Display currency and USD->currency rate, reported by the calculator. */
+    var displayCurrency by remember { mutableStateOf("USD") }
+    var displayRate by remember { mutableStateOf(1.0) }
     var chartUri by remember { mutableStateOf<Uri?>(null) }
     var isSample by remember { mutableStateOf(false) }
     var instrument by remember { mutableStateOf<Instrument?>(null) }
@@ -146,6 +221,29 @@ fun SymbolScannerScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showConfirm by remember { mutableStateOf(false) }
     var executionNote by remember { mutableStateOf<String?>(null) }
+    /**
+     * What the chart disagrees with the app about.
+     *
+     * A list rather than a field per check: both of these say "the screenshot is
+     * not what you told the app it was", they are read together, and stacking a
+     * separate amber panel per check would turn two useful warnings into
+     * wallpaper.
+     */
+    var scanWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    /**
+     * The user's own guardrail limits, loaded once and edited through the sheet.
+     *
+     * Was `GuardrailConfig()` constructed inline on every recomposition, which
+     * made "your rules" and the EDIT MY RULES button both untrue.
+     */
+    var guardrailConfig by remember { mutableStateOf(GuardrailStore.load(context)) }
+    var showGuardrailSheet by remember { mutableStateOf(false) }
+
+    /** Losses in a row on the linked account. Null means it could not be read. */
+    var lossStreak by remember { mutableStateOf<Int?>(null) }
+    /** Which real phase a running scan is in. See [ScanPhase]. */
+    var scanPhase by remember { mutableStateOf(ScanPhase.PRICING) }
 
     // The scanner is a separate once-off purchase from app access. The screen
     // stays fully visible either way -- the gate is on the scan, not on the
@@ -160,33 +258,58 @@ fun SymbolScannerScreen(
     // The plan and everything scored off it are derived, never stored. The
     // allocation rail on the plan state rebalances live, and a stored plan would
     // have meant three copies of the same figures drifting apart on every tap.
-    val plan = remember(reading, instrument, preset, balance, riskPercent) {
+    // What the plan is actually sized against, in the order the user would
+    // expect: the figure they typed into the calculator, then the linked
+    // terminal's, then the stand-in.
+    //
+    // The typed figure used to be dropped on the floor -- the card reported only
+    // a risk percent -- so the plan sized off the terminal or off $10,000 while
+    // the card above it did its arithmetic on something else entirely.
+    val effectiveBalance = when {
+        sizingBalance > 0.0 -> sizingBalance
+        balance > 0.0 -> balance
+        else -> SAMPLE_BALANCE
+    }
+    /** True when neither the user nor a terminal supplied a balance. */
+    val balanceIsStandIn = sizingBalance <= 0.0 && balance <= 0.0
+
+    val plan = remember(reading, instrument, preset, effectiveBalance, riskPercent, mode, displayCurrency, displayRate) {
         val r = reading
         val i = instrument
         if (r == null || i == null) null
         else TradePlanner.build(
             instrument = i,
             reading = r,
-            // An unconnected terminal reports zero. Sizing off zero yields a
-            // zero position and a plan of blanks, so the preview balance stands
-            // in and the input state labels it.
-            balance = if (balance > 0.0) balance else SAMPLE_BALANCE,
+            balance = effectiveBalance,
             riskPercent = riskPercent,
-            preset = preset
+            preset = preset,
+            mode = mode,
+            displayCurrency = displayCurrency,
+            displayRate = displayRate
         )
     }
-    val confluence = remember(plan, reading, instrument, mode) {
+    val confluence = remember(plan, reading, instrument, mode, calendarAvailable) {
         val r = reading
         val i = instrument
         val p = plan
         if (r == null || i == null || p == null) null
-        else ConfluenceEngine.score(i, r, p, mode)
+        else ConfluenceEngine.score(i, r, p, mode, calendarAvailable)
     }
-    val guardrails = remember(plan, reading) {
+    // Re-evaluated when the rules change, so saving in the sheet re-scores the
+    // plan behind it immediately -- including flipping it to BLOCKED.
+    val guardrails = remember(plan, reading, calendarAvailable, guardrailConfig, lossStreak) {
         val r = reading
         val p = plan
         if (r == null || p == null) null
-        else Guardrails.evaluate(p, r, GuardrailConfig(), consecutiveLosses = 0)
+        else Guardrails.evaluate(
+            plan = p,
+            reading = r,
+            config = guardrailConfig,
+            // Read from the broker's closed trades by `broker-history`, and null
+            // when that could not be established. Null warns; it does not pass.
+            consecutiveLosses = lossStreak,
+            calendarAvailable = calendarAvailable
+        )
     }
 
     fun resetToInput() {
@@ -195,6 +318,7 @@ fun SymbolScannerScreen(
         instrument = null
         isSample = false
         errorMessage = null
+        scanWarnings = emptyList()
     }
 
     fun runSample() {
@@ -211,6 +335,7 @@ fun SymbolScannerScreen(
         }
         val uri = chartUri ?: return
         stage = ScanStage.SCANNING
+        scanPhase = ScanPhase.PRICING
         errorMessage = null
         scope.launch {
             val encoded = encodeChart(context, uri)
@@ -219,6 +344,19 @@ fun SymbolScannerScreen(
                 stage = ScanStage.INPUT
                 return@launch
             }
+            // Asked before the chart is read, and allowed to come back null.
+            // A quote improves the instrument; it is not a precondition for
+            // reading a chart, so a disconnected broker costs precision rather
+            // than the whole scan.
+            val quote = ScanSource.brokerQuote(context, symbol)
+
+            // Same broker, same phase, so it rides along with the quote rather
+            // than adding a round trip the user waits through.
+            lossStreak = ScanSource.lossStreak(context)
+
+            // Broker answered (or did not). Either way the pricing phase is over.
+            scanPhase = ScanPhase.READING
+
             val built = ScanSource.buildInstrument(
                 symbol = symbol,
                 livePrice = livePrices[ScanSource.feedKey(symbol)],
@@ -229,18 +367,57 @@ fun SymbolScannerScreen(
                     .ifBlank { "Closed" },
                 sessionOpen = ForexRepository.marketSessions.value.any { it.isOpen },
                 spreadPips = null,
-                atrPips = null
+                atrPips = null,
+                quote = quote
             )
-            ScanSource.analyzeChart(encoded)
+            ScanSource.analyzeChart(
+                imageBase64 = encoded,
+                pair = symbol,
+                mode = mode,
+                strategy = strategy,
+                email = mainViewModel.userEmail.value.ifEmpty {
+                    com.novahost.app.sdk.Entitlements.savedEmail(context)
+                },
+                deviceId = com.novahost.app.sdk.DeviceSecurityHelper.getDeviceId(context)
+            )
                 .onSuccess { verdict ->
+                    // The two remaining phases are local and finish in microseconds.
+                    // Reported anyway so the list is a record of what ran, not a
+                    // countdown invented to fill the wait.
+                    scanPhase = ScanPhase.SIZING
                     val events = ScanSource.buildEvents(symbol, calendar)
-                    instrument = built
-                    reading = ScanSource.toReading(verdict, built, events)
+                    // The ATR arrives with the reading, not before it, so the
+                    // instrument is completed here rather than at build time.
+                    val priced = ScanSource.withMeasuredAtr(built, verdict)
+                    instrument = priced
+                    reading = ScanSource.toReading(verdict, priced, events)
+                    // Surfaced, not blocked. Everything downstream keys off the
+                    // SELECTED symbol and the SELECTED mode -- the scan cannot
+                    // adopt what the chart says -- so a disagreement has to be
+                    // shown rather than silently resolved either way.
+                    scanWarnings = listOfNotNull(
+                        ScanSource.symbolMismatch(verdict, symbol)?.let { onChart ->
+                            "This chart is labelled " + onChart + ", but " + symbol +
+                                " is selected. The plan below sizes and sends " + symbol +
+                                ". Go back and pick the right pair."
+                        },
+                        ScanSource.timeframeMismatch(verdict, mode)?.let { tf ->
+                            "This is a " + tf + " chart scanned in " + mode.label +
+                                " mode, which reads " + mode.timeframes +
+                                ". The stop and the volatility score are measured against the " +
+                                "wrong horizon."
+                        }
+                    )
+                    scanPhase = ScanPhase.SCORING
                     isSample = false
                     stage = ScanStage.SCORE
                 }
                 .onFailure { failure ->
                     errorMessage = failure.message ?: "The scan did not complete."
+                    // A locked scanner is a purchase prompt, not an error line.
+                    if ((failure as? ScanRefused)?.code == "SCANNER_LOCKED") {
+                        showScannerGate = true
+                    }
                     stage = ScanStage.INPUT
                 }
         }
@@ -272,10 +449,19 @@ fun SymbolScannerScreen(
                     onSymbol = { symbol = it },
                     mode = mode,
                     onMode = { mode = it },
+                    strategy = strategy,
+                    onStrategy = {
+                        strategy = it
+                        context.getSharedPreferences("nova_appearance", android.content.Context.MODE_PRIVATE)
+                            .edit().putString("scan_strategy", it.name).apply()
+                    },
                     balance = balance,
                     onRisk = { riskPercent = it },
+                    onBalance = { sizingBalance = it },
+                    onCurrency = { code, rate -> displayCurrency = code; displayRate = rate },
                     scannerUnlocked = hasScanner,
                     chartAttached = chartUri != null,
+                    chartUri = chartUri,
                     onAttach = { chartPicker.launch("image/*") },
                     robotName = branding.name.ifBlank { "NO ROBOT" },
                     robotAvatar = branding.avatarUrl,
@@ -287,7 +473,13 @@ fun SymbolScannerScreen(
                     onAddKeys = { navController.navigate(Routes.ACTIVATE) }
                 )
 
-                ScanStage.SCANNING -> ScanRunningState(accent = accent)
+                ScanStage.SCANNING -> ScanRunningState(
+                    accent = accent,
+                    chartUri = chartUri,
+                    symbol = symbol,
+                    strategy = strategy,
+                    phase = scanPhase
+                )
 
                 ScanStage.SCORE -> {
                     val c = confluence
@@ -301,6 +493,7 @@ fun SymbolScannerScreen(
                             mode = mode,
                             glow = glow,
                             isSample = isSample,
+                            warnings = scanWarnings,
                             onBack = ::resetToInput,
                             onAdvance = { stage = ScanStage.PLAN }
                         )
@@ -316,6 +509,7 @@ fun SymbolScannerScreen(
                             confluence = c,
                             accent = accent,
                             preset = preset,
+                            balanceIsStandIn = balanceIsStandIn,
                             onPreset = { preset = it },
                             onBack = { stage = ScanStage.SCORE },
                             onAdvance = { stage = ScanStage.CONTEXT }
@@ -348,13 +542,30 @@ fun SymbolScannerScreen(
                                 accent = accent,
                                 isSample = isSample,
                                 executionNote = executionNote,
+                                calendarAvailable = calendarAvailable,
                                 onBack = { stage = ScanStage.PLAN },
+                                onEditRules = { showGuardrailSheet = true },
                                 onExecute = { showConfirm = true }
                             )
                         }
                     }
                 }
             }
+        }
+
+        // Opened from EDIT MY RULES on the guardrail panel and from the tune
+        // icon in the Context header -- both of which were decoration until now.
+        if (showGuardrailSheet) {
+            GuardrailSheet(
+                config = guardrailConfig,
+                accent = accent,
+                onDismiss = { showGuardrailSheet = false },
+                onSave = { updated ->
+                    guardrailConfig = updated
+                    GuardrailStore.save(context, updated)
+                    showGuardrailSheet = false
+                }
+            )
         }
 
         if (showConfirm && plan != null) {
@@ -374,7 +585,18 @@ fun SymbolScannerScreen(
                                 side = confirmed.direction.label,
                                 volume = leg.lots,
                                 sl = confirmed.stop,
-                                tp = leg.price
+                                tp = leg.price,
+                                // Market, or a pending order waiting at the
+                                // entry. Without these the executor sends
+                                // openPrice 0 -- MetaCopier's market flag -- and
+                                // a retest entry fills wherever price happens to
+                                // be, with a stop and targets built around a
+                                // level that was never traded.
+                                orderType = confirmed.entryType.name,
+                                openPrice = confirmed.openPriceForBroker,
+                                // The broker cancels it if price never comes back,
+                                // so a stale setup cannot fire days later.
+                                pendingExpirySeconds = confirmed.pendingExpirySeconds
                             )
                         }
                         val failed = results.count { it.isFailure }
@@ -463,10 +685,16 @@ private fun ScanInputState(
     onSymbol: (String) -> Unit,
     mode: ScanMode,
     onMode: (ScanMode) -> Unit,
+    strategy: ScanStrategy,
+    onStrategy: (ScanStrategy) -> Unit,
     balance: Double,
     onRisk: (Double) -> Unit,
+    onBalance: (Double) -> Unit,
+    onCurrency: (String, Double) -> Unit,
     scannerUnlocked: Boolean,
     chartAttached: Boolean,
+    /** The picked screenshot, so the card can show it rather than describe it. */
+    chartUri: Uri?,
     onAttach: () -> Unit,
     robotName: String,
     robotAvatar: String?,
@@ -530,52 +758,118 @@ private fun ScanInputState(
                 )
             }
 
+            // How to read the chart, as opposed to how long to hold it. The old
+            // endpoint hardcoded an SMC prompt, so every scan was an SMC read
+            // whether or not that is how the user trades.
+            Column {
+                ScanSectionLabel("STRATEGY")
+                Spacer(Modifier.height(8.dp))
+                SegmentedGrid(
+                    options = ScanStrategy.entries.toList(),
+                    selected = strategy,
+                    accent = accent,
+                    onSelect = onStrategy,
+                    label = { it.label },
+                    caption = { it.caption }
+                )
+            }
+
             // Balance, risk and trade count in one place. This replaced a pair
             // of read-only tiles whose risk figure could only be cycled through
             // 0.5 / 1.0 / 1.5 / 2.0 by tapping it.
             TradeCalculatorCard(
                 accent = accent,
                 terminalBalance = balance,
-                onPerTradeRiskPercent = onRisk
+                onPerTradeRiskPercent = onRisk,
+                onBalance = onBalance,
+                onCurrency = onCurrency
             )
 
-            DashedCard(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onAttach),
-                background = if (chartAttached) accent.copy(alpha = 0.06f) else ScanSurfaceGlass,
-                borderColor = if (chartAttached) accent.copy(alpha = 0.5f) else ScanBorderStrong
-            ) {
-                Box(
+            // Attached: the screenshot itself, at a size you can actually read.
+            // A tick and the words "Chart attached" asked the user to take it on
+            // faith that the right image went up -- and the one mistake this
+            // screen cannot recover from is scanning yesterday's screenshot,
+            // which looks identical to scanning today's until the plan is wrong.
+            if (chartUri != null) {
+                Column(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(ScanWell),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(ScanSurfaceGlass)
+                        .border(1.dp, accent.copy(alpha = 0.42f), RoundedCornerShape(18.dp))
+                        .clickable(onClick = onAttach)
                 ) {
-                    Icon(
-                        if (chartAttached) Icons.Rounded.CheckCircle else Icons.Rounded.AddPhotoAlternate,
-                        contentDescription = null,
-                        tint = if (chartAttached) accent.onArtFloor() else HomeTextDim,
-                        modifier = Modifier.size(20.dp)
+                    AsyncImage(
+                        model = chartUri,
+                        contentDescription = "The chart you attached",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(168.dp)
+                            .background(ScanWell)
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = accent.onArtFloor(),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Chart attached",
+                            color = HomeTextValue,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "TAP TO SWAP",
+                            color = HomeTextFaint,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (chartAttached) "Chart attached" else "Attach your chart",
-                        color = HomeTextValue,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        if (chartAttached) {
-                            "Tap to swap it for a different screenshot."
-                        } else {
-                            "Your drawings and levels get folded into the score."
-                        },
-                        color = HomeTextFaint,
-                        fontSize = 10.sp,
-                        lineHeight = 15.sp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
+            } else {
+                DashedCard(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onAttach),
+                    background = ScanSurfaceGlass,
+                    borderColor = ScanBorderStrong
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ScanWell),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.AddPhotoAlternate,
+                            contentDescription = null,
+                            tint = HomeTextDim,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Attach your chart",
+                            color = HomeTextValue,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Your drawings and levels get folded into the score.",
+                            color = HomeTextFaint,
+                            fontSize = 10.sp,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -826,47 +1120,200 @@ private fun RobotRail(
  * kept because it sets the right expectation about what is happening.
  */
 @Composable
-private fun ScanRunningState(accent: Color) {
-    val steps = listOf(
-        "Reading the chart",
-        "Finding structure",
-        "Measuring the stop",
-        "Scoring confluence"
-    )
+private fun ScanRunningState(
+    accent: Color,
+    chartUri: Uri?,
+    symbol: String,
+    strategy: ScanStrategy,
+    phase: ScanPhase
+) {
+    val steps = ScanPhase.entries.toList()
     val transition = rememberInfiniteTransition(label = "scan")
-    val progress by transition.animateFloat(
+
+    // One pass of the reticle down the chart, and the step list is derived from
+    // the same clock -- so the words under the chart describe the band the user
+    // is watching rather than running on a timer of their own.
+    val sweep by transition.animateFloat(
         initialValue = 0f,
-        targetValue = steps.size.toFloat(),
-        animationSpec = infiniteRepeatable(tween(4200, easing = FastOutSlowInEasing), RepeatMode.Restart),
-        label = "scanStep"
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "sweep"
+    )
+    // A slow pulse on the phase that is actually running. It carries "still
+    // working" without implying progress the app cannot measure -- the previous
+    // build animated a fake position through the list, which on a slow network
+    // reached "scoring confluence" while the first request was still in flight.
+    val pulse by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse"
     )
 
+    val ink = accent.onArtFloor()
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = ScannerGutter),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = ScannerGutter)
+            .navigationBarsPadding(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        CircularProgressIndicator(color = accent.onArtFloor(), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
-        Spacer(Modifier.height(28.dp))
-        steps.forEachIndexed { index, step ->
-            val reached = progress >= index
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(color = ink, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(9.dp))
+            Text(
+                "SCANNING " + symbol.uppercase() + " · " + strategy.label.uppercase(),
+                color = ink,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        // The chart being scanned, with the reticle drawn over it. Showing the
+        // real screenshot is the point: a spinner over a blank screen asks the
+        // user to believe work is happening, and this lets them watch it.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(ScanWell)
+                .border(1.dp, accent.copy(alpha = 0.34f), RoundedCornerShape(20.dp))
+        ) {
+            if (chartUri != null) {
+                AsyncImage(
+                    model = chartUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+
+                // A scrim so the overlay reads against a bright chart, lifted
+                // where the band is passing.
+                drawRect(color = Color.Black.copy(alpha = 0.34f))
+
+                // Analysis grid. Faint -- it frames the chart, it does not
+                // compete with the candles underneath.
+                val cells = 6
+                repeat(cells - 1) { i ->
+                    val f = (i + 1f) / cells
+                    drawLine(
+                        color = accent.copy(alpha = 0.10f),
+                        start = Offset(w * f, 0f),
+                        end = Offset(w * f, h),
+                        strokeWidth = 1f
+                    )
+                    drawLine(
+                        color = accent.copy(alpha = 0.10f),
+                        start = Offset(0f, h * f),
+                        end = Offset(w, h * f),
+                        strokeWidth = 1f
+                    )
+                }
+
+                // The sweep: a soft band with a hot line at its leading edge.
+                val y = h * sweep
+                val band = h * 0.18f
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            accent.copy(alpha = 0.28f),
+                            accent.copy(alpha = 0.06f)
+                        ),
+                        startY = y - band,
+                        endY = y
+                    ),
+                    topLeft = Offset(0f, (y - band).coerceAtLeast(0f)),
+                    size = Size(w, band.coerceAtMost(y).coerceAtLeast(0f))
+                )
+                drawLine(
+                    color = ink,
+                    start = Offset(0f, y),
+                    end = Offset(w, y),
+                    strokeWidth = 2.5f
+                )
+
+                // Corner brackets. The camera-focus idiom, which is what makes
+                // the frame read as "being examined" rather than "being shown".
+                val arm = 26f
+                val inset = 12f
+                val bracket = accent.copy(alpha = 0.85f)
+                listOf(
+                    Triple(Offset(inset, inset), Offset(inset + arm, inset), Offset(inset, inset + arm)),
+                    Triple(Offset(w - inset, inset), Offset(w - inset - arm, inset), Offset(w - inset, inset + arm)),
+                    Triple(Offset(inset, h - inset), Offset(inset + arm, h - inset), Offset(inset, h - inset - arm)),
+                    Triple(Offset(w - inset, h - inset), Offset(w - inset - arm, h - inset), Offset(w - inset, h - inset - arm))
+                ).forEach { (corner, horizontal, vertical) ->
+                    drawLine(bracket, corner, horizontal, strokeWidth = 3f)
+                    drawLine(bracket, corner, vertical, strokeWidth = 3f)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        steps.forEach { step ->
+            val done = step.ordinal < phase.ordinal
+            val active = step == phase
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(if (active) 8.dp else 6.dp)
                         .clip(CircleShape)
-                        .background(if (reached) accent.onArtFloor() else HomeBorderStrong)
+                        .background(
+                            when {
+                                active -> ink.copy(alpha = pulse)
+                                done -> ink
+                                else -> HomeBorderStrong
+                            }
+                        )
                 )
                 Spacer(Modifier.width(14.dp))
-                Text(
-                    step,
-                    color = if (reached) HomeTextPrimary else HomeTextFaint,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        step.label,
+                        color = when {
+                            active -> ScanTextBright
+                            done -> HomeTextPrimary
+                            else -> HomeTextFaint
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold
+                    )
+                    // Only the running step explains itself. Four permanent
+                    // subtitles would be a wall of text on a screen the user is
+                    // waiting through.
+                    if (active) {
+                        Text(
+                            step.detail,
+                            color = HomeTextFaint,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(top = 1.dp)
+                        )
+                    }
+                }
+                if (done) {
+                    Icon(
+                        Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        tint = ink.copy(alpha = 0.65f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
     }
@@ -882,6 +1329,7 @@ private fun ScanScoreState(
     mode: ScanMode,
     glow: NovaGlow,
     isSample: Boolean,
+    warnings: List<String>,
     onBack: () -> Unit,
     onAdvance: () -> Unit
 ) {
@@ -924,6 +1372,25 @@ private fun ScanScoreState(
             Spacer(Modifier.height(18.dp))
 
             if (isSample) SampleBadge(Modifier.padding(bottom = 14.dp))
+
+            // Above the score, because these qualify everything under them: the
+            // plan sizes and sends the SELECTED symbol on the SELECTED horizon
+            // whatever the chart turned out to be.
+            //
+            // One panel however many warnings there are. Two stacked amber
+            // blocks read as decoration; one block with two lines reads as a
+            // list of things to fix.
+            if (warnings.isNotEmpty()) {
+                ScanNote(
+                    icon = Icons.Rounded.GppMaybe,
+                    text = warnings.joinToString("\n\n"),
+                    tint = ScanWarn,
+                    background = ScanWarn.copy(alpha = 0.06f),
+                    borderColor = ScanWarn.copy(alpha = 0.32f),
+                    textColor = ScanWarnText
+                )
+                Spacer(Modifier.height(14.dp))
+            }
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1049,6 +1516,7 @@ private fun ScanPlanState(
     confluence: ConfluenceResult,
     accent: Color,
     preset: AllocationPreset,
+    balanceIsStandIn: Boolean,
     onPreset: (AllocationPreset) -> Unit,
     onBack: () -> Unit,
     onAdvance: () -> Unit
@@ -1091,6 +1559,26 @@ private fun ScanPlanState(
                 .padding(horizontal = ScannerGutter)
         ) {
             Spacer(Modifier.height(16.dp))
+
+            // Every figure below this line is a fraction of the balance. When
+            // that balance is a placeholder, so are the lots and so is the P/L,
+            // and the screen has to say which -- an unlabelled $10,000 plan
+            // reads as the user's own account.
+            if (balanceIsStandIn) {
+                ScanNote(
+                    icon = Icons.Rounded.GppMaybe,
+                    text = "Sized against a stand-in $" +
+                        String.format("%,.0f", SAMPLE_BALANCE) +
+                        " balance. Link a terminal, or type your balance on the scan screen, " +
+                        "and these lots will be yours.",
+                    tint = ScanWarn,
+                    background = ScanWarn.copy(alpha = 0.06f),
+                    borderColor = ScanWarn.copy(alpha = 0.30f),
+                    textColor = ScanWarnText
+                )
+                Spacer(Modifier.height(14.dp))
+            }
+
             PriceLadder(plan)
 
             Spacer(Modifier.height(16.dp))
@@ -1187,7 +1675,7 @@ private fun PlanTable(plan: TradePlan) {
                 TableCell((leg.allocation * 100).toInt().toString() + "%", 0.9f)
                 TableCell(String.format("%.2f", leg.lots), 0.9f, end = true)
                 TableCell(
-                    "+$" + String.format("%,.0f", leg.estimatedPl),
+                    "+" + plan.money(leg.estimatedPl),
                     1.2f,
                     end = true,
                     tint = ScanBuy
@@ -1202,8 +1690,8 @@ private fun PlanTable(plan: TradePlan) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Risk $" + String.format("%,.0f", plan.actualRisk) +
-                    " · Reward $" + String.format("%,.0f", plan.totalReward),
+                "Risk " + plan.money(plan.actualRisk) +
+                    " · Reward " + plan.money(plan.totalReward),
                 color = HomeTextDim,
                 fontSize = 10.sp,
                 modifier = Modifier.weight(1f)
@@ -1249,7 +1737,10 @@ private fun ScanContextState(
     accent: Color,
     isSample: Boolean,
     executionNote: String?,
+    /** Whether the economic feed answered. See ConfluenceEngine.eventCheck. */
+    calendarAvailable: Boolean,
     onBack: () -> Unit,
+    onEditRules: () -> Unit,
     onExecute: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -1265,7 +1756,17 @@ private fun ScanContextState(
                 )
             },
             trailing = {
-                Icon(Icons.Rounded.Tune, null, tint = HomeTextDim, modifier = Modifier.size(20.dp))
+                // The other half of the same feature as EDIT MY RULES below.
+                Icon(
+                    Icons.Rounded.Tune,
+                    contentDescription = "Edit my rules",
+                    tint = HomeTextDim,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onEditRules)
+                        .padding(4.dp)
+                        .size(20.dp)
+                )
             }
         )
 
@@ -1320,7 +1821,15 @@ private fun ScanContextState(
             if (reading.events.isEmpty()) {
                 ScanCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "No calendar events for these currencies today.",
+                        // An empty radar and an unread calendar are different
+                        // facts, and this card used to state the first while the
+                        // guardrail below it correctly reported the second --
+                        // two panels on one screen contradicting each other.
+                        if (calendarAvailable) {
+                            "No calendar events for these currencies today."
+                        } else {
+                            "The economic calendar could not be read. Check it yourself before sending."
+                        },
                         color = HomeTextDim,
                         fontSize = 11.sp
                     )
@@ -1333,7 +1842,7 @@ private fun ScanContextState(
             }
 
             Spacer(Modifier.height(12.dp))
-            GuardrailPanel(report)
+            GuardrailPanel(report, onEditRules = onEditRules)
 
             if (executionNote != null) {
                 Spacer(Modifier.height(12.dp))
@@ -1450,7 +1959,7 @@ private fun EventFigure(label: String, value: String) {
 }
 
 @Composable
-private fun GuardrailPanel(report: GuardrailReport) {
+private fun GuardrailPanel(report: GuardrailReport, onEditRules: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     val clear = report.allClear
     Column(
@@ -1500,7 +2009,9 @@ private fun GuardrailPanel(report: GuardrailReport) {
                     .padding(top = 6.dp)
                     .height(34.dp)
                     .clip(CircleShape)
-                    .border(1.dp, (if (clear) ScanBuy else ScanWarn).copy(alpha = 0.22f), CircleShape),
+                    .border(1.dp, (if (clear) ScanBuy else ScanWarn).copy(alpha = 0.22f), CircleShape)
+                    // It looked like a button for as long as it was not one.
+                    .clickable(onClick = onEditRules),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
@@ -1808,11 +2319,57 @@ private fun ExecuteReviewSheet(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                plan.legs.size.toString() + " orders on " + plan.instrument.symbol + " · " +
-                    plan.direction.label + " · " + String.format("%.2f", plan.totalLots) + " lots total",
+                plan.legs.size.toString() + " " + plan.entryType.label.uppercase() + " orders on " +
+                    plan.instrument.symbol + " · " + plan.direction.label + " · " +
+                    String.format("%.2f", plan.totalLots) + " lots total",
                 color = HomeTextDim,
                 fontSize = 12.sp
             )
+
+            // What kind of order this is, in words, above the legs. A pending
+            // order does not fill today and a market order fills immediately --
+            // the user is approving two very different things and the sheet used
+            // to describe both the same way.
+            Spacer(Modifier.height(12.dp))
+            ScanNote(
+                icon = if (plan.entryType == EntryType.MARKET) Icons.Rounded.Bolt else Icons.Rounded.History,
+                text = when (plan.entryType) {
+                    EntryType.MARKET ->
+                        "Fills now at the market, around " + plan.instrument.formatPrice(plan.entry) + "."
+                    // A pending order has a lifetime, and approving one without
+                    // knowing it is approving an order that could fire days from
+                    // now into a market that has moved on.
+                    EntryType.LIMIT ->
+                        "Waits for price to come back to " + plan.instrument.formatPrice(plan.entry) +
+                            ". Nothing opens until it does, and your broker cancels it after " +
+                            humanDuration(plan.pendingExpirySeconds / 60) + "."
+                    EntryType.STOP ->
+                        "Waits for price to break " + plan.instrument.formatPrice(plan.entry) +
+                            ". Nothing opens until it does, and your broker cancels it after " +
+                            humanDuration(plan.pendingExpirySeconds / 60) + "."
+                },
+                tint = accent.onArtFloor(),
+                background = accent.copy(alpha = 0.05f),
+                borderColor = HomeBorderFaint,
+                textColor = HomeTextValue
+            )
+
+            // The screenshot is a moment ago; the order is now. If price has
+            // crossed the entry since the scan, the order the app is about to
+            // place is the opposite kind to the one the setup described.
+            if (plan.entryDrifted) {
+                Spacer(Modifier.height(8.dp))
+                ScanNote(
+                    icon = Icons.Rounded.GppMaybe,
+                    text = "Price has moved since this chart was captured, so this is now a " +
+                        plan.entryType.label.lowercase() + " order rather than what the scan read. " +
+                        "Re-scan if the setup has changed.",
+                    tint = ScanWarn,
+                    background = ScanWarn.copy(alpha = 0.06f),
+                    borderColor = ScanWarn.copy(alpha = 0.30f),
+                    textColor = ScanWarnText
+                )
+            }
 
             Spacer(Modifier.height(18.dp))
             plan.legs.forEachIndexed { index, leg ->
@@ -1850,7 +2407,7 @@ private fun ExecuteReviewSheet(
                         )
                     }
                     Text(
-                        "+$" + String.format("%,.0f", leg.estimatedPl),
+                        "+" + plan.money(leg.estimatedPl),
                         color = ScanBuy,
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace
@@ -1861,7 +2418,7 @@ private fun ExecuteReviewSheet(
             Spacer(Modifier.height(10.dp))
             ScanNote(
                 icon = Icons.Rounded.GppMaybe,
-                text = "Worst case on this plan is $" + String.format("%,.0f", plan.actualRisk) +
+                text = "Worst case on this plan is " + plan.money(plan.actualRisk) +
                     " if the stop fills on all " + plan.legs.size + " legs.",
                 tint = ScanSell,
                 background = ScanSell.copy(alpha = 0.05f),

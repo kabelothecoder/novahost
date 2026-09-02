@@ -42,7 +42,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Run state ──────────────────────────────────────────────────────────
 
-    private val _isRunning = MutableStateFlow(MetaAPIManager.botStatus.value == BotStatus.RUNNING)
+    // Restored, not merely read. botStatus is in-memory and starts IDLE, so on a
+    // cold start after Android reclaimed the process this asked a flag that had
+    // been reset and answered STOP for a robot the service is about to resume --
+    // an ignition button disagreeing with the notification above it.
+    private val _isRunning = MutableStateFlow(
+        MetaAPIManager.restoreRunState(application) ||
+            MetaAPIManager.botStatus.value == BotStatus.RUNNING
+    )
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
     private val _isConnecting = MutableStateFlow(false)
@@ -145,6 +152,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
 
+                    // Recorded and set BEFORE the service is asked to start.
+                    //
+                    // The service reads this back in onCreate, which matters
+                    // twice: Android recreates this START_STICKY service by
+                    // itself after a process death, and even on this path the
+                    // listener subscribes inside onCreate -- so setting RUNNING
+                    // afterwards left a window in which a signal could arrive
+                    // and be dropped as "the robot is stopped".
+                    MetaAPIManager.persistRunState(context, true)
+                    MetaAPIManager.botStatus.value = BotStatus.RUNNING
+
                     val intent = Intent(context, com.novahost.app.service.NovaHostPulseService::class.java)
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         context.startForegroundService(intent)
@@ -154,19 +172,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
                     speak("Welcome. NovaHost systems activated.")
                     _isRunning.value = true
-                    MetaAPIManager.botStatus.value = BotStatus.RUNNING
                 } catch (e: Exception) {
                     android.util.Log.e("NovaHost", "Startup failed", e)
+                    // Nothing is listening, so nothing may claim to be. Leaving
+                    // the flag set would have the service resume a robot that
+                    // never actually started.
+                    MetaAPIManager.persistRunState(context, false)
+                    MetaAPIManager.botStatus.value = BotStatus.STOPPED
                     _transientMessage.value = "Network Error: Could not connect to trade server."
                 }
                 _isConnecting.value = false
             } else {
                 try {
+                    MetaAPIManager.persistRunState(context, false)
                     MetaAPIManager.botStatus.value = BotStatus.STOPPED
                     MetaAPIManager.disconnect()
                     context.stopService(Intent(context, com.novahost.app.service.NovaHostPulseService::class.java))
                 } catch (e: Exception) {
                     android.util.Log.e("NovaHost", "Disconnect failed", e)
+                    // The flag is cleared above, before anything can throw --
+                    // a teardown that half-failed must not leave the robot
+                    // resuming itself on the next process start.
                     _transientMessage.value = "Error stopping trade server."
                 }
                 // The button returns to START either way. Leaving it on STOP

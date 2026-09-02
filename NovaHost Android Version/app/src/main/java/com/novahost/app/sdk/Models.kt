@@ -126,6 +126,19 @@ data class TradeSignal(
     val tp: Double? = null,
     val adminBalance: Double? = null,
     val lot: Double? = 0.01,
+    /**
+     * MARKET / LIMIT / STOP, as claim-signals and the realtime broadcast now
+     * carry it.
+     *
+     * Null on a payload from an older server build, and null must mean MARKET:
+     * that is how every mentor signal behaved before the portal could express a
+     * level, and treating a missing field as "unknown" would strand the signal.
+     */
+    val order_type: String? = null,
+    /** The price a pending order waits at. Null for a market order. */
+    val open_price: Double? = null,
+    /** Seconds until the broker cancels an unfilled pending order. Null = GTC. */
+    val pending_expiry_seconds: Int? = null,
     val status: String? = null,
     val signal_id: String? = null,
     val created_at: String? = null
@@ -133,6 +146,41 @@ data class TradeSignal(
     /** Normalized direction, tolerating either column. */
     val action: String get() = (side ?: type ?: "BUY").uppercase()
 }
+
+/**
+ * What `claim-signals` handed this device.
+ *
+ * The signals here have been claimed server-side and belong to this licence
+ * alone -- no other handset on the same key will be given them, and a repeat
+ * poll will not return them again. Acting on every entry exactly once is
+ * therefore both safe and required: anything dropped on the floor here is
+ * dropped permanently.
+ */
+@Serializable
+data class ClaimSignalsResponse(
+    val success: Boolean = false,
+    val code: String? = null,
+    val error: String? = null,
+    val signals: List<TradeSignal> = emptyList(),
+    /**
+     * Claimed but too old to trade, and now retired.
+     *
+     * A count rather than a list because there is nothing to do with them -- it
+     * exists so the terminal feed can say the robot was offline and missed
+     * something, instead of a gap the user has no way to notice.
+     */
+    val stale: Int = 0,
+    val window_seconds: Int = 300,
+    /**
+     * The robot's current symbol allowance, as the server sees it right now.
+     *
+     * Null on an older server build, which must be treated as "no opinion" and
+     * never as "the robot allows nothing" -- clearing a device's allowance
+     * because a response lacked a field would empty the Trading Symbols screen
+     * and stop every trade.
+     */
+    val allowed_symbols: List<String>? = null
+)
 
 /**
  * A robot's presentation identity, carried from expert_advisors via the license
@@ -186,7 +234,43 @@ data class MetaCopierTradeRequest(
     val volume: Double,
     val sl: Double? = 0.0,
     val tp: Double? = 0.0,
-    val signal_id: String? = null
+    val signal_id: String? = null,
+    /**
+     * MARKET / LIMIT / STOP. Absent means MARKET, which is how every mentor
+     * signal has always behaved.
+     *
+     * The scanner sets it because a chart entry is rarely where price is
+     * standing: "buy the retest at 1.0850" with price at 1.0880 is an order that
+     * waits below, and sending it as a market order fills 30 pips away from the
+     * level the whole plan was built on.
+     */
+    val order_type: String? = null,
+    /**
+     * The price a pending order waits at. Ignored for MARKET.
+     *
+     * Sent alongside [order_type] rather than folded into it because MetaCopier
+     * needs both: a pending `orderType` without an `openPrice` is rejected, and
+     * an `openPrice` with a market `orderType` silently makes it pending.
+     */
+    val open_price: Double? = null,
+    /**
+     * Seconds until the broker cancels an unfilled pending order.
+     *
+     * Null or zero means no expiry, which is right for a market order and is
+     * the default for a mentor signal. A mentor sending a limit or stop from
+     * Normal Trade may now set one, in which case the broker cancels the order
+     * if it never fills.
+     */
+    val pending_expiry_seconds: Int? = null,
+    /**
+     * Runs the whole executor -- licence, symbol plan, sizing, bracket checks,
+     * broker symbol resolution -- and stops one step short of placing the order.
+     *
+     * The pipeline had no way to be proved without a live position being the
+     * test instrument, so nobody proved it, and a break between the mentor
+     * portal and the broker looked exactly like a quiet market.
+     */
+    val dry_run: Boolean = false
 )
 
 /**
@@ -245,7 +329,23 @@ data class MetaCopierConnectRequest(
     val password: String,
     val server: String,
     val platform: String = "MT5",
-    val region_name: String? = null
+    val region_name: String? = null,
+    /**
+     * What this broker appends to instrument names -- `.m` on a micro book,
+     * `.pro` on a raw-spread one, empty on a standard account.
+     *
+     * Recorded against the licence at connect time because that is the only
+     * moment the app knows which account it is talking about. `metacopier-execute`
+     * then decorates every canonical symbol with it: without this, a micro
+     * account is sent orders for `XAUUSD` when its book only lists `XAUUSD.m`,
+     * and the broker rejects every one.
+     *
+     * The screen already derived this and passed it to
+     * [MetaAPIManager.testBrokerConnection], which dropped it on the floor.
+     */
+    val symbol_suffix: String = "",
+    /** The user's own words for the account type, e.g. "Micro". Kept for support. */
+    val account_type: String? = null
 )
 
 /** Response from metacopier-connect. */
@@ -272,6 +372,15 @@ data class MetaCopierConnectResponse(
 @Serializable
 data class MetaCopierTradeResponse(
     val success: Boolean = false,
+    /**
+     * Machine-readable outcome: `EXECUTED`, `DRY_RUN`, `NO_ACCOUNT_LINKED`,
+     * `SYMBOL_DISABLED`, `POSITION_CAP`, `INVALID_STOPS`, `UNKNOWN_SYMBOL`,
+     * `INSUFFICIENT_MARGIN`, `TRADING_PROHIBITED`, `ACCOUNT_DISCONNECTED`.
+     *
+     * [error] is written for the user and will be reworded; this will not.
+     * Branch on this, never on the prose.
+     */
+    val code: String? = null,
     val message: String? = null,
     val requestId: Long? = null,
     val error: String? = null,

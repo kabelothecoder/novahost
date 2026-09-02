@@ -1,183 +1,145 @@
-﻿import { 
-  BarChart3, 
-  Key, 
-  Users, 
-  RotateCcw, 
-  TrendingUp,
-  Home,
-  Send,
-  Server,
-  Layout,
+import {
+  BarChart3,
+  Bot,
+  BookOpen,
+  KeyRound,
+  LayoutDashboard,
+  LayoutTemplate,
   MessageSquare,
+  RotateCcw,
+  SlidersHorizontal,
+  Zap,
   Shield,
-  ChevronDown,
-  Zap
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { SidebarMenuSub, SidebarMenuSubItem } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 import {
   Sidebar,
   SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const menuItems = [
-  { title: "Dashboard", url: "/", icon: Home },
-  { title: "Generate Key", url: "/generate", icon: Key },
-  { title: "Manage EA", url: "/manage", icon: Users },
+/*
+ * Navigation is grouped rather than flat. The previous sidebar exposed five
+ * routes; the portal has fourteen, so Key Stats, Reactivate, the hosting guide,
+ * the web builder and feedback were reachable only by typing a URL.
+ *
+ * Profile and Settings stay in the account menu, where people look for them.
+ */
+const navGroups: Array<{
+  label: string;
+  items: Array<{ title: string; url: string; icon: typeof LayoutDashboard }>;
+}> = [
+  {
+    label: "Overview",
+    items: [{ title: "Dashboard", url: "/", icon: LayoutDashboard }],
+  },
+  {
+    label: "Licensing",
+    items: [
+      { title: "Generate Key", url: "/generate", icon: KeyRound },
+      { title: "Licenses", url: "/dispatcher/licenses", icon: Shield },
+      { title: "Reactivate", url: "/reactivate", icon: RotateCcw },
+      { title: "Key Stats", url: "/stats", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Trading",
+    items: [
+      { title: "Quick Trade", url: "/dispatcher/quick-trade", icon: Zap },
+      { title: "Normal Trade", url: "/dispatcher/normal-trade", icon: SlidersHorizontal },
+      { title: "Expert Advisors", url: "/manage", icon: Bot },
+    ],
+  },
+  {
+    label: "Resources",
+    items: [
+      { title: "Hosting Guide", url: "/tutorial", icon: BookOpen },
+      { title: "Web Builder", url: "/builder", icon: LayoutTemplate },
+      { title: "Feedback", url: "/feedback", icon: MessageSquare },
+    ],
+  },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
-  const location = useLocation();
+  const { pathname } = useLocation();
   const isMobile = useIsMobile();
-  const isCollapsed = state === "collapsed";
+  const isCollapsed = state === "collapsed" && !isMobile;
+
+  // The dashboard is the only route that must match exactly; every other entry
+  // should stay lit while you are on one of its detail pages.
+  const isActive = (url: string) =>
+    url === "/" ? pathname === "/" : pathname.startsWith(url);
 
   return (
-    <Sidebar 
-      className={`${isCollapsed ? "w-16" : "w-64"} transition-all duration-300 border-r border-border/50 bg-gradient-to-b from-card/95 to-card backdrop-blur-sm`}
+    <Sidebar
+      className="border-r border-sidebar-border bg-sidebar/70 backdrop-blur-xl"
       collapsible={isMobile ? "offcanvas" : "icon"}
       variant={isMobile ? "floating" : "sidebar"}
     >
-      <SidebarContent className="p-4">
-        {/* Brand Section */}
-        <div className="mb-8 animate-fade-in">
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20">
-            <div className="w-10 h-10 bg-gradient-primary rounded-xl flex items-center justify-center shadow-lg transform hover:scale-110 transition-all duration-300">
-              <BarChart3 className="w-5 h-5 text-primary-foreground" />
-            </div>
-            {(!isCollapsed || isMobile) && (
-              <div className="transition-all duration-300">
-                <h1 className="font-bold text-lg text-foreground">NovaHost</h1>
-                <p className="text-xs text-muted-foreground">Admin Portal</p>
-              </div>
+      <SidebarContent className="gap-0">
+        {/* Brand — sized to match the header opposite it so the hairlines line up */}
+        <div
+          className={cn(
+            "flex h-16 shrink-0 items-center border-b border-sidebar-border",
+            isCollapsed ? "justify-center px-2" : "px-4",
+          )}
+        >
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/novahost-mark.png"
+              alt=""
+              aria-hidden="true"
+              className="h-7 w-7 shrink-0 rounded-md object-cover"
+            />
+            {!isCollapsed && (
+              <span className="text-sm font-semibold text-sidebar-accent-foreground">
+                NovaHost
+              </span>
             )}
           </div>
         </div>
 
-        <SidebarGroup>
-          <SidebarGroupLabel className={`${isCollapsed && !isMobile ? "sr-only" : ""} transition-all duration-300 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3`}>
-            Navigation
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="space-y-2">
-              {menuItems.map((item, index) => {
-                const isActive = location.pathname === item.url;
-                return (
-                  <SidebarMenuItem 
-                    key={item.title} 
-                    className="animate-fade-in" 
-                    style={{ animationDelay: `${100 * index}ms` }}
-                  >
-                    <NavLink 
-                      to={item.url}
-                      className={`
-                        flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium 
-                        transition-all duration-300 ease-in-out transform hover:scale-[1.02]
-                        ${isActive 
-                          ? 'bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-lg shadow-primary/25 border border-primary/30' 
-                          : 'hover:bg-accent/70 hover:text-accent-foreground text-muted-foreground hover:shadow-md border border-transparent hover:border-border/50'
-                        }
-                      `}
-                    >
-                      <item.icon className={`
-                        w-5 h-5 flex-shrink-0 transition-all duration-300 
-                        ${isActive ? 'text-primary-foreground scale-110' : 'group-hover:scale-105'}
-                      `} />
-                      {(!isCollapsed || isMobile) && (
-                        <span className="transition-all duration-300 font-medium">
-                          {item.title}
-                        </span>
-                      )}
-                      {isActive && (!isCollapsed || isMobile) && (
-                        <div className="ml-auto w-2 h-2 bg-primary-foreground rounded-full animate-pulse" />
-                      )}
-                    </NavLink>
-                  </SidebarMenuItem>
-                );
-              })}
-
-              {/* Trade Dispatcher Collapsible Group */}
-              <Collapsible defaultOpen={true} className="group/collapsible animate-fade-in" style={{ animationDelay: '300ms' }}>
-                <SidebarMenuItem>
-                  <CollapsibleTrigger asChild>
-                    <button
-                      className={`
-                        w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium 
-                        transition-all duration-300 ease-in-out transform hover:scale-[1.02]
-                        hover:bg-accent/70 hover:text-accent-foreground text-muted-foreground border border-transparent hover:border-border/50
-                        ${location.pathname.startsWith('/dispatcher') ? 'text-primary bg-accent/30' : ''}
-                      `}
-                    >
-                      <Send className="w-5 h-5 flex-shrink-0 text-muted-foreground group-data-[state=open]/collapsible:text-primary transition-colors" />
-                      {(!isCollapsed || isMobile) && (
-                        <>
-                          <span className="font-medium text-left flex-1">Trade Dispatcher</span>
-                          <ChevronDown className="w-4 h-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180 text-muted-foreground" />
-                        </>
-                      )}
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-1">
-                    <SidebarMenuSub className="space-y-1 border-l border-white/10 ml-6 pl-4 flex flex-col">
-                      <SidebarMenuSubItem>
-                        <NavLink
-                          to="/dispatcher/quick-trade"
-                          className={({ isActive }) => `
-                            flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-300
-                            ${isActive 
-                              ? 'bg-primary/20 text-primary border border-primary/20 shadow-md shadow-primary/5' 
-                              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground border border-transparent'
-                            }
-                          `}
-                        >
-                          <Zap className="w-3.5 h-3.5" />
-                          <span>Quick Trade</span>
-                        </NavLink>
-                      </SidebarMenuSubItem>
-                      <SidebarMenuSubItem>
-                        <NavLink
-                          to="/dispatcher/licenses"
-                          className={({ isActive }) => `
-                            flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-300
-                            ${isActive 
-                              ? 'bg-primary/20 text-primary border border-primary/20 shadow-md shadow-primary/5' 
-                              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground border border-transparent'
-                            }
-                          `}
-                        >
-                          <Shield className="w-3.5 h-3.5" />
-                          <span>Licenses</span>
-                        </NavLink>
-                      </SidebarMenuSubItem>
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Bottom Decoration */}
-        {(!isCollapsed || isMobile) && (
-          <div className="mt-auto space-y-6 pt-6">
-            <div className="p-4 rounded-xl bg-gradient-to-r from-primary/5 to-secondary/5 border border-border/50">
-              <div className="text-xs text-muted-foreground text-center">
-                <p className="font-medium">NovaHost EA Manager</p>
-                <p>Professional Edition</p>
-              </div>
+        <nav className="flex-1 overflow-y-auto px-2 py-4">
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-5 last:mb-0">
+              {!isCollapsed && (
+                <p className="section-label px-2 pb-1.5">{group.label}</p>
+              )}
+              <ul className="space-y-0.5">
+                {group.items.map((item) => {
+                  const active = isActive(item.url);
+                  return (
+                    <li key={item.url}>
+                      <NavLink
+                        to={item.url}
+                        title={isCollapsed ? item.title : undefined}
+                        className={cn(
+                          "flex h-8 items-center gap-2.5 rounded-md text-sm transition-colors",
+                          isCollapsed ? "justify-center px-0" : "px-2",
+                          active
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                        )}
+                      >
+                        <item.icon
+                          className={cn(
+                            "h-4 w-4 shrink-0",
+                            active ? "text-primary" : "text-muted-foreground",
+                          )}
+                        />
+                        {!isCollapsed && <span className="truncate">{item.title}</span>}
+                      </NavLink>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-          </div>
-        )}
+          ))}
+        </nav>
       </SidebarContent>
     </Sidebar>
   );

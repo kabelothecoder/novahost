@@ -81,8 +81,26 @@ fun PairManagementScreen(
     val accent = LocalNovaHostTheme.current.primaryColor
     val robotName = LocalRobotBranding.current.name
 
-    val allowance = remember { SymbolPlanStore.robotAllowance(context) }
+    // Re-read when the mentor changes what the robot may trade.
+    //
+    // `remember { }` with no key read the allowance exactly once and then never
+    // again, so a symbol added by the mentor mid-session stayed invisible until
+    // the app was restarted -- on top of the allowance itself never refreshing
+    // at all. The signal poll now applies the server's allowance and bumps
+    // [SymbolPlanStore.allowanceRevision]; this follows it.
+    val revision by SymbolPlanStore.allowanceRevision.collectAsState()
+
+    val allowance = remember(revision) { SymbolPlanStore.robotAllowance(context) }
     var plan by remember { mutableStateOf(SymbolPlanStore.load(context)) }
+
+    // Reload the plan when the allowance moves. `load` reconciles against the
+    // current allowance and preserves whatever the user set for symbols that
+    // survived, so a new symbol appears with defaults and nothing already
+    // configured is disturbed. Skipped on first composition -- the plan above is
+    // already current, and reloading it would discard nothing but wastes a read.
+    LaunchedEffect(revision) {
+        if (revision > 0) plan = SymbolPlanStore.load(context)
+    }
     var active by remember {
         mutableStateOf(plan.selected.firstOrNull()?.symbol ?: allowance.firstOrNull())
     }
@@ -156,6 +174,46 @@ fun PairManagementScreen(
         )
     }
 
+    // ---- Broker symbol discovery --------------------------------------------
+    //
+    // Kept out of the normal save path on purpose: this queries the user's live
+    // broker, which is slow and can fail for reasons that have nothing to do
+    // with the plan. It is an explicit action with its own result line, not
+    // something that happens silently behind a stepper.
+    var discovering by remember { mutableStateOf(false) }
+    var discoveryNote by remember { mutableStateOf<String?>(null) }
+
+    fun discoverBrokerSymbols() {
+        if (discovering) return
+        discovering = true
+        discoveryNote = null
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+
+        scope.launch {
+            SymbolPlanStore.discover(context).fold(
+                onSuccess = { found ->
+                    // discover() saves what it resolved, so the screen re-reads
+                    // rather than trying to merge the same answer twice.
+                    plan = SymbolPlanStore.load(context)
+                    discoveryNote = when {
+                        found.matched.isEmpty() ->
+                            "Your broker lists none of these under a name we recognise. " +
+                                "Type the exact names from MetaTrader Market Watch below."
+                        found.unmatched.isEmpty() ->
+                            "Matched all ${found.matched.size} to your broker."
+                        else ->
+                            "Matched ${found.matched.size}. Not on your broker: " +
+                                found.unmatched.joinToString(", ")
+                    }
+                },
+                onFailure = {
+                    discoveryNote = it.message ?: "Could not reach your broker."
+                }
+            )
+            discovering = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(ScanCanvas)) {
         Column(
             modifier = Modifier
@@ -190,6 +248,18 @@ fun PairManagementScreen(
                         active = if (wasOn) {
                             plan.selected.firstOrNull { it.symbol != sym }?.symbol
                         } else sym
+                    }
+                )
+
+                BrokerSymbolSection(
+                    allowance = allowance,
+                    plan = plan,
+                    accent = accent,
+                    discovering = discovering,
+                    note = discoveryNote,
+                    onDiscover = ::discoverBrokerSymbols,
+                    onBrokerSymbol = { sym, value ->
+                        update(sym) { it.copy(brokerSymbol = value) }
                     }
                 )
 
@@ -1530,6 +1600,202 @@ private fun SectionHead(
             )
         }
         if (trailing != null) trailing()
+    }
+}
+
+/**
+ * What this user's broker calls each of the robot's instruments.
+ *
+ * ## Why a whole section exists for spelling
+ *
+ * NovaHost trades canonical names -- XAUUSD, NAS100 -- because that is what the
+ * mentor picks and what the licence allows. Brokers do not agree, and the
+ * disagreement is not cosmetic: an order naming a symbol the broker does not
+ * carry is rejected outright, so a robot on a mismatched book receives every
+ * signal, sends every order, and fills none of them.
+ *
+ * This is not hypothetical. A live Trade245 account lists gold as `Gold`, the
+ * Nasdaq as `.USTECH.` and the Dow as `.US30.`. Nothing about a leading dot is
+ * guessable, and every NAS100 and US30 signal on that account failed silently.
+ *
+ * ## Why it is a button and not a form
+ *
+ * The obvious design is a text box per symbol, and it is the wrong one: it asks
+ * a subscriber to know something only their terminal knows, and punishes a typo
+ * with a robot that quietly stops trading. MetaCopier can be asked for the
+ * account's real Market Watch instead, so the normal path is one tap and no
+ * typing.
+ *
+ * The fields stay, editable, for the account whose spelling nothing predicts.
+ * They are the escape hatch, not the route.
+ */
+@Composable
+private fun BrokerSymbolSection(
+    allowance: List<String>,
+    plan: SymbolPlan,
+    accent: Color,
+    discovering: Boolean,
+    note: String?,
+    onDiscover: () -> Unit,
+    onBrokerSymbol: (String, String) -> Unit
+) {
+    if (allowance.isEmpty()) return
+
+    val mapped = plan.symbols.count { it.brokerSymbol.isNotBlank() }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionHead(
+            title = "YOUR BROKER'S NAMES",
+            subtitle = if (mapped == 0) {
+                "Not matched yet — tap to read them from your account"
+            } else {
+                "$mapped of ${allowance.size} matched to your broker"
+            },
+            trailing = {
+                // Pill, per the component rules. Disabled while in flight rather
+                // than hidden, so the control does not move under a finger that
+                // is already on its way to it.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .border(1.dp, accent.copy(alpha = if (discovering) 0.18f else 0.45f), CircleShape)
+                        .clickable(enabled = !discovering, onClick = onDiscover)
+                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = accent.copy(alpha = if (discovering) 0.4f else 1f),
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        if (discovering) "READING…" else "MATCH",
+                        color = accent.copy(alpha = if (discovering) 0.4f else 1f),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.7.sp
+                    )
+                }
+            }
+        )
+
+        if (note != null) {
+            Text(
+                note,
+                color = HomeTextDim,
+                fontSize = 10.sp,
+                lineHeight = 15.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(ScanWell)
+                    .padding(horizontal = 13.dp, vertical = 10.dp)
+            )
+        }
+
+        allowance.forEach { sym ->
+            BrokerSymbolRow(
+                symbol = sym,
+                brokerSymbol = plan.configFor(sym)?.brokerSymbol.orEmpty(),
+                accent = accent,
+                onValue = { onBrokerSymbol(sym, it) }
+            )
+        }
+    }
+}
+
+/** One canonical symbol and the name it goes to the broker under. */
+@Composable
+private fun BrokerSymbolRow(
+    symbol: String,
+    brokerSymbol: String,
+    accent: Color,
+    onValue: (String) -> Unit
+) {
+    // Local text state so an in-progress entry is not rewritten by the plan
+    // round-tripping back through recomposition.
+    var text by remember(symbol) { mutableStateOf(brokerSymbol) }
+    LaunchedEffect(brokerSymbol) {
+        // Accepts an outside value only when it genuinely differs -- which is
+        // what lets MATCH fill the field without fighting someone mid-type.
+        if (brokerSymbol != text) text = brokerSymbol
+    }
+
+    val filled = text.isNotBlank()
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(ScanWell)
+            .border(
+                1.dp,
+                if (filled) accent.copy(alpha = 0.22f) else HomeBorderSubtle,
+                RoundedCornerShape(14.dp)
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp)
+    ) {
+        Text(
+            symbol,
+            color = ScanTextBright,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 0.6.sp,
+            modifier = Modifier.width(74.dp)
+        )
+
+        Text(
+            "→",
+            color = HomeTextFaint,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(end = 10.dp)
+        )
+
+        Box(modifier = Modifier.weight(1f)) {
+            if (text.isEmpty()) {
+                Text(
+                    "same as $symbol",
+                    color = ScanTextTrace,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            BasicTextField(
+                value = text,
+                onValueChange = { raw ->
+                    // Only what MetaTrader permits inside a symbol name. Filtered
+                    // here rather than on save so the user sees immediately that a
+                    // space or slash is not going to be part of it.
+                    val cleaned = raw.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }
+                        .take(24)
+                    text = cleaned
+                    onValue(cleaned)
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                cursorBrush = SolidColor(accent),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        if (filled) {
+            Icon(
+                Icons.Rounded.Check,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(14.dp)
+            )
+        }
     }
 }
 

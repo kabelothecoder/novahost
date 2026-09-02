@@ -34,7 +34,12 @@ serve(async (req: Request) => {
     }
 
     const body = await req.json()
-    const { ea_id, pair, lot, side, type, sl, tp, signal_id, adminBalance } = body
+    const {
+      ea_id, pair, lot, side, type, sl, tp, signal_id, adminBalance,
+      // Pending-order fields. `type` above is the legacy side fallback and is a
+      // different thing entirely — do not conflate them.
+      order_type, price, pending_expiry_seconds,
+    } = body
 
     // ---- 2. DO THEY OWN THIS BOT? -------------------------------------------
     // Portal registration is public, so a valid JWT only proves "signed up",
@@ -78,6 +83,52 @@ serve(async (req: Request) => {
       .replace('.PRO', '').replace('.RAW', '').replace('.M', '')
       .replace('.SB', '').replace('.ECN', '')
 
+    // ---- 3b. ORDER KIND -----------------------------------------------------
+    // MARKET unless the mentor asked for a level. Mirrors toOrderType() in
+    // metacopier-execute, which rejects anything outside this set rather than
+    // guessing — so an unrecognised value must fail here, loudly, instead of
+    // being stored and silently dropped at execution.
+    const orderKind = String(order_type ?? 'MARKET').trim().toUpperCase()
+
+    if (!['MARKET', 'LIMIT', 'STOP'].includes(orderKind)) {
+      return new Response(JSON.stringify({
+        error: `Unknown order type "${order_type}". Expected MARKET, LIMIT or STOP.`
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    const isPendingOrder = orderKind !== 'MARKET'
+    const entryPrice =
+      (price === undefined || price === null || price === '') ? null : Number(price)
+
+    // A pending order without a level is not executable. Refusing it here means
+    // the mentor is told now, rather than every subscriber's terminal rejecting
+    // it independently minutes later.
+    if (isPendingOrder && (entryPrice === null || !Number.isFinite(entryPrice) || entryPrice <= 0)) {
+      return new Response(JSON.stringify({
+        error: `A ${orderKind} order needs the price to wait at.`
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    const expirySeconds =
+      (pending_expiry_seconds === undefined || pending_expiry_seconds === null || pending_expiry_seconds === '')
+        ? null
+        : Number(pending_expiry_seconds)
+
+    if (expirySeconds !== null && (!Number.isFinite(expirySeconds) || expirySeconds <= 0)) {
+      return new Response(JSON.stringify({
+        error: 'Expiry must be a positive number of seconds, or omitted for good-till-cancelled.'
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
     // ---- 4. DEDUPLICATION ---------------------------------------------------
     if (signal_id) {
       const { data: existing } = await supabase
@@ -106,6 +157,12 @@ serve(async (req: Request) => {
       lot: (lot === undefined || lot === null || lot === '') ? null : Number(lot),
       sl,
       tp,
+      order_type: orderKind,
+      // Only stored for the pending kinds. A market order carrying a price
+      // would be a level the executor is obliged to ignore, and a stale level
+      // in the record is worse than none.
+      price: isPendingOrder ? entryPrice : null,
+      pending_expiry_seconds: isPendingOrder ? expirySeconds : null,
       // signal_id is uniquely indexed; suffix when fanning out to several bots
       signal_id: signal_id
         ? (targetEaIds.length > 1 ? `${signal_id}:${idx}` : signal_id)
@@ -136,6 +193,11 @@ serve(async (req: Request) => {
           lot: row.lot,
           sl: row.sl,
           tp: row.tp,
+          // Named as metacopier-execute expects them, so the realtime payload
+          // and the claim-signals payload stay interchangeable on the handset.
+          order_type: row.order_type,
+          open_price: row.price,
+          pending_expiry_seconds: row.pending_expiry_seconds,
           adminBalance: adminBalance || 0
         }
       })

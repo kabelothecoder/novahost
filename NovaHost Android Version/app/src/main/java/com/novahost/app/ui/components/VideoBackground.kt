@@ -1,4 +1,4 @@
-﻿package com.novahost.app.ui.components
+package com.novahost.app.ui.components
 
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -51,11 +51,27 @@ fun GlobalVideoBackground(
     }
 
     LaunchedEffect(videoUrl) {
-        val uri = if (!videoUrl.isNullOrBlank()) {
-            Uri.parse(videoUrl)
-        } else {
-            Uri.parse("android.resource://${context.packageName}/raw/bg_motion_loop")
+        // Both sources were dead ends. The default URL pointed at a legacy
+        // Supabase project whose domain no longer resolves, and the documented
+        // fallback res/raw/bg_motion_loop.mp4 has never existed in this repo --
+        // res/raw is empty. So every launch prepared an ExoPlayer that could
+        // only error. Resolve a source we actually have, or play nothing and
+        // let the gradient below stand as the background.
+        val rawId = context.resources.getIdentifier(
+            "bg_motion_loop", "raw", context.packageName
+        )
+        val uri = when {
+            !videoUrl.isNullOrBlank() -> Uri.parse(videoUrl)
+            rawId != 0 -> Uri.parse("android.resource://${context.packageName}/raw/bg_motion_loop")
+            else -> null
         }
+
+        if (uri == null) {
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            return@LaunchedEffect
+        }
+
         exoPlayer.setMediaItem(MediaItem.fromUri(uri))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true

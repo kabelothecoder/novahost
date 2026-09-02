@@ -27,6 +27,8 @@ export default {
 				primary: {
 					DEFAULT: 'hsl(var(--primary))',
 					foreground: 'hsl(var(--primary-foreground))',
+					muted: 'hsl(var(--primary-muted))',
+					// Hover shade for accent text. Legacy name, no longer a glow.
 					glow: 'hsl(var(--primary-glow))'
 				},
 				secondary: {
@@ -53,6 +55,15 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				// Direction of a trade. Semantic only — never use for decoration.
+				long: {
+					DEFAULT: 'hsl(var(--long))',
+					foreground: 'hsl(var(--long-foreground))'
+				},
+				short: {
+					DEFAULT: 'hsl(var(--short))',
+					foreground: 'hsl(var(--short-foreground))'
+				},
 				success: {
 					DEFAULT: 'hsl(var(--success))',
 					foreground: 'hsl(var(--success-foreground))'
@@ -73,19 +84,23 @@ export default {
 				}
 			},
 			backgroundImage: {
-				'gradient-primary': 'var(--gradient-primary)',
-				'gradient-card': 'var(--gradient-card)',
-				'gradient-success': 'var(--gradient-success)',
-				'gradient-warning': 'var(--gradient-warning)'
+				// Compatibility shims. These were multi-stop gradients; they now
+				// resolve to the flat surface of the same name so that pages still
+				// referencing them inherit the new system. Remove each entry once no
+				// page uses the class.
+				'gradient-primary': 'linear-gradient(hsl(var(--primary)), hsl(var(--primary)))',
+				'gradient-card': 'linear-gradient(hsl(var(--card)), hsl(var(--card)))'
 			},
 			boxShadow: {
 				'sm': 'var(--shadow-sm)',
 				'card': 'var(--shadow-card)',
-				'hover': 'var(--shadow-hover)'
+				'popover': 'var(--shadow-popover)',
+				// Was a 24px lift on hover. Cards no longer move; kept flat so
+				// unconverted pages stop levitating.
+				'hover': 'var(--shadow-card)'
 			},
-			transitionTimingFunction: {
-				'smooth': 'var(--transition-smooth)',
-				'bounce': 'var(--transition-bounce)'
+			fontFamily: {
+				mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
@@ -94,20 +109,12 @@ export default {
 			},
 			keyframes: {
 				'accordion-down': {
-					from: {
-						height: '0'
-					},
-					to: {
-						height: 'var(--radix-accordion-content-height)'
-					}
+					from: { height: '0' },
+					to: { height: 'var(--radix-accordion-content-height)' }
 				},
 				'accordion-up': {
-					from: {
-						height: 'var(--radix-accordion-content-height)'
-					},
-					to: {
-						height: '0'
-					}
+					from: { height: 'var(--radix-accordion-content-height)' },
+					to: { height: '0' }
 				}
 			},
 			animation: {

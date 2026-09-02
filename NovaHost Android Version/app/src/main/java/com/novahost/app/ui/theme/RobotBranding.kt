@@ -31,10 +31,16 @@ data class RobotBranding(
     val tagline: String = "",
     val allowedSymbols: List<String> = emptyList(),
     val productCode: String = "NovaHost",
-    // TODO(rebrand): this points at a *different* legacy Supabase project (kivpdtisymhymmndndun) than the rest
-    // of the app (epulmnfbxjmaimefhofp) — confirm what this is before migrating, then re-upload promo asset
-    // to the new NovaHost Supabase project's storage bucket and update this URL.
-    val promoVideoUrl: String? = "https://kivpdtisymhymmndndun.supabase.co/storage/v1/object/public/assets/metahost_promo.mp4"
+    /**
+     * Null until a promo asset is uploaded to THIS project's storage bucket.
+     *
+     * This used to default to a metahost_promo.mp4 on the legacy Supabase
+     * project kivpdtisymhymmndndun, which no longer resolves at DNS at all --
+     * so every robot carried a dead URL and every launch opened an ExoPlayer
+     * that could only fail. Re-upload the asset to epulmnfbxjmaimefhofp and set
+     * it here (or per-robot from the portal) to bring the video back.
+     */
+    val promoVideoUrl: String? = null
 )
 
 val LocalRobotBranding = compositionLocalOf { RobotBranding() }

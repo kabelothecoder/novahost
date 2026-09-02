@@ -101,6 +101,20 @@ Deno.serve(async (req: Request) => {
         lot: Number(s.lot) || 0,
         max_trades: Number(s.max_trades) || 0,
         smart_lot: s.smart_lot === true,
+        // ---- What THIS user's broker calls the instrument -------------------
+        //
+        // The one field here that is NOT normalised, because it is not ours to
+        // normalise: it goes into an order verbatim, and `XAUUSD.m` stripped to
+        // `XAUUSDM` is a symbol no broker lists. Only trimmed, and reduced to
+        // the characters MetaTrader permits inside a symbol name.
+        //
+        // Absent means "I have not said", which is different from a blank, and
+        // must stay null -- the executor falls back to suffix and alias
+        // discovery on null, and would otherwise send an empty symbol.
+        broker_symbol: (() => {
+          const raw = String(s.broker_symbol ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '')
+          return raw.length > 0 ? raw : null
+        })(),
         updated_at: new Date().toISOString(),
       }))
 

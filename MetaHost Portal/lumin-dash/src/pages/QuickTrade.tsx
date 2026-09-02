@@ -1,359 +1,233 @@
-﻿import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Send, TrendingUp, TrendingDown, Activity, Loader2, Bot, Users, Radio, CheckCircle2, Zap } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loader2, SlidersHorizontal } from "lucide-react";
+import { Link } from "react-router-dom";
+import { DispatchStatus } from "@/components/DispatchStatus";
+import { ALL_ROBOTS, useTradeDispatch, type Side } from "@/hooks/useTradeDispatch";
 
-interface Product {
-  id: string;
-  name: string;
-  code: string;
-}
-
-const AVAILABLE_PAIRS = [
-  "EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "XAGUSD", 
-  "NAS100", "US30", "SPX500", "BTCUSD", "ETHUSD", "VIX"
-];
-
+/**
+ * The fast path: symbol, optionally a lot, then one press.
+ *
+ * Direction is the button rather than a separate toggle above a separate submit
+ * — on a screen whose whole purpose is speed, choosing a side and then
+ * confirming it was two actions for one decision. Everything else lives on
+ * Normal Trade.
+ */
 export default function QuickTrade() {
-  const { user } = useAuth();
   const { toast } = useToast();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [targetId, setTargetId] = useState<string>("ALL");
-  const [pair, setPair] = useState<string>("EURUSD");
-  const [side, setSide] = useState<"buy" | "sell">("buy");
-  // Blank by default. Pre-filling 0.1 meant the common path was the mentor
-  // silently overriding every subscriber's own sizing with a number picked for
-  // no particular account.
-  const [volume, setVolume] = useState<string>("");
-  const [sl, setSl] = useState<string>("");
-  const [tp, setTp] = useState<string>("");
-  const [isSending, setIsSending] = useState(false);
-  const [activeTerminals, setActiveTerminals] = useState(0);
-  const [clientsReached, setClientsReached] = useState(0);
-  const [lastSignalSent, setLastSignalSent] = useState<Date | null>(null);
+  const {
+    products,
+    targetId,
+    setTargetId,
+    targetName,
+    availablePairs,
+    activeTerminals,
+    clientsReached,
+    lastSignalSent,
+    lastSignalIds,
+    isSending,
+    send,
+  } = useTradeDispatch();
 
+  const [pair, setPair] = useState("");
+  const [lot, setLot] = useState("");
+  const [pendingSide, setPendingSide] = useState<Side | null>(null);
+
+  // Keep the selection inside the list. Switching robots must never leave a
+  // symbol selected that the new target does not carry -- the send would be
+  // refused per licence and the mentor would have no idea why.
   useEffect(() => {
-    if (!user) return;
-
-    async function loadProducts() {
-      const { data } = await supabase
-        .from("expert_advisors")
-        .select("id, name, code")
-        .eq("user_id", user.id)
-        .order("name");
-      if (data) setProducts(data);
+    if (availablePairs.length === 0) {
+      if (pair) setPair("");
+      return;
     }
-    loadProducts();
+    if (!availablePairs.includes(pair)) setPair(availablePairs[0]);
+  }, [availablePairs, pair]);
 
-    async function fetchActiveTerminals() {
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const { count, error } = await supabase
-        .from("device_activations")
-        .select("*", { count: "exact", head: true })
-        .gt("last_seen_at", fifteenMinutesAgo)
-        .eq("status", "active");
-      
-      if (!error && count !== null) {
-        setActiveTerminals(count); 
-      }
-    }
-
-    fetchActiveTerminals();
-    const interval = setInterval(fetchActiveTerminals, 10000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const handleSendSignal = async () => {
-    // Pair and direction are the signal. Lot, stop and target are optional:
-    //
-    //  - Lot, because the subscriber's own Trading Symbols plan already decides
-    //    size -- their smart-lot figure, their manual size, or mentor-relative
-    //    scaling. Forcing a number here made the mentor guess on behalf of every
-    //    account, none of whose balances they know.
-    //  - SL and TP, because a mentor calling a level to watch is not always
-    //    placing a bracket, and an empty field beat inventing one.
+  const handleSend = async (side: Side) => {
     if (!pair) {
-      toast({ title: "Pick a pair", description: "Choose the instrument to signal.", variant: "destructive" });
-      return;
-    }
-
-    if (!AVAILABLE_PAIRS.includes(pair)) {
-      toast({ title: "Invalid Pair", description: "The selected trading pair is not supported.", variant: "destructive" });
-      return;
-    }
-
-    // Only validate what was actually filled in.
-    if (volume && (parseFloat(volume) <= 0 || parseFloat(volume) > 50)) {
-      toast({ title: "Volume Error", description: "Lot size must be between 0.01 and 50.", variant: "destructive" });
-      return;
-    }
-
-    if (sl && parseFloat(sl) <= 0) {
-      toast({ title: "Stop loss", description: "Leave the stop blank, or enter a price above zero.", variant: "destructive" });
-      return;
-    }
-
-    if (tp && parseFloat(tp) <= 0) {
-      toast({ title: "Take profit", description: "Leave the target blank, or enter a price above zero.", variant: "destructive" });
-      return;
-    }
-
-    if (!user) {
-      toast({ title: "Auth Error", description: "You must be logged in.", variant: "destructive" });
-      return;
-    }
-
-    setIsSending(true);
-    try {
-      // Null, not zero, for anything left blank. Zero is a value the executor
-      // would act on; null is the absence the subscriber's own plan fills in.
-      const payload = {
-        ea_id: targetId === "ALL" ? "MASTER_OVERRIDE" : targetId,
-        pair,
-        lot: volume ? parseFloat(volume) : null,
-        price: 0,
-        sl: sl ? parseFloat(sl) : null,
-        tp: tp ? parseFloat(tp) : null,
-        type: side.toUpperCase()
-      };
-
-      const { data, error } = await supabase.functions.invoke('broadcast-signal', {
-        body: payload
+      // Says which of the two reasons it is. "Pick a pair" is unhelpful advice
+      // when the dropdown is empty because the robot carries no symbols -- the
+      // fix is in the robot editor, not on this screen.
+      toast({
+        title: availablePairs.length === 0 ? "This robot has no symbols" : "Pick a pair",
+        description:
+          availablePairs.length === 0
+            ? "Add the instruments it is allowed to trade under Expert Advisors, then come back."
+            : "Choose the instrument to signal.",
+        variant: "destructive",
       });
-      
-      if (error) throw error;
-
-      toast({ 
-        title: "Signal Broadcasted", 
-        description: `${side.toUpperCase()} signal sent for ${pair} to ${targetId === 'ALL' ? 'All EAs' : products.find(p => p.id === targetId)?.name}` 
-      });
-
-      setSl("");
-      setTp("");
-      setLastSignalSent(new Date());
-      setClientsReached(activeTerminals);
-
-    } catch (e: any) {
-      console.error(e);
-      toast({ title: "Broadcast Failed", description: e.message || "Could not route dispatch", variant: "destructive" });
-    } finally {
-      setIsSending(false);
+      return;
     }
+
+    const lotValue = lot ? Number(lot) : null;
+    if (lotValue !== null && (Number.isNaN(lotValue) || lotValue <= 0 || lotValue > 50)) {
+      toast({
+        title: "Check the lot size",
+        description: "Leave it blank, or enter a size between 0.01 and 50.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPendingSide(side);
+    const result = await send({
+      pair,
+      side,
+      lot: lotValue,
+      sl: null,
+      tp: null,
+      orderType: "MARKET",
+      entryPrice: null,
+      expirySeconds: null,
+    });
+    setPendingSide(null);
+
+    if (!result.ok) {
+      toast({
+        title: "Broadcast failed",
+        description: result.error,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Says who it went to, and says it plainly when that is nobody. "Signal
+    // Broadcasted" alone was true and useless: the call succeeds whether it
+    // reaches a hundred handsets or none.
+    toast({
+      title: activeTerminals > 0 ? "Signal broadcast" : "Signal saved — no terminals online",
+      description:
+        activeTerminals > 0
+          ? `${side.toUpperCase()} ${pair} sent to ${targetName} — ${activeTerminals} terminal${activeTerminals === 1 ? "" : "s"} online.`
+          : `${side.toUpperCase()} ${pair} was recorded for ${targetName}, but nothing will trade until a terminal comes online.`,
+      variant: activeTerminals > 0 ? undefined : "destructive",
+    });
   };
 
+  const noSymbols = availablePairs.length === 0;
+
   return (
-    <div className="space-y-8 animate-fade-in max-w-4xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
-            <Activity className="w-6 h-6 text-primary" />
-            Quick Trade
-          </h1>
-          <p className="text-muted-foreground">Construct and execute instant market orders to all client EAs.</p>
-        </div>
-      </div>
+    <div className="mx-auto grid max-w-[1100px] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <Card className="h-fit">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-border px-5 py-3.5">
+          <CardTitle>Market order</CardTitle>
+          <Button asChild variant="ghost" size="sm" className="h-7 gap-1.5 text-xs">
+            <Link to="/dispatcher/normal-trade">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Full ticket
+            </Link>
+          </Button>
+        </CardHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="glass-card shadow-2xl border-white/10 dark:border-white/5 relative overflow-hidden group">
-          <div className="absolute -inset-1 bg-gradient-to-r from-primary/10 via-secondary/10 to-primary/10 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
-          <CardHeader className="relative">
-            <CardTitle className="text-xl">Quick Trade parameters</CardTitle>
-            <CardDescription>Setup parameters for instantaneous MT5 deployment</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6 relative z-10">
-            
-            {/* Side selector */}
-            <div className="space-y-2">
-              <Label>Trade Action</Label>
-              <Tabs value={side} onValueChange={(val) => setSide(val as any)} className="w-full">
-                <TabsList className="grid grid-cols-2 bg-black/40 border border-white/10 rounded-xl p-1 h-11">
-                  <TabsTrigger 
-                    value="buy" 
-                    className="rounded-lg text-xs font-semibold data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400 data-[state=active]:border-emerald-500/30 border border-transparent"
-                  >
-                    <TrendingUp className="w-4 h-4 mr-2" /> BUY POSITION
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="sell" 
-                    className="rounded-lg text-xs font-semibold data-[state=active]:bg-rose-500/20 data-[state=active]:text-rose-400 data-[state=active]:border-rose-500/30 border border-transparent"
-                  >
-                    <TrendingDown className="w-4 h-4 mr-2" /> SELL POSITION
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Target Execution Units</Label>
+        <CardContent className="space-y-4 p-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-robot">Robot</Label>
               <Select value={targetId} onValueChange={setTargetId}>
-                <SelectTrigger className="bg-white/5 backdrop-blur-md border-white/10">
-                  <SelectValue placeholder="Select target EA" />
+                <SelectTrigger id="qt-robot">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="glass-modal border-white/10">
-                  <SelectItem value="ALL">
-                    <div className="flex items-center gap-2 text-primary font-bold">
-                      <Send className="w-4 h-4" /> All Active EAs
-                    </div>
-                  </SelectItem>
-                  {products.map(p => (
+                <SelectContent>
+                  <SelectItem value={ALL_ROBOTS}>All robots</SelectItem>
+                  {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      <div className="flex items-center gap-2">
-                        <Bot className="w-4 h-4 text-muted-foreground" />
-                        {p.name}
-                      </div>
+                      {p.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Trading Pair</Label>
-                <Select value={pair} onValueChange={setPair}>
-                  <SelectTrigger className="bg-white/5 backdrop-blur-md border-white/10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="glass-modal border-white/10">
-                    {AVAILABLE_PAIRS.map(p => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Volume (Lots){" "}
-                  <span className="text-muted-foreground font-normal">— optional</span>
-                </Label>
-                <Input
-                  type="number" step="0.01" min="0.01"
-                  value={volume} onChange={(e) => setVolume(e.target.value)}
-                  placeholder="Leave blank — each trader's own size"
-                  className="bg-white/5 backdrop-blur-md border-white/10"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-pair">Symbol</Label>
+              <Select value={pair} onValueChange={setPair} disabled={noSymbols}>
+                <SelectTrigger id="qt-pair">
+                  <SelectValue placeholder={noSymbols ? "No symbols configured" : "Select"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availablePairs.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-rose-500">Stop Loss <span className="text-muted-foreground font-normal">— optional</span></Label>
-                <Input 
-                  type="number" step="0.00001"
-                  value={sl} onChange={(e) => setSl(e.target.value)}
-                  placeholder="e.g. 1.05400"
-                  className="bg-white/5 backdrop-blur-md border-white/10"
-                />
-              </div>
+          {/* Points at the fix rather than leaving an empty dropdown to be interpreted. */}
+          {noSymbols && (
+            <p className="text-xs text-muted-foreground">
+              {targetId === ALL_ROBOTS
+                ? "None of your robots have symbols configured. Add them under Expert Advisors."
+                : "This robot has no symbols configured. Add them under Expert Advisors."}
+            </p>
+          )}
 
-              <div className="space-y-2">
-                <Label className="text-emerald-500">Take Profit <span className="text-muted-foreground font-normal">— optional</span></Label>
-                <Input 
-                  type="number" step="0.00001"
-                  value={tp} onChange={(e) => setTp(e.target.value)}
-                  placeholder="e.g. 1.06000"
-                  className="bg-white/5 backdrop-blur-md border-white/10"
-                />
-              </div>
-            </div>
-            
-            {/* Prominent Quick Trade Entry Button */}
-            <div className="space-y-4 pt-4 border-t border-white/5 mt-6">
-              <Button 
-                onClick={handleSendSignal}
-                disabled={isSending}
-                className={`w-full h-12 rounded-xl text-white font-bold flex items-center justify-center gap-2 shadow-lg hover:scale-[1.01] transition-all duration-300 ${
-                  side === "buy" 
-                    ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20" 
-                    : "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20"
-                }`}
-              >
-                {isSending ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5 fill-current animate-pulse" />
-                    Quick Trade Entry
-                  </>
-                )}
-              </Button>
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="qt-lot">
+              Lot size <span className="font-normal text-muted-foreground">— optional</span>
+            </Label>
+            <Input
+              id="qt-lot"
+              type="number"
+              step="0.01"
+              min="0.01"
+              inputMode="decimal"
+              value={lot}
+              onChange={(e) => setLot(e.target.value)}
+              placeholder="Each trader's own sizing"
+              className="tabular"
+            />
+            <p className="text-xs text-muted-foreground">
+              Left blank, every subscriber's own sizing plan decides. A number here overrides
+              all of them.
+            </p>
+          </div>
 
-          </CardContent>
-        </Card>
-        
-        <div className="space-y-6">
-          {/* Heartbeat & Performance Dashboard */}
-          <Card className="glass-card shadow-lg border-white/10 dark:border-white/5 bg-gradient-to-br from-background/90 to-black/95 overflow-hidden">
-            <CardHeader className="border-b border-white/5 pb-4">
-              <CardTitle className="text-xl flex items-center justify-between text-white">
-                <span className="flex items-center gap-2">
-                  <Radio className="w-5 h-5 text-emerald-400 animate-pulse" /> Network Heartbeat
-                </span>
-                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">Live</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-6">
-              
-              {/* Active MT5 Terminals KPI */}
-              <div className="flex flex-col items-center justify-center p-6 bg-black/40 rounded-2xl border border-white/5">
-                <p className="text-sm text-muted-foreground uppercase tracking-wider mb-2 font-semibold">Active MT5 Terminals</p>
-                <div className="text-5xl font-mono font-bold text-white tracking-widest drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
-                  {activeTerminals.toLocaleString()}
-                </div>
-              </div>
+          {/*
+            The only saturated blocks on the screen, and they commit the trade.
+            Direction is the press.
+          */}
+          <div className="grid grid-cols-2 gap-3 border-t border-border pt-4">
+            <Button
+              variant="long"
+              size="lg"
+              disabled={isSending || noSymbols}
+              onClick={() => handleSend("buy")}
+            >
+              {pendingSide === "buy" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Buy"}
+            </Button>
+            <Button
+              variant="short"
+              size="lg"
+              disabled={isSending || noSymbols}
+              onClick={() => handleSend("sell")}
+            >
+              {pendingSide === "sell" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sell"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-              {/* Clients Reached / Delivery Progress */}
-              <div className="space-y-3 p-5 glass-card bg-primary/5 rounded-xl border-primary/20">
-                <div className="flex justify-between items-end">
-                  <h3 className="text-sm font-semibold text-primary/80 uppercase tracking-wide flex items-center gap-2">
-                    <Users className="w-4 h-4" /> Clients Reached
-                  </h3>
-                  <span className="font-mono text-xl text-primary font-bold">{clientsReached.toLocaleString()}</span>
-                </div>
-                
-                {/* Progress bar */}
-                <div className="h-3 w-full bg-black/50 rounded-full overflow-hidden border border-white/5">
-                  <div 
-                    className="h-full bg-gradient-to-r from-primary to-cyan-400 transition-all duration-[50ms]"
-                    style={{ width: `${activeTerminals > 0 ? (clientsReached / activeTerminals) * 100 : 0}%`, boxShadow: '0 0 10px rgba(56,189,248,0.5)' }}
-                  />
-                </div>
-                
-                {clientsReached === activeTerminals && clientsReached > 0 && lastSignalSent && (
-                  <p className="text-xs text-emerald-400 flex items-center gap-1 justify-end animate-in fade-in slide-in-from-right-2">
-                    <CheckCircle2 className="w-3 h-3" /> Synchronized 
-                  </p>
-                )}
-              </div>
-
-              {/* System Status Info */}
-              <div className="flex items-center justify-between p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
-                <span className="text-sm font-medium text-emerald-400 flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                  </span>
-                  System Status
-                </span>
-                <span className="text-sm font-bold text-emerald-400 uppercase tracking-wider font-mono">
-                  Online
-                </span>
-              </div>
-
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <DispatchStatus
+        activeTerminals={activeTerminals}
+        clientsReached={clientsReached}
+        lastSignalSent={lastSignalSent}
+        hasSent={lastSignalIds.length > 0}
+      />
     </div>
   );
 }

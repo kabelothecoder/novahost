@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -179,6 +181,7 @@ fun HomeScreen(
         onAssetHub = { showRobotPicker = true },
         onSettings = { navController.navigate(Routes.SETTINGS) },
         onScanner = { navController.navigate(Routes.SCANNER) },
+        onTerminal = { navController.navigate(Routes.TERMINAL) },
         onAddKey = { navController.navigate(Routes.ACTIVATE) },
         onRobotSelected = { license ->
             if (switchingKey == null) {
@@ -431,7 +434,14 @@ private fun RobotPickerSheet(
         dragHandle = null
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                // The list is as long as the user has licences, and the ADD KEY
+                // pill and footer sit under it. Without this the sheet simply
+                // clipped everything past the fold -- a user with three robots
+                // could not reach the control that adds a fourth.
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

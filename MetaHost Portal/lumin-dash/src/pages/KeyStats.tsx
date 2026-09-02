@@ -1,342 +1,351 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, TrendingDown, Users, Key, Shield, Database } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  LineChart,
-  Line,
+  Area,
+  AreaChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend
 } from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { cn } from "@/lib/utils";
 
-interface KPICardProps {
-  title: string;
-  value: string | number;
-  change: string;
-  isPositive: boolean;
-  icon: React.ReactNode;
-  isLoading?: boolean;
+/*
+ * Every figure on this page is counted from the mentor's own rows.
+ *
+ * It previously rendered four tiles whose values were the literal string "—"
+ * with a "0%" change, and two charts fed from `const activationData = []` and
+ * `const planDistributionData = []`, behind a two-second setTimeout pretending
+ * to load. Nothing on the page ever touched the database.
+ *
+ * Two of the original tiles are gone rather than filled in. "Revenue This
+ * Month" and "Churn Rate" cannot be computed honestly here: `plans` carries no
+ * price and `subscriptions` no amount, because mentors issue licences while the
+ * PayFast products are NovaHost's own revenue, not theirs. Churn needs a
+ * history of status transitions that is not recorded. Inventing either is what
+ * the page was already doing.
+ */
+
+const MONTHS_SHOWN = 6;
+
+interface Totals {
+  keysIssued: number;
+  activeLicenses: number;
+  devicesLinked: number;
+  signalsSent: number;
 }
 
-function KPICard({ title, value, change, isPositive, icon, isLoading }: KPICardProps) {
-  if (isLoading) {
-    return (
-      <Card className="bg-gradient-card border-border hover:shadow-hover transition-all duration-300 transform hover:scale-105">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-8 w-16" />
-              <Skeleton className="h-3 w-20" />
-            </div>
-            <Skeleton className="w-12 h-12 rounded-xl" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="bg-gradient-card border-border hover:shadow-hover transition-all duration-300 transform hover:scale-105 cursor-pointer">
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <p className="text-3xl font-bold text-foreground">{value}</p>
-            <div className="flex items-center gap-1">
-              {isPositive ? (
-                <TrendingUp className="w-4 h-4 text-success" />
-              ) : (
-                <TrendingDown className="w-4 h-4 text-destructive" />
-              )}
-              <span className={`text-sm font-medium ${
-                isPositive ? "text-success" : "text-destructive"
-              }`}>
-                {change}
-              </span>
-              <span className="text-sm text-muted-foreground">vs last month</span>
-            </div>
-          </div>
-          <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center">
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+interface Bucket {
+  month: string;
+  activations: number;
 }
 
-const activationData: Array<{ month: string; activations: number; reactivations: number }> = [];
+interface PlanSlice {
+  name: string;
+  count: number;
+}
 
-const planDistributionData: Array<{ name: string; value: number; count: number; color: string }> = [];
+type Status = "loading" | "ready" | "error";
+
+function emptyBuckets(): Bucket[] {
+  const now = new Date();
+  return Array.from({ length: MONTHS_SHOWN }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (MONTHS_SHOWN - 1 - i), 1);
+    return { month: d.toLocaleString("en", { month: "short" }), activations: 0 };
+  });
+}
+
+const nf = new Intl.NumberFormat("en-ZA");
 
 export default function KeyStats() {
-  const [isLoading, setIsLoading] = useState(true);
+  const { user } = useAuth();
+  const [status, setStatus] = useState<Status>("loading");
+  const [totals, setTotals] = useState<Totals | null>(null);
+  const [activations, setActivations] = useState<Bucket[]>([]);
+  const [plans, setPlans] = useState<PlanSlice[]>([]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 2000);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!user) return;
+    let cancelled = false;
 
-  const kpiData = [
-    {
-      title: "Total Keys Generated",
-      value: "—",
-      change: "0%",
-      isPositive: true,
-      icon: <Key className="w-6 h-6 text-primary" />
-    },
-    {
-      title: "Active Licenses",
-      value: "—",
-      change: "0%",
-      isPositive: true,
-      icon: <Shield className="w-6 h-6 text-success" />
-    },
-    {
-      title: "Revenue This Month",
-      value: "—",
-      change: "0%",
-      isPositive: true,
-      icon: <TrendingUp className="w-6 h-6 text-warning" />
-    },
-    {
-      title: "Churn Rate",
-      value: "—",
-      change: "0%",
-      isPositive: true,
-      icon: <Database className="w-6 h-6 text-destructive" />
+    async function load() {
+      try {
+        const [{ data: licences, error: licErr }, { data: planRows }, { data: eas }] =
+          await Promise.all([
+            supabase
+              .from("licenses")
+              .select("id, status, created_at, plan_id")
+              .eq("user_id", user!.id),
+            supabase.from("plans").select("id, name"),
+            supabase.from("expert_advisors").select("id").eq("user_id", user!.id),
+          ]);
+
+        if (licErr) throw licErr;
+        if (cancelled) return;
+
+        const rows = licences ?? [];
+        const licenceIds = rows.map((r) => r.id);
+        const eaIds = (eas ?? []).map((e) => e.id);
+
+        // Counts that need a second round trip. Each guards its own empty list
+        // first, because `.in()` with no values matches every row rather than
+        // none — a mentor with no robots would otherwise be shown the whole
+        // platform's signal count. Wrapped so each resolves to a plain number:
+        // mixing a query builder and a literal in one Promise.all produces a
+        // union deep enough to defeat the checker.
+        const countDevices = async () => {
+          if (licenceIds.length === 0) return 0;
+          const { count } = await supabase
+            .from("device_activations")
+            .select("*", { count: "exact", head: true })
+            .in("license_id", licenceIds);
+          return count ?? 0;
+        };
+
+        const countSignals = async () => {
+          if (eaIds.length === 0) return 0;
+          const { count } = await supabase
+            .from("signals")
+            .select("*", { count: "exact", head: true })
+            .in("ea_id", eaIds);
+          return count ?? 0;
+        };
+
+        const [devicesLinked, signalsSent] = await Promise.all([countDevices(), countSignals()]);
+
+        if (cancelled) return;
+
+        setTotals({
+          keysIssued: rows.length,
+          activeLicenses: rows.filter((r) => r.status?.toLowerCase() === "active").length,
+          devicesLinked,
+          signalsSent,
+        });
+
+        // Activations by month
+        const buckets = emptyBuckets();
+        const index = new Map(buckets.map((b, i) => [b.month, i]));
+        const since = new Date();
+        since.setMonth(since.getMonth() - (MONTHS_SHOWN - 1));
+        since.setDate(1);
+        since.setHours(0, 0, 0, 0);
+
+        for (const row of rows) {
+          const created = new Date(row.created_at);
+          if (created < since) continue;
+          const i = index.get(created.toLocaleString("en", { month: "short" }));
+          if (i !== undefined) buckets[i].activations += 1;
+        }
+        setActivations(buckets);
+
+        // Plan distribution
+        const planName = new Map((planRows ?? []).map((p) => [p.id, p.name]));
+        const tally = new Map<string, number>();
+        for (const row of rows) {
+          const name = planName.get(row.plan_id) ?? "Unassigned";
+          tally.set(name, (tally.get(name) ?? 0) + 1);
+        }
+        setPlans(
+          Array.from(tally, ([name, count]) => ({ name, count })).sort(
+            (a, b) => b.count - a.count,
+          ),
+        );
+
+        setStatus("ready");
+      } catch (e) {
+        console.error("Failed to load key stats:", e);
+        if (!cancelled) setStatus("error");
+      }
     }
-  ];
 
-  if (isLoading) {
-    return (
-      <div className="space-y-8 animate-fade-in">
-        <div className="animate-scale-in">
-          <Skeleton className="h-8 w-48 mb-2" />
-          <Skeleton className="h-4 w-96" />
-        </div>
-        
-        {/* KPI Skeletons */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="animate-scale-in" style={{ animationDelay: `${150 + (i * 75)}ms` }}>
-              <KPICard
-                title=""
-                value=""
-                change=""
-                isPositive={true}
-                icon={null}
-                isLoading={true}
-              />
-            </div>
-          ))}
-        </div>
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
-        {/* Chart Skeletons */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="animate-scale-in" style={{ animationDelay: "500ms" }}>
-            <CardHeader>
-              <Skeleton className="h-6 w-32" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-80 w-full" />
-            </CardContent>
-          </Card>
-          <Card className="animate-scale-in" style={{ animationDelay: "650ms" }}>
-            <CardHeader>
-              <Skeleton className="h-6 w-32" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="h-80 w-full" />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
+  const tiles = useMemo(
+    () => [
+      { label: "Keys issued", value: totals?.keysIssued },
+      { label: "Active licences", value: totals?.activeLicenses },
+      { label: "Devices linked", value: totals?.devicesLinked },
+      { label: "Signals sent", value: totals?.signalsSent },
+    ],
+    [totals],
+  );
+
+  const totalActivations = activations.reduce((s, b) => s + b.activations, 0);
+  const totalPlanned = plans.reduce((s, p) => s + p.count, 0);
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Key Statistics</h1>
-        <p className="text-muted-foreground">
-          Comprehensive analytics and insights for your license management
-        </p>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {kpiData.map((kpi, index) => (
-          <KPICard
-            key={index}
-            title={kpi.title}
-            value={kpi.value}
-            change={kpi.change}
-            isPositive={kpi.isPositive}
-            icon={kpi.icon}
-            isLoading={false}
-          />
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+        {tiles.map((tile) => (
+          <div key={tile.label} className="bg-card px-5 py-4">
+            <p className="section-label">{tile.label}</p>
+            {status === "loading" ? (
+              <Skeleton className="mt-2 h-7 w-16" />
+            ) : (
+              <p
+                className={cn(
+                  "tabular mt-1.5 text-2xl font-semibold",
+                  status === "error" && "text-muted-foreground",
+                )}
+              >
+                {status === "error" ? "—" : nf.format(tile.value ?? 0)}
+              </p>
+            )}
+          </div>
         ))}
       </div>
 
-      {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* License Activations Chart */}
-        <Card className="bg-gradient-card border-border">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-primary" />
-              License Activations
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Monthly license activations and reactivations
-            </p>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-baseline justify-between space-y-0 border-b border-border px-5 py-3.5">
+            <CardTitle>Licences issued</CardTitle>
+            <span className="text-xs text-muted-foreground">Last {MONTHS_SHOWN} months</span>
           </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={activationData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis 
-                    dataKey="month" 
-                    className="text-muted-foreground"
-                    fontSize={12}
-                  />
-                  <YAxis 
-                    className="text-muted-foreground"
-                    fontSize={12}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px'
-                    }}
-                  />
-                  <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="activations" 
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={2}
-                    name="New Activations"
-                    dot={{ fill: 'hsl(var(--primary))', strokeWidth: 2, r: 4 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="reactivations" 
-                    stroke="hsl(var(--success))" 
-                    strokeWidth={2}
-                    name="Reactivations"
-                    dot={{ fill: 'hsl(var(--success))', strokeWidth: 2, r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+          <CardContent className="p-5">
+            {status === "loading" ? (
+              <Skeleton className="h-[260px] w-full" />
+            ) : status === "error" ? (
+              <Empty message="Couldn't load statistics." />
+            ) : totalActivations === 0 ? (
+              <Empty message={`No licences issued in the last ${MONTHS_SHOWN} months.`} />
+            ) : (
+              <div className="h-[260px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={activations} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                    <defs>
+                      <linearGradient id="keystats-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.18} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      axisLine={false}
+                      tickLine={false}
+                      width={40}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                    />
+                    <Tooltip
+                      cursor={{ stroke: "hsl(var(--border))" }}
+                      content={({ active, payload, label }) =>
+                        active && payload?.length ? (
+                          <div className="rounded-md border border-border bg-popover px-2.5 py-1.5 shadow-popover">
+                            <p className="text-xs text-muted-foreground">{label}</p>
+                            <p className="tabular text-sm font-medium">
+                              {payload[0].value} licences
+                            </p>
+                          </div>
+                        ) : null
+                      }
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="activations"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={1.5}
+                      fill="url(#keystats-fill)"
+                      dot={false}
+                      activeDot={{ r: 3, fill: "hsl(var(--primary))" }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Plan Distribution Chart */}
-        <Card className="bg-gradient-card border-border">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-primary" />
-              Plan Distribution
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Current active licenses by plan type
-            </p>
+        <Card>
+          <CardHeader className="border-b border-border px-5 py-3.5">
+            <CardTitle>By plan</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={planDistributionData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}%`}
-                    labelLine={false}
-                    fontSize={12}
-                  >
-                    {planDistributionData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value: any, name: any, props: any) => [
-                      `${value}% (${props.payload.count} licenses)`,
-                      name
-                    ]}
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px'
-                    }}
-                  />
-                  <Legend 
-                    wrapperStyle={{ fontSize: '12px' }}
-                    formatter={(value, entry) => (
-                      <span style={{ color: entry.color }}>
-                        {value} ({planDistributionData.find(item => item.name === value)?.count} licenses)
+          <CardContent className="p-5">
+            {status === "loading" ? (
+              <Skeleton className="h-[260px] w-full" />
+            ) : status === "error" || totalPlanned === 0 ? (
+              <Empty
+                message={status === "error" ? "Couldn't load plans." : "No licences to break down."}
+              />
+            ) : (
+              <div className="space-y-4">
+                <div className="h-[160px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={plans}
+                        dataKey="count"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={48}
+                        outerRadius={72}
+                        paddingAngle={2}
+                        stroke="none"
+                      >
+                        {/*
+                          One hue at descending strength rather than a different
+                          colour per plan. Plans are an ordinal breakdown of one
+                          quantity, and the system spends saturated colour on
+                          trade direction alone.
+                        */}
+                        {plans.map((_, i) => (
+                          <Cell
+                            key={i}
+                            fill={`hsl(var(--primary) / ${Math.max(0.25, 1 - i * 0.22)})`}
+                          />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <ul className="space-y-1.5">
+                  {plans.map((p, i) => (
+                    <li key={p.name} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{
+                            background: `hsl(var(--primary) / ${Math.max(0.25, 1 - i * 0.22)})`,
+                          }}
+                          aria-hidden="true"
+                        />
+                        <span className="truncate">{p.name}</span>
                       </span>
-                    )}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+                      <span className="tabular shrink-0 text-muted-foreground">{p.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
 
-      {/* Additional Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-gradient-card border-border hover:shadow-hover transition-all duration-300">
-          <CardContent className="p-6 text-center">
-            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mx-auto mb-4">
-              <Key className="w-6 h-6 text-primary" />
-            </div>
-            <h3 className="font-semibold text-lg mb-2">Average Revenue Per User</h3>
-            <p className="text-3xl font-bold text-primary mb-1">—</p>
-            <p className="text-sm text-muted-foreground">—</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-card border-border hover:shadow-hover transition-all duration-300">
-          <CardContent className="p-6 text-center">
-            <div className="w-12 h-12 bg-success/10 rounded-lg flex items-center justify-center mx-auto mb-4">
-              <Shield className="w-6 h-6 text-success" />
-            </div>
-            <h3 className="font-semibold text-lg mb-2">License Utilization</h3>
-            <p className="text-3xl font-bold text-success mb-1">—</p>
-            <p className="text-sm text-muted-foreground">—</p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-card border-border hover:shadow-hover transition-all duration-300">
-          <CardContent className="p-6 text-center">
-            <div className="w-12 h-12 bg-warning/10 rounded-lg flex items-center justify-center mx-auto mb-4">
-              <TrendingUp className="w-6 h-6 text-warning" />
-            </div>
-            <h3 className="font-semibold text-lg mb-2">Growth Rate</h3>
-            <p className="text-3xl font-bold text-warning mb-1">—</p>
-            <p className="text-sm text-muted-foreground">—</p>
-          </CardContent>
-        </Card>
-      </div>
+function Empty({ message }: { message: string }) {
+  return (
+    <div className="flex h-[260px] items-center justify-center">
+      <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   );
 }

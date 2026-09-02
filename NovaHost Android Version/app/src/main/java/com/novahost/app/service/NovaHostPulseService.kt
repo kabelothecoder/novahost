@@ -118,6 +118,15 @@ class NovaHostPulseService : Service(), LifecycleOwner, ViewModelStoreOwner, Sav
         startForegroundServiceNotification()
         setupPulseOverlay()
 
+        // Put the run state back BEFORE the listener starts.
+        //
+        // This service is START_STICKY, so Android recreates it by itself after
+        // reclaiming the process -- with a fresh MetaAPIManager whose botStatus
+        // is IDLE. The notification returned, the socket resubscribed, and
+        // SignalListener's RUNNING gate then dropped every signal that arrived,
+        // permanently and without a word, on an app that said it was trading.
+        MetaAPIManager.restoreRunState(applicationContext)
+
         // Execution belongs to the service, not to the bubble. This used to run
         // inside the overlay's composition, which meant it only ran while the
         // overlay was attached -- so a device without the draw-over permission

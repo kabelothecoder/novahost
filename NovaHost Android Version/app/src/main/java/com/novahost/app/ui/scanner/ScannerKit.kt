@@ -656,7 +656,7 @@ fun PriceLadder(plan: TradePlan, modifier: Modifier = Modifier) {
 
     val stop = LadderRung(
         label = "SL",
-        meta = trimmed(plan.stopPips) + " pips · -$" + trimmed(plan.actualRisk),
+        meta = trimmed(plan.stopPips) + " pips · -" + plan.money(plan.actualRisk),
         price = instrument.formatPrice(plan.stop),
         tint = ScanSell,
         metaTint = ScanSellMeta,
@@ -1037,6 +1037,81 @@ fun <T> SegmentedRail(
                     fontSize = 9.sp,
                     modifier = Modifier.padding(top = 2.dp)
                 )
+            }
+        }
+    }
+}
+
+/**
+ * [SegmentedRail] wrapped onto two rows.
+ *
+ * Four options do not fit one rail on a handset -- at 360dp each cell is about
+ * 80dp and "Price Action" wraps mid-word -- so the strategy picker is a 2x2
+ * grid. Same well, same selected treatment, same type: it should read as the
+ * same control as the mode rail above it, only taller.
+ *
+ * A short odd list is padded with an invisible spacer rather than being allowed
+ * to stretch, so three options give two full-width-half cells and a gap, not one
+ * cell twice the size of its neighbour.
+ */
+@Composable
+fun <T> SegmentedGrid(
+    options: List<T>,
+    selected: T,
+    accent: Color,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    columns: Int = 2,
+    label: (T) -> String,
+    caption: (T) -> String
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(ScanWell)
+            .border(1.dp, HomeBorderSubtle, shape)
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { option ->
+                    val isSelected = option == selected
+                    val inner = RoundedCornerShape(10.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(inner)
+                            .then(
+                                if (isSelected) Modifier
+                                    .background(accent.copy(alpha = 0.14f))
+                                    .border(1.dp, accent.copy(alpha = 0.46f), inner)
+                                else Modifier
+                            )
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 10.dp, horizontal = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = label(option),
+                            color = if (isSelected) ScanTextBright else HomeTextDim,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = caption(option),
+                            color = if (isSelected) accent.onArtFloor() else ScanTextTrace,
+                            fontSize = 9.sp,
+                            lineHeight = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

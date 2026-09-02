@@ -1,26 +1,31 @@
-﻿import { ReactNode } from 'react';
-import { Card } from '@/components/ui/card';
+import { ReactNode } from "react";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
 interface AuthLayoutProps {
   children: ReactNode;
+  /**
+   * Registration has ten fields to sign-in's two. Forcing both through one
+   * width made the long form a single cramped column on desktop.
+   */
+  wide?: boolean;
 }
-export function AuthLayout({
-  children
-}: AuthLayoutProps) {
-  return <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm md:w-[480px]">
-        <div className="flex justify-center mb-8">
-          <img 
-            src="/logo.svg" 
-            alt="NovaHost Logo" 
-            className="h-10 w-auto select-none" 
-            draggable={false} 
+
+export function AuthLayout({ children, wide = false }: AuthLayoutProps) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div className={cn("w-full", wide ? "max-w-xl" : "max-w-sm")}>
+        <div className="mb-6 flex justify-center">
+          <img
+            src="/novahost-mark.png"
+            alt="NovaHost"
+            className="h-11 w-11 rounded-xl object-cover shadow-card select-none"
+            draggable={false}
           />
         </div>
-        
-        {/* Centered Card */}
-        <Card className="p-6 shadow-lg border-border bg-card">
-          {children}
-        </Card>
+
+        <Card className="p-6">{children}</Card>
       </div>
-    </div>;
+    </div>
+  );
 }

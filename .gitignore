@@ -48,7 +48,7 @@ Thumbs.db
 # ─── Vercel / Supabase local ──────────────────────────────────────
 .vercel
 .supabase/
-supabase/.temp/
+**/supabase/.temp/
 
 # ─── Logs ─────────────────────────────────────────────────────────
 *.log

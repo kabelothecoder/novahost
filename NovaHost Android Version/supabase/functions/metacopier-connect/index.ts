@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
-    const { license_key, account_number, password, server, platform, region_name } = body
+    const { license_key, account_number, password, server, platform, region_name, symbol_suffix, account_type } = body
 
     if (!license_key || !account_number || !password || !server) {
       return json({
@@ -246,6 +246,43 @@ Deno.serve(async (req: Request) => {
     metadata.broker_server = accountPayload.loginServer
     metadata.platform = wantPlatform
     metadata.connected_at = new Date().toISOString()
+
+    // ---- What this broker calls its instruments -----------------------------
+    //
+    // NovaHost trades canonical names (XAUUSD, NAS100). Brokers decorate them:
+    // a micro book is XAUUSD.m, a raw-spread one XAUUSDpro. An order naming a
+    // symbol the broker does not list is rejected outright, so the decoration
+    // has to be recorded at the moment we know which account this is.
+    //
+    // It was being collected and thrown away. The app derived the suffix from
+    // the account type, passed it to MetaAPIManager.testBrokerConnection, and
+    // the request built there dropped it -- so the executor sent bare canonical
+    // names to every account and micro users had a robot that placed orders and
+    // filled none of them.
+    //
+    // The client's suffix wins when given; otherwise it is derived from the
+    // account type the same way the app does, so an older build that still
+    // sends only the type keeps working.
+    const derivedSuffix = String(account_type ?? '').trim().toUpperCase().startsWith('MICRO')
+      ? '.m'
+      : ''
+    const suffix = String(symbol_suffix ?? derivedSuffix)
+      .trim()
+      // Ends up inside an order symbol, so only what MetaTrader uses in a
+      // symbol name survives.
+      .replace(/[^A-Za-z0-9._-]/g, '')
+
+    // An empty suffix is written, not skipped: a user moving from a micro to a
+    // standard account must be able to clear a stale ".m", and leaving the old
+    // key in place would silently keep decorating symbols the new book does not
+    // have.
+    metadata.symbol_suffix = suffix
+    if (account_type) metadata.account_type = String(account_type).trim()
+
+    console.log(
+      `[MetaCopier] licence ${license.id} symbol suffix = "${suffix}"` +
+      (suffix ? ` (orders will read e.g. XAUUSD${suffix})` : ' (bare symbol names)')
+    )
 
     const { error: linkErr } = await supabase
       .from('licenses')

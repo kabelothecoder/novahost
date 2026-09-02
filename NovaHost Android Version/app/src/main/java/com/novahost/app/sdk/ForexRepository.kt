@@ -86,6 +86,24 @@ object ForexRepository {
     private val _economicCalendar = MutableStateFlow<List<EconomicEvent>>(emptyList())
     val economicCalendar: StateFlow<List<EconomicEvent>> = _economicCalendar.asStateFlow()
 
+    /**
+     * Whether the calendar was actually read, as opposed to simply being empty.
+     *
+     * These are different facts and the scanner scores them differently. "No
+     * high-impact events today" is a genuine all-clear worth twenty points;
+     * "the calendar endpoint answered with an error" is an unknown, and awarding
+     * points for it would mean the event check passes hardest exactly when it
+     * knows least.
+     *
+     * It has been the second case for some time without anyone being able to
+     * tell: FMP retired `/api/v3/economic_calendar` for non-legacy keys, the
+     * response no longer parses as a list of events, and the catch block that
+     * swallows the failure is empty. The Event Radar has been showing "no
+     * events" and the scan has been collecting the twenty points for it.
+     */
+    private val _calendarAvailable = MutableStateFlow(false)
+    val calendarAvailable: StateFlow<Boolean> = _calendarAvailable.asStateFlow()
+
     private val _marketSessions = MutableStateFlow<List<MarketSession>>(emptyList())
     val marketSessions: StateFlow<List<MarketSession>> = _marketSessions.asStateFlow()
 
@@ -180,17 +198,34 @@ object ForexRepository {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                // Handle error
+                // Logged rather than swallowed. An empty catch here is how the
+                // calendar came to be permanently unavailable without anything
+                // in the app saying so.
+                android.util.Log.w("NovaHost", "[Calendar] fetch failed: " + e.message)
+                _calendarAvailable.value = false
             }
 
             override fun onResponse(call: Call, response: Response) {
-                response.body?.string()?.let { bodyString ->
-                    try {
-                        val events = json.decodeFromString<List<EconomicEvent>>(bodyString)
-                        _economicCalendar.value = events
-                    } catch (e: Exception) {
-                        // Handle serialization errors
-                    }
+                val bodyString = response.body?.string()
+                if (bodyString == null) {
+                    _calendarAvailable.value = false
+                    return
+                }
+                try {
+                    val events = json.decodeFromString<List<EconomicEvent>>(bodyString)
+                    _economicCalendar.value = events
+                    _calendarAvailable.value = true
+                } catch (e: Exception) {
+                    // A retired endpoint answers with an object, not a list, so
+                    // this is where FMP's "Legacy Endpoint" notice lands. The
+                    // first 200 characters go to the log because the message is
+                    // the whole diagnosis.
+                    android.util.Log.w(
+                        "NovaHost",
+                        "[Calendar] unreadable response: " + bodyString.take(200)
+                    )
+                    _economicCalendar.value = emptyList()
+                    _calendarAvailable.value = false
                 }
             }
         })

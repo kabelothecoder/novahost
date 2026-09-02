@@ -47,7 +47,7 @@ object FxRates {
      * produces a sane figure rather than a zero, and the UI marks any sizing
      * done on them as an estimate.
      */
-    private val FALLBACK = mapOf("USD" to 1.0, "ZAR" to 18.0, "EUR" to 0.92)
+    private val FALLBACK = mapOf("USD" to 1.0, "ZAR" to 16.1, "EUR" to 0.86)
 
     /**
      * @param rate      units of [currency] per 1 USD.
@@ -86,30 +86,55 @@ object FxRates {
         return Quote(code, FALLBACK[code] ?: 1.0, 0L)
     }
 
-    private suspend fun fetch(code: String): Double? = withContext(Dispatchers.IO) {
-        val key = BuildConfig.FMP_API_KEY
-        if (key.isBlank()) return@withContext null
-
+    /**
+     * One call for every rate, from a keyless provider.
+     *
+     * This used to ask FMP for `/api/v3/quote/USDZAR`. That endpoint was retired
+     * for non-legacy keys and now answers with a "Legacy Endpoint" notice
+     * instead of a price -- the same retirement that killed the economic
+     * calendar. The parse failed, the catch swallowed it, and every conversion
+     * silently fell through to [FALLBACK]'s hardcoded 18.0 while the live rate
+     * was 16.11. On a risk calculator that is a position size about twelve per
+     * cent wrong, on every trade, with nothing on screen suggesting anything was
+     * amiss.
+     *
+     * open.er-api.com needs no key and returns every rate in one response, so a
+     * single call fills the whole cache rather than one currency at a time.
+     */
+    private suspend fun fetchAll(): Map<String, Double>? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
-                .url("https://financialmodelingprep.com/api/v3/quote/USD$code?apikey=$key")
+                .url("https://open.er-api.com/v6/latest/USD")
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
+                if (!response.isSuccessful) {
+                    android.util.Log.w("NovaHost", "[FX] rates HTTP ${response.code}")
+                    return@withContext null
+                }
                 val body = response.body?.string() ?: return@withContext null
+                val root = json.parseToJsonElement(body).jsonObject
 
-                val element = json.parseToJsonElement(body)
-                val first = element.jsonArray.firstOrNull()?.jsonObject ?: return@withContext null
-                val price = first["price"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                if (root["result"]?.jsonPrimitive?.content != "success") {
+                    android.util.Log.w("NovaHost", "[FX] provider did not report success")
+                    return@withContext null
+                }
 
-                price?.takeIf { it > 0.0 }
+                val rates = root["rates"]?.jsonObject ?: return@withContext null
+                SUPPORTED.mapNotNull { code ->
+                    val value = rates[code]?.jsonPrimitive?.content?.toDoubleOrNull()
+                    if (value != null && value > 0.0) code to value else null
+                }.toMap().takeIf { it.isNotEmpty() }
             }
         } catch (e: Exception) {
-            android.util.Log.w("NovaHost", "[FX] USD$code fetch failed: ${e.message}")
+            // Logged, not swallowed. An empty catch here is exactly how the
+            // stale fallback went unnoticed for as long as it did.
+            android.util.Log.w("NovaHost", "[FX] rate fetch failed: ${e.message}")
             null
         }
     }
+
+    private suspend fun fetch(code: String): Double? = fetchAll()?.get(code)
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
