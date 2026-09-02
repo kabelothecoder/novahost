@@ -50,7 +50,7 @@ function Navbar() {
       {/* Logo */}
       <Link to="/landing" className="flex items-center gap-2 select-none">
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-950 text-white text-xs font-black tracking-tight">
-          MH
+          NH
         </span>
         <span className="text-lg font-bold tracking-tight text-gray-900">NovaHost</span>
       </Link>
@@ -562,7 +562,7 @@ export default function Landing() {
             className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-semibold tracking-wide"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-            Available on Android & iOS
+            Available on Android
           </motion.div>
 
           <motion.h2
