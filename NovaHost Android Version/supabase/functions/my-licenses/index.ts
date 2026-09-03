@@ -15,7 +15,7 @@ const CORS_HEADERS = {
  * failed twice over. There is no `user_email` column -- it is `owner_email` --
  * so PostgREST answered 400 and the client's bare catch turned the error into
  * an empty list. And even spelled correctly it could never have worked: an
- * install holds a mentor-issued key and the anon key, with no Supabase auth
+ * install holds a mentor-issued key and the anon key, with no NovaHost auth
  * session, and RLS on `licenses` has no `anon` policy. `auth.uid()` is null, so
  * every row is filtered out. The drawer was structurally incapable of showing
  * anything.
@@ -48,7 +48,7 @@ const CORS_HEADERS = {
  * -- picking one re-runs `validate-license` for that key, which returns the
  * blob once instead of once per robot per resume.
  *
- * The proper fix is upstream: the portal should put art in Supabase Storage and
+ * The proper fix is upstream: the portal should put art in the project's object storage and
  * store a URL. Until it does, this keeps the drawer usable.
  */
 function slim(license: Record<string, unknown>) {
@@ -91,7 +91,7 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -107,7 +107,7 @@ Deno.serve(async (req: Request) => {
     // ---- Which licences is this handset bound to? --------------------------
     const ids = new Set<string>()
 
-    const { data: seats, error: seatErr } = await supabase
+    const { data: seats, error: seatErr } = await novaHost
       .from('device_activations')
       .select('license_id')
       .eq('device_id', deviceId)
@@ -117,7 +117,7 @@ Deno.serve(async (req: Request) => {
     for (const s of seats ?? []) if (s.license_id) ids.add(s.license_id as string)
 
     // Legacy binding. Kept until every install has re-activated at least once.
-    const { data: legacy, error: legacyErr } = await supabase
+    const { data: legacy, error: legacyErr } = await novaHost
       .from('licenses')
       .select('id')
       .eq('metadata->>device_id', deviceId)
@@ -133,7 +133,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- The licences themselves, with their robots ------------------------
-    const { data: licenses, error: licErr } = await supabase
+    const { data: licenses, error: licErr } = await novaHost
       .from('licenses')
       .select(`
         id,

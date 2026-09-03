@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 
 import crypto from 'crypto';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const novaHostUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const novaHostServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
+const novaHost = createClient(novaHostUrl, novaHostServiceKey);
 
 function validatePayfastSignature(data: Record<string, string>, signatureToMatch: string, passphrase: string): boolean {
   const payload = { ...data };
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
       }
 
       // Upsert subscription
-      const { error } = await supabase
+      const { error } = await novaHost
         .from('subscriptions')
         .upsert({
           email: cleanEmail,
@@ -98,14 +98,14 @@ export async function POST(request: Request) {
         }, { onConflict: 'email' });
 
       if (error) {
-        console.error('Supabase error inserting subscription:', error);
+        console.error('NovaHost error inserting subscription:', error);
         return new NextResponse('Database Error', { status: 500 });
       }
 
       // Generate and insert license key
       const generatedKey = `MH-${crypto.randomUUID().substring(0, 8).toUpperCase()}`;
       
-      const { error: licenseError } = await supabase
+      const { error: licenseError } = await novaHost
         .from('licenses')
         .upsert({
           email: cleanEmail,
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
         }, { onConflict: 'email' });
 
       if (licenseError) {
-        console.error('Supabase error inserting license:', licenseError);
+        console.error('NovaHost error inserting license:', licenseError);
         return new NextResponse('Database Error', { status: 500 });
       }
 
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Email required' }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await novaHost
     .from('subscriptions')
     .select('status, plan_type, expires_at')
     .eq('email', email)
@@ -153,7 +153,7 @@ export async function GET(request: Request) {
   // Check expiration
   if (data.expires_at && new Date(data.expires_at) < new Date()) {
     // Expired
-    await supabase.from('subscriptions').update({ status: 'expired' }).eq('email', email);
+    await novaHost.from('subscriptions').update({ status: 'expired' }).eq('email', email);
     return NextResponse.json({ status: 'expired', plan_type: data.plan_type }, { status: 200 });
   }
 

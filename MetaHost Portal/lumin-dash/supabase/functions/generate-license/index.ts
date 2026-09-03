@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const novaHost = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       global: { fetch },
       auth: {
         autoRefreshToken: false,
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Missing ea or plan' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
-    const { data: { user }, error: userErr } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
+    const { data: { user }, error: userErr } = await novaHost.auth.getUser(authHeader.replace('Bearer ', ''));
     if (userErr || !user) {
       console.error('generate-license: Auth failed', { userErr, hasUser: !!user });
       return new Response(JSON.stringify({ error: 'Unauthorized', details: userErr?.message }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -54,14 +54,14 @@ Deno.serve(async (req) => {
     // --- Credits system bypassed for subscription model ---
 
     // Find product by name or code
-    let { data: product, error: prodErr } = await supabase
+    let { data: product, error: prodErr } = await novaHost
       .from('expert_advisors')
       .select('id, code, name, display_name, avatar_url, background_video_url, symbols')
       .ilike('name', ea)
       .maybeSingle();
 
     if (!product) {
-      const byCode = await supabase
+      const byCode = await novaHost
         .from('expert_advisors')
         .select('id, code, name, display_name, avatar_url, background_video_url, symbols')
         .eq('code', ea)
@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     }
 
     // Find plan by name or code for the product
-    let { data: planRow } = await supabase
+    let { data: planRow } = await novaHost
       .from('plans')
       .select('id, code, name, duration_days, max_devices')
       .eq('product_id', product.id)
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (!planRow) {
-      const byCode = await supabase
+      const byCode = await novaHost
         .from('plans')
         .select('id, code, name, duration_days, max_devices')
         .eq('product_id', product.id)
@@ -112,7 +112,7 @@ Deno.serve(async (req) => {
 
     for (let i = 0; i < 5; i++) {
       licenseKey = generateLicenseKey(prefix);
-      const { data: inserted, error: insErr } = await supabase
+      const { data: inserted, error: insErr } = await novaHost
         .from('licenses')
         .insert({
           owner_id: user.id,

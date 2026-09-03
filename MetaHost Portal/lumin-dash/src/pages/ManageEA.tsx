@@ -17,7 +17,7 @@ import {
   ArrowLeft, Upload, Link, X, Bold, Italic, Eye, Palette,
   Save, RotateCcw, AlertTriangle, Sparkles, Layout, Settings
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { playNotificationSound } from "@/lib/notify";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -67,14 +67,14 @@ export default function ManageEA() {
     if (!id) return;
     setIsLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await novaHost.auth.getSession();
       if (!sessionData?.session) {
         setIsLoading(false);
         return;
       }
       const userId = sessionData.session.user.id;
 
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from("expert_advisors")
         .select("*")
         .eq("id", id)
@@ -161,11 +161,11 @@ export default function ManageEA() {
 
     setIsSaving(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await novaHost.auth.getSession();
       const userId = sessionData?.session?.user.id;
       if (!userId) throw new Error("No active session found.");
 
-      const { error } = await supabase
+      const { error } = await novaHost
         .from("expert_advisors")
         .update({
           name: name.trim(),

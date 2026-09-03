@@ -425,12 +425,12 @@ object SymbolPlanStore {
                 }
             )
 
-            val response = SupabaseSetup.client.httpClient.post(
-                "${BuildConfig.SUPABASE_URL}/functions/v1/sync-symbol-config"
+            val response = NovaHostBackend.client.httpClient.post(
+                "${BuildConfig.NOVAHOST_API_URL}/functions/v1/sync-symbol-config"
             ) {
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
-                header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
+                header("apikey", BuildConfig.NOVAHOST_API_KEY)
                 timeout { requestTimeoutMillis = 20_000 }
                 setBody(request)
             }
@@ -511,12 +511,12 @@ object SymbolPlanStore {
         }
 
         return try {
-            val response = SupabaseSetup.client.httpClient.post(
-                "${BuildConfig.SUPABASE_URL}/functions/v1/broker-symbols"
+            val response = NovaHostBackend.client.httpClient.post(
+                "${BuildConfig.NOVAHOST_API_URL}/functions/v1/broker-symbols"
             ) {
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
-                header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
+                header("apikey", BuildConfig.NOVAHOST_API_KEY)
                 // The broker is queried live, so this is slower than a plain
                 // database read and must not be cut off mid-answer.
                 timeout { requestTimeoutMillis = 30_000 }

@@ -4,7 +4,7 @@ import { LicenseChart } from "@/components/LicenseChart";
 import { RecentRequestsTable } from "@/components/RecentRequestsTable";
 import { QuickAddCard } from "@/components/QuickAddCard";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { cn } from "@/lib/utils";
 
 type LicenseStatus = "loading" | "valid" | "invalid";
@@ -29,7 +29,7 @@ export function DashboardContent() {
     async function checkLicense() {
       if (!user) return;
       try {
-        const { data: licenses } = await supabase
+        const { data: licenses } = await novaHost
           .from("licenses")
           .select("license_key")
           .eq("user_id", user.id)
@@ -47,7 +47,7 @@ export function DashboardContent() {
           localStorage.setItem("device_id", deviceId);
         }
 
-        const { data, error } = await supabase.functions.invoke("validate-license", {
+        const { data, error } = await novaHost.functions.invoke("validate-license", {
           body: { licenseKey: currentLicense, deviceId },
         });
 

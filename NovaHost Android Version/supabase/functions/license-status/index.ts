@@ -9,7 +9,7 @@ const CORS_HEADERS = {
 /**
  * Answers "is this licence usable, and does it have a trading account attached".
  *
- * This exists because the Android app has no Supabase auth session. It holds a
+ * This exists because the Android app has no NovaHost auth session. It holds a
  * mentor-issued licence key and talks to PostgREST with the anon key, and RLS on
  * `licenses` grants SELECT only to `authenticated` or to a row's own
  * `auth.uid() = user_id`. So the app's direct query returned an empty list for
@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -51,7 +51,7 @@ Deno.serve(async (req: Request) => {
 
     const key = String(rawKey).trim().toUpperCase()
 
-    const { data: license, error } = await supabase
+    const { data: license, error } = await novaHost
       .from('licenses')
       .select('id, ea_id, status, expires_at, allowed_symbols, metadata')
       .eq('license_key', key)

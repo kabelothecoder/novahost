@@ -52,7 +52,7 @@ fun GlobalVideoBackground(
 
     LaunchedEffect(videoUrl) {
         // Both sources were dead ends. The default URL pointed at a legacy
-        // Supabase project whose domain no longer resolves, and the documented
+        // NovaHost backend project whose domain no longer resolves, and the documented
         // fallback res/raw/bg_motion_loop.mp4 has never existed in this repo --
         // res/raw is empty. So every launch prepared an ExoPlayer that could
         // only error. Resolve a source we actually have, or play nothing and

@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { novaHost } from '@/integrations/novahost/client';
 import { Upload, User } from 'lucide-react';
 
 export default function Profile() {
@@ -29,7 +29,7 @@ export default function Profile() {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data } = await supabase
+      const { data } = await novaHost
         .from('profiles')
         .select('full_name, avatar_url')
         .eq('id', user.id)
@@ -44,11 +44,11 @@ export default function Profile() {
     setIsLoading(true);
     try {
       const updates: any = { full_name: formData.name };
-      const { error: upErr } = await supabase.from('profiles').update(updates).eq('id', user.id);
+      const { error: upErr } = await novaHost.from('profiles').update(updates).eq('id', user.id);
       if (upErr) throw upErr;
 
       if (formData.email && formData.email !== user.email) {
-        await supabase.auth.updateUser({ email: formData.email });
+        await novaHost.auth.updateUser({ email: formData.email });
       }
 
       toast({ title: 'Profile updated', description: 'Your profile has been successfully updated.' });
@@ -74,14 +74,14 @@ export default function Profile() {
       return;
     }
     const path = `${user.id}/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+    const { error: upErr } = await novaHost.storage.from('avatars').upload(path, file, { upsert: true });
     if (upErr) {
       toast({ title: 'Upload failed', description: upErr.message, variant: 'destructive' });
       return;
     }
-    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    const { data } = novaHost.storage.from('avatars').getPublicUrl(path);
     const publicUrl = data.publicUrl;
-    const { error: profErr } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
+    const { error: profErr } = await novaHost.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
     if (profErr) {
       toast({ title: 'Save failed', description: profErr.message, variant: 'destructive' });
       return;

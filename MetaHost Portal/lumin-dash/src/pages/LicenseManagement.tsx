@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { Check, Copy, RefreshCw, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -86,13 +86,13 @@ export default function LicenseManagement() {
     setIsLoading(true);
     setLoadFailed(false);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await novaHost.auth.getSession();
       if (!sessionData.session) {
         setLicenses([]);
         return;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from("licenses")
         .select(
           `id, license_key, owner_email, status, expires_at, metadata, created_at,

@@ -5,7 +5,7 @@ import android.util.LruCache
 import com.novahost.app.sdk.BotStatus
 import com.novahost.app.sdk.MetaAPIManager
 import com.novahost.app.sdk.NotificationHelper
-import com.novahost.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.NovaHostBackend
 import com.novahost.app.sdk.SymbolPlanStore
 import com.novahost.app.sdk.TradeSignal
 import io.github.jan.supabase.realtime.broadcastFlow
@@ -41,7 +41,7 @@ import kotlinx.coroutines.sync.withLock
  * ## Why realtime is no longer the delivery mechanism
  *
  * It still could not be trusted after that fix, and the reason is structural
- * rather than a bug: **a Supabase broadcast is fire-and-forget.** No
+ * rather than a bug: **a realtime broadcast is fire-and-forget.** No
  * acknowledgement, no redelivery, no cursor. A handset that dozed, backgrounded,
  * switched from wifi to data, or simply held a socket that lapsed for two
  * seconds lost the signal permanently -- and neither end recorded that anything
@@ -148,7 +148,7 @@ object SignalListener {
         // the robot still trades -- which is the entire point of the split.
         nudgeJob = scope.launch {
             try {
-                val channel = SupabaseSetup.client.realtime.channel("signals")
+                val channel = NovaHostBackend.client.realtime.channel("signals")
                 val nudges = channel.broadcastFlow<TradeSignal>(event = "new-signal")
 
                 channel.subscribe()

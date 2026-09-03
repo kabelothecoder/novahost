@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -79,12 +79,12 @@ export default function KeyStats() {
       try {
         const [{ data: licences, error: licErr }, { data: planRows }, { data: eas }] =
           await Promise.all([
-            supabase
+            novaHost
               .from("licenses")
               .select("id, status, created_at, plan_id")
               .eq("user_id", user!.id),
-            supabase.from("plans").select("id, name"),
-            supabase.from("expert_advisors").select("id").eq("user_id", user!.id),
+            novaHost.from("plans").select("id, name"),
+            novaHost.from("expert_advisors").select("id").eq("user_id", user!.id),
           ]);
 
         if (licErr) throw licErr;
@@ -102,7 +102,7 @@ export default function KeyStats() {
         // union deep enough to defeat the checker.
         const countDevices = async () => {
           if (licenceIds.length === 0) return 0;
-          const { count } = await supabase
+          const { count } = await novaHost
             .from("device_activations")
             .select("*", { count: "exact", head: true })
             .in("license_id", licenceIds);
@@ -111,7 +111,7 @@ export default function KeyStats() {
 
         const countSignals = async () => {
           if (eaIds.length === 0) return 0;
-          const { count } = await supabase
+          const { count } = await novaHost
             .from("signals")
             .select("*", { count: "exact", head: true })
             .in("ea_id", eaIds);

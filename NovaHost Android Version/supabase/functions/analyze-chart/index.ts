@@ -361,12 +361,12 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Sign in with the email you bought the scanner with.", code: "NO_IDENTITY" }, 401);
     }
 
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    const { data: sub, error: subErr } = await supabase
+    const { data: sub, error: subErr } = await novaHost
       .from("subscriptions")
       .select("has_scanner, device_id")
       .eq("email", email)

@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { RotateCcw, CheckCircle, XCircle, Search } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 
 export default function ReActivateKey() {
   const [isLoading, setIsLoading] = useState(true);
@@ -52,7 +52,7 @@ export default function ReActivateKey() {
     setSearchResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('admin-licenses', {
+      const { data, error } = await novaHost.functions.invoke('admin-licenses', {
         body: { action: 'search', query: formData.searchTerm.trim() },
       });
       if (error) throw error;
@@ -92,7 +92,7 @@ export default function ReActivateKey() {
     setIsSearching(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('admin-licenses', {
+      const { data, error } = await novaHost.functions.invoke('admin-licenses', {
         body: { action: 'reactivate', licenseKey: searchResult.keyInfo.licenseKey },
       });
       if (error) throw error;

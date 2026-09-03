@@ -653,7 +653,7 @@ Deno.serve(async (req: Request) => {
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
     const { license_key, pair, side, volume, sl, tp, signal_id, dry_run, order_type, open_price, pending_expiry_seconds } = body
@@ -681,7 +681,7 @@ Deno.serve(async (req: Request) => {
       detail: Record<string, unknown> = {}
     ) => {
       try {
-        await supabase.from('signal_logs').insert([{
+        await novaHost.from('signal_logs').insert([{
           license_id: licenseId,
           license_key: key,
           ea_id: eaId,
@@ -747,7 +747,7 @@ Deno.serve(async (req: Request) => {
     // ---- Authorize: the licence must exist, be active, and be unexpired ------
     // The caller is a device holding a mentor-issued key, not a logged-in user,
     // so the licence IS the credential. Never trust the client's word for it.
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select(
         'id, ea_id, status, expires_at, allowed_symbols, metadata, ' +
@@ -814,7 +814,7 @@ Deno.serve(async (req: Request) => {
     //
     // Absent configuration is NOT a block: a licence that has never synced has
     // no rows here, and those installs must keep trading exactly as before.
-    const { data: symbolCfg, error: cfgErr } = await supabase
+    const { data: symbolCfg, error: cfgErr } = await novaHost
       .from('license_symbol_config')
       .select('enabled, lot, max_trades, smart_lot, broker_symbol')
       .eq('license_id', license.id)
@@ -1252,7 +1252,7 @@ Deno.serve(async (req: Request) => {
     const filledAs: string = placed
     const knownMap = (metadata?.symbol_map ?? {}) as Record<string, string>
     if (knownMap[cleanPair] !== filledAs) {
-      const { error: mapErr } = await supabase
+      const { error: mapErr } = await novaHost
         .from('licenses')
         .update({ metadata: { ...(metadata ?? {}), symbol_map: { ...knownMap, [cleanPair]: filledAs } } })
         .eq('id', license.id)

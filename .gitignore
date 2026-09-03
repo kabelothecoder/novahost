@@ -66,3 +66,6 @@ yarn-error.log*
 
 # Upload-key coordinates for the release signing config. Never commit.
 keystore.properties
+
+# Rendered email-template preview (regenerate with supabase/templates/preview.mjs)
+**/templates/preview.out.html

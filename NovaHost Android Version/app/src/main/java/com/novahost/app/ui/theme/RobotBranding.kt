@@ -34,7 +34,7 @@ data class RobotBranding(
     /**
      * Null until a promo asset is uploaded to THIS project's storage bucket.
      *
-     * This used to default to a metahost_promo.mp4 on the legacy Supabase
+     * This used to default to a metahost_promo.mp4 on the legacy NovaHost backend
      * project kivpdtisymhymmndndun, which no longer resolves at DNS at all --
      * so every robot carried a dead URL and every launch opened an ExoPlayer
      * that could only fail. Re-upload the asset to epulmnfbxjmaimefhofp and set

@@ -14,7 +14,7 @@ serve(async (req: Request) => {
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    const novaHost = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
     // ---- 1. WHO IS CALLING? -------------------------------------------------
     // Deployed with verify_jwt:true, so a missing/expired/forged JWT is rejected
@@ -23,7 +23,7 @@ serve(async (req: Request) => {
     const jwt = authHeader.replace(/^Bearer\s+/i, '')
 
     const { data: { user }, error: authError } = jwt
-      ? await supabase.auth.getUser(jwt)
+      ? await novaHost.auth.getUser(jwt)
       : { data: { user: null }, error: new Error('Missing credentials') }
 
     if (authError || !user) {
@@ -47,7 +47,7 @@ serve(async (req: Request) => {
     // records which mentor created each bot. A mentor may only broadcast to
     // bots they own — this is what stops mentor A pushing trades to mentor B's
     // paying subscribers.
-    const { data: ownedEas, error: eaError } = await supabase
+    const { data: ownedEas, error: eaError } = await novaHost
       .from('expert_advisors')
       .select('id')
       .eq('user_id', user.id)
@@ -131,7 +131,7 @@ serve(async (req: Request) => {
 
     // ---- 4. DEDUPLICATION ---------------------------------------------------
     if (signal_id) {
-      const { data: existing } = await supabase
+      const { data: existing } = await novaHost
         .from('signals')
         .select('id')
         .eq('signal_id', signal_id)
@@ -170,7 +170,7 @@ serve(async (req: Request) => {
       status: 'broadcasted'
     }))
 
-    const { data: signalData, error: dbError } = await supabase
+    const { data: signalData, error: dbError } = await novaHost
       .from('signals')
       .insert(rows)
       .select()
@@ -180,7 +180,7 @@ serve(async (req: Request) => {
     // ---- 6. FAN-OUT ---------------------------------------------------------
     // Emit one event per bot. Clients subscribe filtered by the ea_id their
     // license is tied to, so a user only ever receives their own mentor's calls.
-    const channel = supabase.channel('signals')
+    const channel = novaHost.channel('signals')
     for (const row of signalData ?? []) {
       await channel.send({
         type: 'broadcast',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { cn } from "@/lib/utils";
 
 interface StatsData {
@@ -29,7 +29,7 @@ export function KPICards() {
 
     async function fetchStats() {
       try {
-        const { data, error } = await supabase.rpc("get_dashboard_stats");
+        const { data, error } = await novaHost.rpc("get_dashboard_stats");
         if (error) throw error;
         if (cancelled) return;
         // The RPC is typed `Returns: Json`, so the shape has to be asserted.

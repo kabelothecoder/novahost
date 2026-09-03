@@ -1,8 +1,8 @@
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 
 export async function pushTradeLog(licenseKey: string, pair: string, action: string, pl: number) {
   try {
-    const { error } = await supabase.from('trade_logs').insert({
+    const { error } = await novaHost.from('trade_logs').insert({
       license_key: licenseKey,
       pair,
       action,

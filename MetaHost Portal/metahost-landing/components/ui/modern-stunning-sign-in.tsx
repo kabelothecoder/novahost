@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { ReactNode, useState, FormEvent } from "react";
-import { supabase } from "@/lib/supabase";
+import { novaHost } from "@/lib/novahost";
 import { useRouter } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 
@@ -25,7 +25,7 @@ export function SignIn1({ logo, title, subtitle, bottomText }: SignInProps) {
     setIsLoading(true);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { error: signInError } = await novaHost.auth.signInWithPassword({
         email,
         password,
       });

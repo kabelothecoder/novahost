@@ -1,10 +1,11 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, CheckCircle2, Copy, FileCode2, Share2, Server } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+// Local alias. The VITE_SUPABASE_URL name is fixed by the Vercel project config.
+const NOVAHOST_API_URL = import.meta.env.VITE_SUPABASE_URL as string;
 
 const mq5Template = `//+------------------------------------------------------------------+
 //|                                                   NovaHost EA.mq5 |
@@ -17,8 +18,8 @@ const mq5Template = `//+--------------------------------------------------------
 
 //--- inputs
 input string LicenseKey = "ENTER_LICENSE_HERE";
-input string SupabaseUrl = "YOUR_SUPABASE_URL";
-input string SupabaseKey = "YOUR_SUPABASE_ANON_KEY";
+input string NovaHostUrl = "YOUR_NOVAHOST_URL";
+input string NovaHostKey = "YOUR_NOVAHOST_KEY";
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -26,7 +27,7 @@ input string SupabaseKey = "YOUR_SUPABASE_ANON_KEY";
 int OnInit()
   {
    Print("NovaHost EA Initialized with License: ", LicenseKey);
-   // Connect to Supabase via WebRequest
+   // Connect to NovaHost via WebRequest
    return(INIT_SUCCEEDED);
   }
 
@@ -144,11 +145,11 @@ export default function HostingTutorial() {
               
               <div className="bg-black/40 border border-white/5 rounded-lg p-4 font-mono text-sm relative group">
                 <p className="text-emerald-400"># Tools &rarr; Options &rarr; Expert Advisors &rarr; Allow WebRequest for listed URL:</p>
-                <p className="text-white mt-2 break-all bg-white/5 p-2 rounded">{SUPABASE_URL}</p>
+                <p className="text-white mt-2 break-all bg-white/5 p-2 rounded">{NOVAHOST_API_URL}</p>
                 <Button
                   size="icon" variant="ghost"
                   className="absolute top-8 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => copyCode(SUPABASE_URL)}
+                  onClick={() => copyCode(NOVAHOST_API_URL)}
                 >
                   <Copy className="w-4 h-4 text-muted-foreground hover:text-white" />
                 </Button>

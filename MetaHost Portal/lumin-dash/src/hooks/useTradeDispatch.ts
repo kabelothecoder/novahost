@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
@@ -73,7 +73,7 @@ export function useTradeDispatch() {
     let cancelled = false;
 
     async function loadProducts() {
-      const { data } = await supabase
+      const { data } = await novaHost
         .from("expert_advisors")
         .select("id, name, symbols")
         .eq("user_id", user!.id)
@@ -105,7 +105,7 @@ export function useTradeDispatch() {
     async function fetchActiveTerminals() {
       const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
-      const { data: eas } = await supabase
+      const { data: eas } = await novaHost
         .from("expert_advisors")
         .select("id")
         .eq("user_id", user!.id);
@@ -116,7 +116,7 @@ export function useTradeDispatch() {
         return;
       }
 
-      const { data: licences } = await supabase
+      const { data: licences } = await novaHost
         .from("licenses")
         .select("id")
         .in("ea_id", eaIds);
@@ -127,7 +127,7 @@ export function useTradeDispatch() {
         return;
       }
 
-      const { count, error } = await supabase
+      const { count, error } = await novaHost
         .from("device_activations")
         .select("*", { count: "exact", head: true })
         .in("license_id", licenceIds)
@@ -165,7 +165,7 @@ export function useTradeDispatch() {
     const startedAt = Date.now();
 
     async function countDeliveries() {
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from("signal_deliveries")
         .select("license_id")
         .in("signal_id", lastSignalIds);
@@ -245,7 +245,7 @@ export function useTradeDispatch() {
           pending_expiry_seconds: input.orderType === "MARKET" ? null : input.expirySeconds,
         };
 
-        const { data, error } = await supabase.functions.invoke("broadcast-signal", {
+        const { data, error } = await novaHost.functions.invoke("broadcast-signal", {
           body: payload,
         });
 

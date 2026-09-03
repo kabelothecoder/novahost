@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
     }
 
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -93,7 +93,7 @@ Deno.serve(async (req: Request) => {
     // Authorised by licence, like every other device-facing function. The
     // account id is resolved from the licence and never taken from the caller.
     const key = String(rawKey).trim().toUpperCase()
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select('id, status, metadata')
       .eq('license_key', key)

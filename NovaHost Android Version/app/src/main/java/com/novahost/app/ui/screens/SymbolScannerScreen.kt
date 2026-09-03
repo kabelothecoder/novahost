@@ -627,6 +627,8 @@ fun SymbolScannerScreen(
                 initialEmail = savedEmail,
                 onCheckAccess = { email -> mainViewModel.checkAppAccess(email) },
                 onBuy = { email -> mainViewModel.buyAppAccess(email) },
+                onSubmitMoveCode = { code -> mainViewModel.submitMoveCode(code) },
+                onCancelMove = { mainViewModel.cancelDeviceMove() },
                 onGranted = {
                     mainViewModel.unlockApp()
                     navController.navigate(Routes.HOME) { popUpTo(0) }

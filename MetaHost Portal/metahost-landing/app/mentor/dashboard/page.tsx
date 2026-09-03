@@ -2,18 +2,18 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { novaHost } from "@/lib/novahost";
 import { Target, Users, TrendingUp, LogOut, User } from "lucide-react";
-import { User as SupabaseUser } from "@supabase/supabase-js";
+import { User as NovaHostUser } from "@supabase/supabase-js";
 
 export default function MentorDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [user, setUser] = useState<NovaHostUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function getSession() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await novaHost.auth.getSession();
       if (!session) {
         router.push("/auth/login");
       } else {
@@ -23,7 +23,7 @@ export default function MentorDashboard() {
     }
     getSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = novaHost.auth.onAuthStateChange((_event, session) => {
       if (!session) {
         router.push("/auth/login");
       } else {
@@ -35,7 +35,7 @@ export default function MentorDashboard() {
   }, [router]);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await novaHost.auth.signOut();
     router.push("/auth/login");
   };
 

@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
 import android.os.Build
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.Serializable
-import com.novahost.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.NovaHostBackend
 import io.github.jan.supabase.realtime.*
 import kotlinx.coroutines.flow.collect
 import com.novahost.app.sdk.TradeSignal

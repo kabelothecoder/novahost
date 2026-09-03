@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>Confirm your NovaHost account</title>
+</head>
+<body style="margin:0;padding:0;background-color:#07070E;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">One tap to confirm your email and finish setting up NovaHost.</div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#07070E;padding:32px 16px;">
+    <tr>
+      <td align="center">
+
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#0E1015;border:1px solid #1D2029;border-radius:16px;overflow:hidden;">
+
+          <!-- Gradient hairline, the brand's visor -->
+          <tr>
+            <td style="height:3px;background-color:#A855F7;background-image:linear-gradient(100deg,#F0439E 0%,#A855F7 48%,#22C9E8 100%);font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+
+          <tr>
+            <td style="padding:36px 36px 0 36px;">
+              <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;font-weight:700;color:#F2F4F8;letter-spacing:-0.02em;">
+                NovaHost
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 36px 0 36px;">
+              <div style="display:inline-block;background-color:#14171E;border:1px solid #23262F;border-radius:999px;padding:6px 14px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#A9B0BF;">
+                New account
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 36px 0 36px;">
+              <h1 style="margin:0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:27px;line-height:1.15;font-weight:700;color:#FFFFFF;letter-spacing:-0.02em;">
+                Confirm your email
+              </h1>
+              <p style="margin:12px 0 0 0;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#98A0B0;">
+                You are almost in. Confirm this address and your NovaHost account is live &mdash; then link a broker and your mentor&rsquo;s trades start arriving.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:28px 36px 0 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#A855F7;background-image:linear-gradient(100deg,#F0439E 0%,#A855F7 48%,#22C9E8 100%);border-radius:999px;">
+                    <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 30px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:#07070E;text-decoration:none;">
+                      Confirm my email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:28px 36px 0 36px;">
+              <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#6C7484;padding-bottom:10px;">
+                Or enter this code
+              </div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#07070E;border:1px solid #2A2E3A;border-radius:10px;padding:20px;text-align:center;font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:26px;font-weight:700;letter-spacing:0.22em;color:#22C9E8;">
+                    {{ .Token }}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 36px 0 36px;">
+              <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12.5px;line-height:1.6;color:#6C7484;">
+                Button not working? Paste this into your browser:
+                <br>
+                <a href="{{ .ConfirmationURL }}" style="color:#22C9E8;text-decoration:none;word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:30px 36px 34px 36px;">
+              <div style="border-top:1px solid #1D2029;padding-top:18px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12.5px;line-height:1.6;color:#5B6272;">
+                <p style="margin:0 0 6px 0;">This link expires in 24 hours. NovaHost hosts the robot and copies its trades to your own broker account &mdash; we never hold your funds.</p>
+                <p style="margin:0;">If you did not sign up, ignore this email. No account is created until the address is confirmed.</p>
+              </div>
+            </td>
+          </tr>
+        </table>
+
+        <div style="font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:11.5px;color:#454B58;padding-top:18px;">
+          &copy; NovaHost
+        </div>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { 
   Users, Edit, Trash2, Plus, AlertTriangle, Bot, CheckCircle2, Loader2, Settings
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { playNotificationSound } from "@/lib/notify";
 import {
   Dialog,
@@ -38,7 +38,7 @@ interface EA {
 
 /**
  * @description ManageEAs displays the list of Expert Advisors, supports mobile-optimized view cards, 
- * handles registration of new EAs via Edge function, and handles deletion via Supabase RLS.
+ * handles registration of new EAs via Edge function, and handles deletion via NovaHost RLS.
  */
 export default function ManageEAs() {
   const navigate = useNavigate();
@@ -56,14 +56,14 @@ export default function ManageEAs() {
   const loadEAs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await novaHost.auth.getSession();
       if (!sessionData?.session) {
         setIsLoading(false);
         return;
       }
       const userId = sessionData.session.user.id;
 
-      const { data: productsData, error: prodError } = await supabase
+      const { data: productsData, error: prodError } = await novaHost
         .from("expert_advisors")
         .select("*")
         .eq("user_id", userId)
@@ -71,7 +71,7 @@ export default function ManageEAs() {
       
       if (prodError) throw prodError;
 
-      const { data: licensesData, error: licError } = await supabase
+      const { data: licensesData, error: licError } = await novaHost
         .from("licenses")
         .select("product_id, status")
         .eq("user_id", userId);
@@ -130,7 +130,7 @@ export default function ManageEAs() {
     setIsSubmitting(true);
     try {
       // Create product (EA) via secure Edge Function
-      const { data, error } = await supabase.functions.invoke('manage-eas', {
+      const { data, error } = await novaHost.functions.invoke('manage-eas', {
         body: { action: 'create', name: formData.name.trim() }
       });
 
@@ -176,7 +176,7 @@ export default function ManageEAs() {
   const confirmDelete = async () => {
     if (!eaToDelete) return;
     try {
-      const { error } = await supabase
+      const { error } = await novaHost
         .from("expert_advisors")
         .delete()
         .eq("id", eaToDelete.id);

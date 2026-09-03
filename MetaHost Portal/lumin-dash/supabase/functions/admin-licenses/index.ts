@@ -17,14 +17,14 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Server not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.' }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
-    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { global: { fetch } });
+    const novaHostAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { global: { fetch } });
 
     // Require a valid user JWT (default verify_jwt = true)
-    const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const novaHostAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { fetch },
       headers: { Authorization: req.headers.get('Authorization') ?? '' },
     });
-    const { data: userData } = await supabaseAuth.auth.getUser();
+    const { data: userData } = await novaHostAuth.auth.getUser();
     if (!userData?.user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
@@ -38,13 +38,13 @@ Deno.serve(async (req) => {
       }
 
       const q = query.trim();
-      const byKey = await supabaseAdmin
+      const byKey = await novaHostAdmin
         .from('licenses')
         .select('id, license_key, status, expires_at, metadata, product:product_id(name), plan:plan_id(name)')
         .eq('user_id', adminId)
         .ilike('license_key', `%${q}%`);
 
-      const byUser = await supabaseAdmin
+      const byUser = await novaHostAdmin
         .from('licenses')
         .select('id, license_key, status, expires_at, metadata, product:product_id(name), plan:plan_id(name)')
         .eq('user_id', adminId)
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Missing licenseKey' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       }
 
-      const { data: lic, error: licErr } = await supabaseAdmin
+      const { data: lic, error: licErr } = await novaHostAdmin
         .from('licenses')
         .select('id, status, plan:plan_id(duration_days), product:product_id(name), plan_info:plan_id(name), license_key')
         .eq('license_key', licenseKey)
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
       const now = new Date();
       const newExpiry = lic.plan?.duration_days == null ? null : new Date(now.getTime() + lic.plan.duration_days * 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: updated, error: upErr } = await supabaseAdmin
+      const { data: updated, error: upErr } = await novaHostAdmin
         .from('licenses')
         .update({ status: 'active', expires_at: newExpiry })
         .eq('id', lic.id)

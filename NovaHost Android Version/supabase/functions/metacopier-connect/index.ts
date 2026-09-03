@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, error: 'Server misconfiguration.' }, 500)
     }
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
     const { license_key, account_number, password, server, platform, region_name, symbol_suffix, account_type } = body
@@ -51,7 +51,7 @@ Deno.serve(async (req: Request) => {
 
     // ---- Authorize by licence -----------------------------------------------
     const key = String(license_key).trim().toUpperCase()
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select('id, ea_id, status, expires_at, metadata')
       .eq('license_key', key)
@@ -394,7 +394,7 @@ Deno.serve(async (req: Request) => {
     // licence key and have no auth.users row, but broker_accounts.user_id is a
     // NOT NULL FK to auth.users. Binding here also lets metacopier-execute
     // resolve the account server-side instead of trusting the client.
-    const { data: current } = await supabase
+    const { data: current } = await novaHost
       .from('licenses')
       .select('metadata')
       .eq('id', license.id)
@@ -452,7 +452,7 @@ Deno.serve(async (req: Request) => {
       (suffix ? ` (orders will read e.g. XAUUSD${suffix})` : ' (bare symbol names)')
     )
 
-    const { error: linkErr } = await supabase
+    const { error: linkErr } = await novaHost
       .from('licenses')
       .update({ metadata })
       .eq('id', license.id)

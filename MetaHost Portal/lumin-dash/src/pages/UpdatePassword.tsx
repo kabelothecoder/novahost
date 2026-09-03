@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { novaHost } from '@/integrations/novahost/client';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -46,7 +46,7 @@ export default function UpdatePassword() {
 
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { error } = await novaHost.auth.updateUser({
         password: formData.password
       });
 

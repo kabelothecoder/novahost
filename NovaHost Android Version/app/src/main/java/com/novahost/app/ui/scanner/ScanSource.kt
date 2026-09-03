@@ -2,7 +2,7 @@ package com.novahost.app.ui.scanner
 
 import com.novahost.app.BuildConfig
 import com.novahost.app.sdk.EconomicEvent
-import com.novahost.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.NovaHostBackend
 import io.ktor.client.call.body
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
@@ -167,7 +167,7 @@ object ScanSource {
      * screenshot is usually PNG, and the previous endpoint hardcoded JPEG.
      *
      * The body is hand-serialized to a String rather than handed to `setBody`
-     * as an object. The Supabase client this app builds installs no
+     * as an object. The NovaHost backend client this app builds installs no
      * ContentNegotiation, so passing a `@Serializable` object throws *before a
      * request is ever sent* -- which the user sees as a failed scan on a working
      * network. `Entitlements.kt` documents the same trap; this function was
@@ -197,11 +197,11 @@ object ScanSource {
             )
         )
 
-        val response: HttpResponse = SupabaseSetup.client.httpClient.post(
-            BuildConfig.SUPABASE_URL.removeSuffix("/") + "/functions/v1/analyze-chart"
+        val response: HttpResponse = NovaHostBackend.client.httpClient.post(
+            BuildConfig.NOVAHOST_API_URL.removeSuffix("/") + "/functions/v1/analyze-chart"
         ) {
-            header(HttpHeaders.Authorization, "Bearer " + BuildConfig.SUPABASE_ANON_KEY)
-            header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            header(HttpHeaders.Authorization, "Bearer " + BuildConfig.NOVAHOST_API_KEY)
+            header("apikey", BuildConfig.NOVAHOST_API_KEY)
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
             // A vision read on a full-size screenshot runs well past the
             // client's 60s default when the model is thinking.
@@ -296,11 +296,11 @@ object ScanSource {
                 BrokerQuoteRequest(license_key = licenseKey, symbol = symbol)
             )
 
-            val response: HttpResponse = SupabaseSetup.client.httpClient.post(
-                BuildConfig.SUPABASE_URL.removeSuffix("/") + "/functions/v1/broker-quote"
+            val response: HttpResponse = NovaHostBackend.client.httpClient.post(
+                BuildConfig.NOVAHOST_API_URL.removeSuffix("/") + "/functions/v1/broker-quote"
             ) {
-                header(HttpHeaders.Authorization, "Bearer " + BuildConfig.SUPABASE_ANON_KEY)
-                header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                header(HttpHeaders.Authorization, "Bearer " + BuildConfig.NOVAHOST_API_KEY)
+                header("apikey", BuildConfig.NOVAHOST_API_KEY)
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                 setBody(payload)
             }
@@ -351,11 +351,11 @@ object ScanSource {
                 BrokerHistoryRequest(license_key = licenseKey)
             )
 
-            val response: HttpResponse = SupabaseSetup.client.httpClient.post(
-                BuildConfig.SUPABASE_URL.removeSuffix("/") + "/functions/v1/broker-history"
+            val response: HttpResponse = NovaHostBackend.client.httpClient.post(
+                BuildConfig.NOVAHOST_API_URL.removeSuffix("/") + "/functions/v1/broker-history"
             ) {
-                header(HttpHeaders.Authorization, "Bearer " + BuildConfig.SUPABASE_ANON_KEY)
-                header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                header(HttpHeaders.Authorization, "Bearer " + BuildConfig.NOVAHOST_API_KEY)
+                header("apikey", BuildConfig.NOVAHOST_API_KEY)
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                 setBody(payload)
             }

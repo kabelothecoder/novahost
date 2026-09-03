@@ -1,4 +1,4 @@
-﻿package com.novahost.app.sdk
+package com.novahost.app.sdk
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
@@ -11,21 +11,29 @@ import io.github.jan.supabase.annotations.SupabaseInternal
 import io.ktor.client.plugins.HttpTimeout
 import com.novahost.app.BuildConfig
 
-object SupabaseSetup {
-    private val SUPABASE_URL = BuildConfig.SUPABASE_URL.removeSuffix("/")
-    private val SUPABASE_ANON_KEY = BuildConfig.SUPABASE_ANON_KEY
+/**
+ * The single connection to the NovaHost backend.
+ *
+ * The `io.github.jan.supabase.*` imports and the `SupabaseClient` type below are
+ * the vendor SDK's own names and cannot be renamed -- they are package
+ * coordinates, not branding. Everything this app owns says NovaHost, so call
+ * sites read `NovaHostBackend.client`.
+ */
+object NovaHostBackend {
+    private val API_URL = BuildConfig.NOVAHOST_API_URL.removeSuffix("/")
+    private val API_KEY = BuildConfig.NOVAHOST_API_KEY
 
     init {
-        if (SUPABASE_URL.isBlank() || SUPABASE_ANON_KEY.isBlank()) {
-            throw IllegalStateException("Fatal: Supabase URL or Anon Key is missing from local.properties. Do NOT fall back to a dummy URL.")
+        if (API_URL.isBlank() || API_KEY.isBlank()) {
+            throw IllegalStateException("Fatal: NovaHost API URL or key is missing from local.properties. Do NOT fall back to a dummy URL.")
         }
     }
 
     @OptIn(SupabaseInternal::class)
     val client: SupabaseClient by lazy {
         createSupabaseClient(
-            supabaseUrl = SUPABASE_URL,
-            supabaseKey = SUPABASE_ANON_KEY
+            supabaseUrl = API_URL,
+            supabaseKey = API_KEY
         ) {
             install(Auth)
             install(Postgrest)
@@ -48,4 +56,3 @@ object SupabaseSetup {
         }
     }
 }
-

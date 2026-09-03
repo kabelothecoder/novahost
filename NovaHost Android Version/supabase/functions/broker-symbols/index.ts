@@ -197,7 +197,7 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
     }
 
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -210,10 +210,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // Authorised by licence, like every other device-facing function: the app
-    // holds a mentor-issued key and has no Supabase auth session. The account id
+    // holds a mentor-issued key and has no NovaHost auth session. The account id
     // is resolved from the licence and never accepted from the caller.
     const key = String(rawKey).trim().toUpperCase()
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select('id, status, expires_at, allowed_symbols, metadata')
       .eq('license_key', key)
@@ -280,7 +280,7 @@ Deno.serve(async (req: Request) => {
 
     // What the user (or a previous discovery) already settled on. An existing
     // answer is reported as-is and never quietly replaced by a fresh guess.
-    const { data: existing } = await supabase
+    const { data: existing } = await novaHost
       .from('license_symbol_config')
       .select('symbol, broker_symbol')
       .eq('license_id', license.id)

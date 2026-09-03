@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { global: { fetch } });
+    const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { global: { fetch } });
 
     const body = await req.json().catch(() => ({}));
     const rawKey = body.license_key || body.licenseKey;
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     const deviceId = rawDevice ? String(rawDevice).trim() : '';
 
     // Query license + joined expert advisor info
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select(`
         id, 
@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
     const now = new Date();
     const expired = license.expires_at !== null && new Date(license.expires_at) < now;
     if (expired) {
-      await supabase.from('licenses').update({ status: 'expired' }).eq('id', license.id);
+      await novaHost.from('licenses').update({ status: 'expired' }).eq('id', license.id);
       
       if (isAndroidClient) {
         return new Response(
@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
       if (!lockedDeviceId && deviceId) {
         metadata.device_id = deviceId;
         metadata.activated_at = new Date().toISOString();
-        const { error: updErr } = await supabase
+        const { error: updErr } = await novaHost
           .from("licenses")
           .update({ metadata })
           .eq("id", license.id);
@@ -180,7 +180,7 @@ Deno.serve(async (req) => {
     const sessionWindow = new Date();
     sessionWindow.setMinutes(sessionWindow.getMinutes() - 10);
 
-    const { count: activeSessions } = await supabase
+    const { count: activeSessions } = await novaHost
       .from('device_activations')
       .select('*', { count: 'exact', head: true })
       .eq('license_id', license.id)
@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
 
     const currentSessions = activeSessions ?? 0;
 
-    const { data: existingSession } = await supabase
+    const { data: existingSession } = await novaHost
       .from('device_activations')
       .select('id, last_seen_at')
       .eq('license_id', license.id)
@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
     }
 
     if (deviceId) {
-      const { error: upsertErr } = await supabase
+      const { error: upsertErr } = await novaHost
         .from('device_activations')
         .upsert({
           license_id: license.id,

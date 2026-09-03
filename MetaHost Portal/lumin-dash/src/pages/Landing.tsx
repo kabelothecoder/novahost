@@ -21,7 +21,7 @@ import {
  * Where the Android APK is served from.
  *
  * Defaults to the signed release build in the `downloads` bucket on the
- * NovaHost Supabase project. `VITE_APK_URL` overrides it (set in the Vercel
+ * NovaHost NovaHost backend. `VITE_APK_URL` overrides it (set in the Vercel
  * project) so the file can be moved without a code change. If both are somehow
  * empty the download control renders disabled rather than linking to "#" --
  * a button that looks live and silently does nothing is worse than one that

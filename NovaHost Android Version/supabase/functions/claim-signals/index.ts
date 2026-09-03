@@ -11,7 +11,7 @@ const CORS_HEADERS = {
  *
  * ## Why a pull path exists at all
  *
- * Signals reached handsets over a Supabase realtime broadcast and nothing else.
+ * Signals reached handsets over a NovaHost realtime broadcast and nothing else.
  * Broadcast is fire-and-forget: there is no acknowledgement, no redelivery and
  * no cursor. A phone that dozed, backgrounded, changed network or dropped its
  * socket for two seconds lost the signal permanently -- and neither end
@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
     // surface. The robot is resolved FROM it -- never taken from the request --
     // so a caller cannot poll for another mentor's signals by naming their ea_id.
     const key = String(rawKey).trim().toUpperCase()
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select('id, ea_id, status, expires_at, allowed_symbols')
       .eq('license_key', key)
@@ -147,7 +147,7 @@ Deno.serve(async (req: Request) => {
     // Best effort, and deliberately before the early return below: failing to
     // record liveness must never cost a signal.
     if (deviceId) {
-      const { error: seenErr } = await supabase
+      const { error: seenErr } = await novaHost
         .from('device_activations')
         .update({ last_seen_at: new Date().toISOString(), status: 'active' })
         .eq('license_id', license.id)
@@ -169,7 +169,7 @@ Deno.serve(async (req: Request) => {
     // dormant for months does not drag its whole history back on first contact.
     const lookbackFrom = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
-    const { data: recent, error: sigErr } = await supabase
+    const { data: recent, error: sigErr } = await novaHost
       .from('signals')
       .select('id, ea_id, pair, side, type, lot, sl, tp, signal_id, created_at, order_type, price, pending_expiry_seconds')
       .eq('ea_id', license.ea_id)
@@ -184,7 +184,7 @@ Deno.serve(async (req: Request) => {
 
     // Already taken by this licence -- by this device on an earlier poll, by the
     // realtime path, or by another handset on the same key.
-    const { data: taken, error: takenErr } = await supabase
+    const { data: taken, error: takenErr } = await novaHost
       .from('signal_deliveries')
       .select('signal_id')
       .eq('license_id', license.id)
@@ -210,7 +210,7 @@ Deno.serve(async (req: Request) => {
     // the RETURNING set is therefore exactly the rows this call created -- which
     // is exactly what this device is allowed to act on. Anything a concurrent
     // caller won simply does not come back.
-    const { data: claimed, error: claimErr } = await supabase
+    const { data: claimed, error: claimErr } = await novaHost
       .from('signal_deliveries')
       .upsert(
         outstanding.map((s) => ({

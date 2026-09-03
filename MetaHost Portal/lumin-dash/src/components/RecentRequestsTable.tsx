@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 
@@ -75,14 +75,14 @@ export function RecentRequestsTable() {
 
   const fetchLicenses = async () => {
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await novaHost.auth.getSession();
       if (!sessionData.session) {
         setLicenses([]);
         setIsLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from('licenses')
         .select(`
           id,
@@ -121,7 +121,7 @@ export function RecentRequestsTable() {
   const handleReactivate = async (licenseId: string) => {
     setIsReactivating(licenseId);
     try {
-      const { data, error } = await supabase.functions.invoke("reactivate-license", {
+      const { data, error } = await novaHost.functions.invoke("reactivate-license", {
         body: { license_id: licenseId }
       });
       if (error) throw error;

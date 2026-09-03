@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { novaHost } from '@/integrations/novahost/client';
 import { playNotificationSound } from '@/lib/notify';
 
 interface AuthContextType {
@@ -22,16 +22,16 @@ export const useAuth = () => {
 
 // Auth state cleanup utility
 const cleanupAuthState = () => {
-  // Remove all Supabase auth keys from localStorage
+  // Remove all NovaHost auth keys from localStorage
   Object.keys(localStorage).forEach((key) => {
-    if (key.startsWith('supabase.auth.') || key.includes('sb-')) {
+    if (key.startsWith('novaHost.auth.') || key.includes('sb-')) {
       localStorage.removeItem(key);
     }
   });
   
   // Remove from sessionStorage if in use
   Object.keys(sessionStorage || {}).forEach((key) => {
-    if (key.startsWith('supabase.auth.') || key.includes('sb-')) {
+    if (key.startsWith('novaHost.auth.') || key.includes('sb-')) {
       sessionStorage.removeItem(key);
     }
   });
@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = novaHost.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
@@ -56,7 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    novaHost.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -72,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Attempt global sign out
       try {
-        await supabase.auth.signOut({ scope: 'global' });
+        await novaHost.auth.signOut({ scope: 'global' });
       } catch (err) {
         // Continue even if this fails
         console.warn('Global signout warning:', err);

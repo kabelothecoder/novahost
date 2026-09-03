@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
     } else {
       console.error('send-license-email: No email credentials found. Production environment is not configured.');
       return new Response(JSON.stringify({ 
-        error: 'No email service credentials configured. Please set RESEND_API_KEY or SMTP_HOST in Supabase secrets.' 
+        error: 'No email service credentials configured. Please set RESEND_API_KEY or SMTP_HOST in the edge function secrets.' 
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }

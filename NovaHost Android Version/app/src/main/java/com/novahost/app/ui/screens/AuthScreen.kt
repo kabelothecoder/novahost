@@ -207,13 +207,13 @@ private fun SignInForm(navController: NavController) {
                 errorMessage = null
                 scope.launch {
                     try {
-                        com.novahost.app.sdk.SupabaseSetup.client.auth.signInWith(Email) {
+                        com.novahost.app.sdk.NovaHostBackend.client.auth.signInWith(Email) {
                             this.email = email
                             this.password = password
                         }
                         // Optionally fetch avatar_url
                         try {
-                            val profile = com.novahost.app.sdk.SupabaseSetup.client.postgrest.from("profiles")
+                            val profile = com.novahost.app.sdk.NovaHostBackend.client.postgrest.from("profiles")
                                 .select().decodeSingleOrNull<UserProfile>()
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -267,7 +267,7 @@ private fun SignUpForm() {
                 successMessage = null
                 scope.launch {
                     try {
-                        com.novahost.app.sdk.SupabaseSetup.client.auth.signUpWith(io.github.jan.supabase.auth.providers.builtin.Email) {
+                        com.novahost.app.sdk.NovaHostBackend.client.auth.signUpWith(io.github.jan.supabase.auth.providers.builtin.Email) {
                             this.email = email
                             this.password = password
                         }
@@ -314,7 +314,7 @@ private fun ForgotForm() {
                 successMessage = null
                 scope.launch {
                     try {
-                        com.novahost.app.sdk.SupabaseSetup.client.auth.resetPasswordForEmail(email)
+                        com.novahost.app.sdk.NovaHostBackend.client.auth.resetPasswordForEmail(email)
                         successMessage = "Recovery instructions sent. Check your email."
                     } catch (e: Exception) {
                         e.printStackTrace()

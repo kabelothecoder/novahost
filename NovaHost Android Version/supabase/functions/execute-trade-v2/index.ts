@@ -7,7 +7,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const supabase = createClient(
+const novaHost = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 )
@@ -111,7 +111,7 @@ serve(async (req: Request) => {
         // Log to database
         // license_id is a uuid FK to licenses.id — license_key is the raw text key,
         // not a uuid, so it belongs in the license_key column, not license_id.
-        await supabase.from('signal_logs').insert([{
+        await novaHost.from('signal_logs').insert([{
             license_key: license_key,
             ea_id: accountId,
             raw_data: { error: errorText, payload: tradePayload },
@@ -132,7 +132,7 @@ serve(async (req: Request) => {
     console.log(`[OrderSend Success] Executed ${actionType} on ${pair}. Result:`, tradeResult);
 
     // Update signal status in the database
-    await supabase.from('signals').insert([{
+    await novaHost.from('signals').insert([{
         pair: pair,
         side: type.toLowerCase(),
         sl: sl,

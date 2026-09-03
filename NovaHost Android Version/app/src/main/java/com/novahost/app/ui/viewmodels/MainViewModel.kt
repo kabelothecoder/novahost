@@ -5,7 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.novahost.app.sdk.Entitlements
-import com.novahost.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.NovaHostBackend
 import io.github.jan.supabase.postgrest.postgrest
 import io.ktor.client.call.body
 import io.ktor.client.plugins.timeout
@@ -35,6 +35,8 @@ enum class GateStage {
     CHECKING,
     /** The server answered and the answer was no. [GateState.message] says why. */
     DENIED,
+    /** A move code has been emailed; waiting for the user to type it in. */
+    MOVE_CODE_ENTRY,
     /** Checkout URL is ready; the browser is about to open. */
     CHECKOUT_READY,
     /** Back from Payfast, polling for the ITN to land. */
@@ -47,15 +49,18 @@ enum class GateStage {
  * @param message  the sentence to put in front of the user, if any.
  * @param checkout the Payfast URL to open, set only in [GateStage.CHECKOUT_READY].
  * @param reason   the server's machine-readable denial: no_purchase / not_paid /
- *                 expired / device_mismatch. The gate needs this and not just
- *                 [message], because a device mismatch is a R150 move rather
+ *                 expired / device_mismatch / stale. The gate needs this and not
+ *                 just [message], because a device mismatch is a R150 move rather
  *                 than a R599 purchase and the button has to say so.
+ * @param move     when [reason] is device_mismatch, whether the R150 move is
+ *                 available and when. Null when a move is not the question.
  */
 data class GateState(
     val stage: GateStage = GateStage.IDLE,
     val message: String? = null,
     val checkout: String? = null,
-    val reason: String? = null
+    val reason: String? = null,
+    val move: Entitlements.MoveStatus? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -154,13 +159,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── App access (R599, once-off) ────────────────────────────────────────
 
     /**
-     * Silent re-check. Never downgrades on a failed call and never puts a
-     * message on screen -- it runs without the user having asked for it.
+     * Silent re-check. Never puts a message on screen -- it runs without the
+     * user having asked for it.
+     *
+     * A failed *call* does not downgrade anyone on the spot: a flat network is
+     * not evidence that somebody stopped paying. But it does not grant an
+     * indefinite reprieve either. If the cached answer has aged past the
+     * server's offline window, the cache itself now reports no access, and that
+     * is what closes the "keep the old phone offline" hole -- so a failed call
+     * re-reads the cache rather than simply returning.
      */
     fun refreshEntitlements(email: String) {
         viewModelScope.launch {
             val result = Entitlements.check(getApplication(), email)
-            if (!result.answered) return@launch
+
+            if (!result.answered) {
+                val fallback = Entitlements.cached(getApplication())
+                _isPremium.value = fallback.appAccess
+                _hasScanner.value = fallback.scanner
+                if (fallback.reason == "stale") {
+                    _appGate.value = GateState(
+                        stage = GateStage.DENIED,
+                        message = fallback.message,
+                        reason = "stale"
+                    )
+                }
+                return@launch
+            }
+
             _isPremium.value = result.appAccess
             _hasScanner.value = result.scanner
         }
@@ -193,15 +219,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 _appGate.value = GateState(
                     stage = GateStage.DENIED,
-                    message = result.message ?: "No app access found for that email.",
-                    reason = result.reason
+                    message = moveAwareMessage(result),
+                    reason = result.reason,
+                    move = result.move
                 )
             }
         }
     }
 
-    /** The paygate's "Buy app access — R599" button. */
+    /**
+     * The denial sentence, with the move rule spelled out when it applies.
+     *
+     * The server's own message for a device mismatch stops at "already active on
+     * another device", which is true but leaves the user with nowhere to go. If
+     * the move is on cooldown or out of allowance, the date and the reason are
+     * the only useful things to say.
+     */
+    private fun moveAwareMessage(result: Entitlements.Entitlement): String {
+        val base = result.message ?: "No app access found for that email."
+        val move = result.move ?: return base
+
+        return when {
+            move.eligible -> base
+            move.reason == "cooldown" -> {
+                val on = move.availableOnLabel
+                if (on != null) {
+                    "This licence is on another device and was moved recently. " +
+                        "You can move it again from $on, or contact support if you need it sooner."
+                } else {
+                    "This licence is on another device and was moved recently. " +
+                        "Contact support if you need it moved now."
+                }
+            }
+            move.reason == "limit_reached" ->
+                "This licence has already been moved ${move.movesUsed} times in the last year, " +
+                    "which is the limit. Contact support to move it again."
+            else -> base
+        }
+    }
+
+    /**
+     * The paygate's primary purchase button.
+     *
+     * Two different products behind one button, because from the user's side it
+     * is one intention: "let me use this app on this phone". A paid email on the
+     * wrong handset is a R150 move and starts by emailing a code; anything else
+     * is the R599 purchase. The gate's own copy already says which is about to
+     * happen, and the decision lives here rather than in the composable so the
+     * screen does not have to know the pricing rules.
+     */
     fun buyAppAccess(email: String) {
+        if (_appGate.value.reason == "device_mismatch") {
+            startDeviceMove(email)
+            return
+        }
+
         val cleaned = email.trim().ifEmpty { _userEmail.value }
         if (cleaned.isEmpty()) {
             _appGate.value = GateState(GateStage.DENIED, "Enter your email first so your purchase can be found again.")
@@ -232,6 +304,121 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     GateState(GateStage.DENIED, checkout.message ?: "That purchase could not be started.")
             }
         }
+    }
+
+    // ── Device move (R150, once-off) ───────────────────────────────────────
+
+    /**
+     * Step one of the move: ask the server to email a six-digit code.
+     *
+     * Nothing is charged here. The code proves the person paying can read the
+     * mailbox the licence belongs to, which is what stops R150 from buying the
+     * eviction of a stranger -- both the target email and the target handset
+     * otherwise travel through the browser under the payer's control.
+     */
+    fun startDeviceMove(email: String) {
+        val cleaned = email.trim().lowercase().ifEmpty { _userEmail.value }
+        if (cleaned.isEmpty()) {
+            _appGate.value = GateState(GateStage.DENIED, "Enter the email you paid with.")
+            return
+        }
+
+        viewModelScope.launch {
+            val keepMove = _appGate.value.move
+            _appGate.value = GateState(GateStage.CHECKING, reason = "device_mismatch", move = keepMove)
+
+            val request = Entitlements.requestMove(getApplication(), cleaned)
+
+            _appGate.value = if (request.sent) {
+                _userEmail.value = cleaned
+                GateState(
+                    stage = GateStage.MOVE_CODE_ENTRY,
+                    message = request.message ?: "We emailed you a 6-digit code.",
+                    reason = "device_mismatch",
+                    move = keepMove
+                )
+            } else {
+                GateState(
+                    stage = GateStage.DENIED,
+                    message = request.message ?: "Could not start the move. Try again.",
+                    reason = "device_mismatch",
+                    move = keepMove
+                )
+            }
+        }
+    }
+
+    /**
+     * Step two: hand the code to the checkout builder.
+     *
+     * A wrong or expired code keeps the user on the entry step with the reason,
+     * rather than dropping them back to the start -- they have a live code in an
+     * inbox and the useful thing is another try, not a fresh round trip.
+     */
+    fun submitMoveCode(code: String) {
+        val email = _userEmail.value.ifEmpty { Entitlements.savedEmail(getApplication()) }
+        val cleanCode = code.trim()
+
+        if (cleanCode.length != 6 || cleanCode.any { !it.isDigit() }) {
+            _appGate.value = _appGate.value.copy(
+                stage = GateStage.MOVE_CODE_ENTRY,
+                message = "Enter the 6-digit code from your email."
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            val keepMove = _appGate.value.move
+            _appGate.value = GateState(GateStage.CHECKING, reason = "device_mismatch", move = keepMove)
+
+            prefs.edit().putString("pending_payment_email", email).apply()
+
+            val checkout = Entitlements.checkout(
+                getApplication(),
+                email,
+                Entitlements.Product.REACTIVATE,
+                moveCode = cleanCode
+            )
+
+            _appGate.value = when {
+                checkout == null -> GateState(
+                    GateStage.MOVE_CODE_ENTRY,
+                    "Could not reach the payment server. Check your connection.",
+                    reason = "device_mismatch",
+                    move = keepMove
+                )
+
+                // The licence arrived here by other means while they were typing.
+                checkout.route == "ACTIVE_SAME_DEVICE" -> {
+                    _isPremium.value = true
+                    GateState(GateStage.GRANTED)
+                }
+
+                checkout.checkoutUrl != null ->
+                    GateState(GateStage.CHECKOUT_READY, checkout.message, checkout.checkoutUrl)
+
+                // Wrong code, expired ticket, or too many tries: stay put.
+                checkout.route == "MOVE_CODE_INVALID" || checkout.route == "MOVE_CODE_REQUIRED" ->
+                    GateState(
+                        GateStage.MOVE_CODE_ENTRY,
+                        checkout.message ?: "That code is not right.",
+                        reason = "device_mismatch",
+                        move = checkout.move ?: keepMove
+                    )
+
+                else -> GateState(
+                    GateStage.DENIED,
+                    checkout.message ?: "That move could not be started.",
+                    reason = "device_mismatch",
+                    move = checkout.move ?: keepMove
+                )
+            }
+        }
+    }
+
+    /** Drops out of code entry back to the gate, e.g. to try another email. */
+    fun cancelDeviceMove() {
+        _appGate.value = GateState(GateStage.IDLE)
     }
 
     // ── Chart scanner (R349, once-off) ─────────────────────────────────────
@@ -304,7 +491,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Called when the metahost://payment/success deep link fires.
      *
-     * Payfast's ITN reaches Supabase a second or three after the browser
+     * Payfast's ITN reaches the NovaHost backend a second or three after the browser
      * redirects, so this polls rather than reading once. It asks
      * check-subscription-status -- the same function the gate uses -- instead of
      * reading the table directly, so the device-binding rule is applied to the
@@ -418,12 +605,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     com.novahost.app.sdk.MyLicensesRequest(android_id = androidId)
                 )
 
-                val response = SupabaseSetup.client.httpClient.post(
-                    "${com.novahost.app.BuildConfig.SUPABASE_URL}/functions/v1/my-licenses"
+                val response = NovaHostBackend.client.httpClient.post(
+                    "${com.novahost.app.BuildConfig.NOVAHOST_API_URL}/functions/v1/my-licenses"
                 ) {
                     header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    header(HttpHeaders.Authorization, "Bearer ${com.novahost.app.BuildConfig.SUPABASE_ANON_KEY}")
-                    header("apikey", com.novahost.app.BuildConfig.SUPABASE_ANON_KEY)
+                    header(HttpHeaders.Authorization, "Bearer ${com.novahost.app.BuildConfig.NOVAHOST_API_KEY}")
+                    header("apikey", com.novahost.app.BuildConfig.NOVAHOST_API_KEY)
                     timeout { requestTimeoutMillis = 20_000 }
                     setBody(payload)
                 }
@@ -490,12 +677,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
 
-                val response = SupabaseSetup.client.httpClient.post(
-                    "${com.novahost.app.BuildConfig.SUPABASE_URL}/functions/v1/validate-license"
+                val response = NovaHostBackend.client.httpClient.post(
+                    "${com.novahost.app.BuildConfig.NOVAHOST_API_URL}/functions/v1/validate-license"
                 ) {
                     header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    header(HttpHeaders.Authorization, "Bearer ${com.novahost.app.BuildConfig.SUPABASE_ANON_KEY}")
-                    header("apikey", com.novahost.app.BuildConfig.SUPABASE_ANON_KEY)
+                    header(HttpHeaders.Authorization, "Bearer ${com.novahost.app.BuildConfig.NOVAHOST_API_KEY}")
+                    header("apikey", com.novahost.app.BuildConfig.NOVAHOST_API_KEY)
                     timeout { requestTimeoutMillis = 30_000 }
                     setBody(payload)
                 }

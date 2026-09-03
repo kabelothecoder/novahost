@@ -1,0 +1,35 @@
+project_id = "epulmnfbxjmaimefhofp"
+
+# ─── Auth email templates ────────────────────────────────────────────────
+# These point at templates/*.html so the branded mail lives in git rather than
+# only in the dashboard, where it is invisible to review and lost on a project
+# restore. `supabase db push` does NOT deploy these -- the dashboard is still
+# the source of truth for a hosted project, so paste the built HTML into
+# Authentication > Emails as well. See templates/README.md.
+#
+# `subject` here also overrides the stock subject lines, which said "Confirm
+# Your Signup" with no mention of the product.
+
+[auth.email.template.confirmation]
+subject = "Confirm your NovaHost account"
+content_path = "./templates/confirmation.html"
+
+[auth.email.template.invite]
+subject = "You've been invited to NovaHost"
+content_path = "./templates/invite.html"
+
+[auth.email.template.magic_link]
+subject = "Your NovaHost sign-in link"
+content_path = "./templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your NovaHost password"
+content_path = "./templates/recovery.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new NovaHost email"
+content_path = "./templates/email_change.html"
+
+[auth.email.template.reauthentication]
+subject = "Your NovaHost verification code"
+content_path = "./templates/reauthentication.html"

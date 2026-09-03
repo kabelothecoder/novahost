@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { toast } from "@/hooks/use-toast";
 import { playWelcomeSwoosh } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -38,7 +38,7 @@ export default function Login() {
 
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error } = await novaHost.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       });
@@ -71,7 +71,7 @@ export default function Login() {
 
     setIsResetLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+      const { error } = await novaHost.auth.resetPasswordForEmail(formData.email, {
         redirectTo: `${window.location.origin}/update-password`,
       });
 

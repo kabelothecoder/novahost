@@ -263,12 +263,12 @@ object MetaAPIManager {
             LicenseStatusRequest(license_key = licenseKey.trim().uppercase())
         )
 
-        val response = SupabaseSetup.client.httpClient.post(
-            "${BuildConfig.SUPABASE_URL}/functions/v1/license-status"
+        val response = NovaHostBackend.client.httpClient.post(
+            "${BuildConfig.NOVAHOST_API_URL}/functions/v1/license-status"
         ) {
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            header(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
-            header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            header(HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
+            header("apikey", BuildConfig.NOVAHOST_API_KEY)
             timeout { requestTimeoutMillis = 20_000 }
             setBody(payload)
         }
@@ -384,12 +384,12 @@ object MetaAPIManager {
                 account_type = accountType?.trim()
             )
 
-            val httpResponse = SupabaseSetup.client.httpClient.post(
-                "${BuildConfig.SUPABASE_URL}/functions/v1/metacopier-connect"
+            val httpResponse = NovaHostBackend.client.httpClient.post(
+                "${BuildConfig.NOVAHOST_API_URL}/functions/v1/metacopier-connect"
             ) {
                 headers {
                     append(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    append(HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                    append(HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
                 }
                 // Registering an account makes MetaCopier dial the broker and
                 // authenticate, which routinely runs past the client defaults.
@@ -482,7 +482,7 @@ object MetaAPIManager {
     fun startBalanceSync(accountId: String) {
         managerScope.launch {
             try {
-                val channel = SupabaseSetup.client.realtime.channel("broker-$accountId")
+                val channel = NovaHostBackend.client.realtime.channel("broker-$accountId")
                 val changes = channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
                     table = "broker_accounts"
                     // Assuming account_id is the primary key or unique identifier
@@ -624,10 +624,10 @@ object MetaAPIManager {
             )
 
             val response: io.ktor.client.statement.HttpResponse =
-                SupabaseSetup.client.httpClient.post(
-                    "${BuildConfig.SUPABASE_URL}/functions/v1/metacopier-execute"
+                NovaHostBackend.client.httpClient.post(
+                    "${BuildConfig.NOVAHOST_API_URL}/functions/v1/metacopier-execute"
                 ) {
-                    header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                    header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
                     header(io.ktor.http.HttpHeaders.ContentType, io.ktor.http.ContentType.Application.Json)
                     // A market order goes broker-side before it answers. 15s is
                     // not enough margin to distinguish "slow fill" from "failed".
@@ -683,12 +683,12 @@ object MetaAPIManager {
             }
 
             val response: io.ktor.client.statement.HttpResponse =
-                SupabaseSetup.client.httpClient.post(
-                    "${BuildConfig.SUPABASE_URL}/functions/v1/claim-signals"
+                NovaHostBackend.client.httpClient.post(
+                    "${BuildConfig.NOVAHOST_API_URL}/functions/v1/claim-signals"
                 ) {
-                    header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                    header(io.ktor.http.HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
                     header(io.ktor.http.HttpHeaders.ContentType, io.ktor.http.ContentType.Application.Json)
-                    header("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                    header("apikey", BuildConfig.NOVAHOST_API_KEY)
                     // Short by design. This runs on a timer, and a poll still
                     // hanging when the next one is due is a poll worth abandoning.
                     timeout { requestTimeoutMillis = 20_000 }

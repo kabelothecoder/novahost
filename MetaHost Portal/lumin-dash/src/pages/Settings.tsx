@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
@@ -31,7 +31,7 @@ const THEMES = [
  * have been successfully updated". Nothing was written anywhere and a reload
  * put both toggles back to their defaults.
  *
- * Preferences now persist to the Supabase user's `user_metadata`. That is a
+ * Preferences now persist to the NovaHost user's `user_metadata`. That is a
  * legitimate store for per-user settings and needs no migration — worth knowing
  * that it is client-writable, so it must never hold anything that grants
  * access. These are display preferences, so it is the right place.
@@ -66,7 +66,7 @@ export default function Settings() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const { error } = await supabase.auth.updateUser({ data: prefs });
+      const { error } = await novaHost.auth.updateUser({ data: prefs });
       if (error) throw error;
 
       setSaved(prefs);

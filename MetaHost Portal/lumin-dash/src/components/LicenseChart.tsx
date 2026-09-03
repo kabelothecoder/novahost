@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 
 interface Bucket {
   month: string;
@@ -45,7 +45,7 @@ export function LicenseChart() {
       since.setHours(0, 0, 0, 0);
 
       try {
-        const { data: rows, error } = await supabase
+        const { data: rows, error } = await novaHost
           .from("licenses")
           .select("created_at")
           .gte("created_at", since.toISOString());

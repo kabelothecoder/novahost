@@ -21,7 +21,7 @@ const CORS_HEADERS = {
  * permanent "could not reach server" state, and nothing was enforced.
  *
  * Authorises by licence key, like every other device-facing function: an app
- * install holds a mentor-issued key and has no Supabase auth session.
+ * install holds a mentor-issued key and has no NovaHost auth session.
  */
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -35,7 +35,7 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const supabase = createClient(
+    const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
 
     const key = String(rawKey).trim().toUpperCase()
 
-    const { data: license, error: licErr } = await supabase
+    const { data: license, error: licErr } = await novaHost
       .from('licenses')
       .select('id, status, expires_at, metadata')
       .eq('license_key', key)
@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
       updated_at: new Date().toISOString(),
     }
 
-    const { error: metaErr } = await supabase
+    const { error: metaErr } = await novaHost
       .from('licenses')
       .update({ metadata })
       .eq('id', license.id)
@@ -122,7 +122,7 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, error: 'No usable symbols in the request.' }, 400)
     }
 
-    const { error: upsertErr } = await supabase
+    const { error: upsertErr } = await novaHost
       .from('license_symbol_config')
       .upsert(rows, { onConflict: 'license_id,symbol' })
 
@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
     // symbol the user removed must stop being tradeable, not linger as an
     // enabled row with an old ceiling.
     const keep = rows.map((r: { symbol: string }) => r.symbol)
-    const { error: pruneErr } = await supabase
+    const { error: pruneErr } = await novaHost
       .from('license_symbol_config')
       .delete()
       .eq('license_id', license.id)

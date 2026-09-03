@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useActiveSection } from "./layout";
-import { supabase } from "@/lib/supabase";
+import { novaHost } from "@/lib/novahost";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, LineChart, Line
@@ -280,7 +280,7 @@ function ApprovalsSection() {
     setActioned(prev => ({ ...prev, [id]: action }));
     
     const status = action === "approved" ? "active" : "rejected";
-    const { error } = await supabase
+    const { error } = await novaHost
       .from("profiles")
       .update({ status })
       .eq("id", id);
@@ -493,7 +493,7 @@ function MentorMatrixSection() {
               </button>
               <button 
                 onClick={async () => {
-                  const { error } = await supabase
+                  const { error } = await novaHost
                     .from("profiles")
                     .update({ status: "suspended" })
                     .eq("id", selected.id);

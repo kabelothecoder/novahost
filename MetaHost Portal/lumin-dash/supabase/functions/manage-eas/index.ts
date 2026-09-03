@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { global: { fetch } });
 
     // Require signed-in user (verify_jwt = true by default)
-    const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const novaHostAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { fetch },
       auth: {
         autoRefreshToken: false,
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized - No auth header' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
-    const { data: userData, error: authErr } = await supabaseAuth.auth.getUser(authHeader.replace('Bearer ', ''));
+    const { data: userData, error: authErr } = await novaHostAuth.auth.getUser(authHeader.replace('Bearer ', ''));
     if (authErr || !userData?.user) {
       console.error('manage-eas: Auth failed', { authErr, hasUser: !!userData?.user });
       return new Response(JSON.stringify({ error: 'Unauthorized', details: authErr?.message }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });

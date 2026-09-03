@@ -23,8 +23,11 @@ android {
             localProperties.withInputStream { properties.load(it) }
         }
 
-        buildConfigField("String", "SUPABASE_URL", "\"${properties.getProperty("supabase.url") ?: ""}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${properties.getProperty("supabase.anon_key") ?: ""}\"")
+        // The `supabase.*` keys are the old names, still read as a fallback so a
+        // local.properties that predates the rename keeps building rather than
+        // failing at runtime with a blank URL.
+        buildConfigField("String", "NOVAHOST_API_URL", "\"${properties.getProperty("novahost.api_url") ?: properties.getProperty("supabase.url") ?: ""}\"")
+        buildConfigField("String", "NOVAHOST_API_KEY", "\"${properties.getProperty("novahost.api_key") ?: properties.getProperty("supabase.anon_key") ?: ""}\"")
         buildConfigField("String", "FINNHUB_API_KEY", "\"${properties.getProperty("finnhub.api_key") ?: ""}\"")
         buildConfigField("String", "FMP_API_KEY", "\"${properties.getProperty("fmp.api_key") ?: ""}\"")
     }
@@ -165,7 +168,7 @@ dependencies {
     // Chrome Custom Tabs
     implementation("androidx.browser:browser:1.8.0")
 
-    // Supabase
+    // Backend SDK (vendor package coordinates -- name is not ours to change)
     implementation("io.github.jan-tennert.supabase:postgrest-kt:3.0.0")
     implementation("io.github.jan-tennert.supabase:auth-kt:3.0.0")
     implementation("io.github.jan-tennert.supabase:functions-kt:3.0.0")

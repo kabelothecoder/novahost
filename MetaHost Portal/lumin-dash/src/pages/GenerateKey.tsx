@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Key, Download, Copy, Eye, Bot, Coins, Plus, Loader2, Mail } from "lucide-react";
 import { LicenseKeyCard } from "@/components/LicenseKeyCard";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ export default function GenerateKey() {
   // Load User
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await novaHost.auth.getUser();
       if (!user) return;
       setUserId(user.id);
     })();
@@ -85,7 +85,7 @@ export default function GenerateKey() {
   useEffect(() => {
     if (!userId) return;
     (async () => {
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from("expert_advisors")
         .select("id, code, name, description, avatar_url, accent_color")
         .eq("user_id", userId)
@@ -101,7 +101,7 @@ export default function GenerateKey() {
       if (!formData.ea) { setAvailablePlans([]); return; }
       const selected = productOptions.find(p => p.code === formData.ea || p.name === formData.ea);
       if (!selected) return;
-      const { data, error } = await supabase
+      const { data, error } = await novaHost
         .from("plans")
         .select("id, code, name")
         .eq("product_id", selected.id)
@@ -129,7 +129,7 @@ export default function GenerateKey() {
     const selectedProduct = productOptions.find(p => p.code === formData.ea);
     const eaDisplayName = selectedProduct?.name ?? formData.ea;
 
-    const { data: rpcResponse, error } = await supabase.functions.invoke("generate-license", {
+    const { data: rpcResponse, error } = await novaHost.functions.invoke("generate-license", {
       body: {
         ea: formData.ea,
         plan: formData.plan,
@@ -197,7 +197,7 @@ export default function GenerateKey() {
 
     setIsSendingEmail(true);
     try {
-      const { data, error } = await supabase.functions.invoke("send-license-email", {
+      const { data, error } = await novaHost.functions.invoke("send-license-email", {
         body: {
           licenseKey: emailTargetKey.licenseKey,
           email: destinationEmail.trim(),

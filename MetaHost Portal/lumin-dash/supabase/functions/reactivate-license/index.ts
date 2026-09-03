@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    const novaHostAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       global: { fetch },
     });
 
@@ -25,10 +25,10 @@ Deno.serve(async (req) => {
     }
 
     // Authenticate user via JWT
-    const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const novaHostAuth = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, {
       global: { fetch }
     });
-    const { data: { user }, error: userErr } = await supabaseAuth.auth.getUser(authHeader.replace('Bearer ', ''));
+    const { data: { user }, error: userErr } = await novaHostAuth.auth.getUser(authHeader.replace('Bearer ', ''));
     if (userErr || !user) {
       console.error('reactivate-license: Auth failed', { userErr, hasUser: !!user });
       return new Response(JSON.stringify({ error: 'Unauthorized', details: userErr?.message }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     }
 
     // Lookup license & Verify ownership
-    const { data: license, error: licErr } = await supabaseAdmin
+    const { data: license, error: licErr } = await novaHostAdmin
         .from('licenses')
         .select('id, owner_id, status, expires_at, plan:plan_id(duration_days)')
         .eq('id', license_id)
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
 
     // Check Credits
-    const { data: userCreditRow, error: credErr } = await supabaseAdmin
+    const { data: userCreditRow, error: credErr } = await novaHostAdmin
       .from('user_credits')
       .select('credits')
       .eq('user_id', user.id)
@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     }
 
     // Deduct Credit
-    const { error: deductErr } = await supabaseAdmin
+    const { error: deductErr } = await novaHostAdmin
       .from('user_credits')
       .update({ credits: userCreditRow.credits - 1 })
       .eq('user_id', user.id);
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     const durationDays = license.plan?.duration_days || 0; 
     const newExpiresAt = durationDays > 0 ? new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
-    const { data: updatedLicense, error: updErr } = await supabaseAdmin
+    const { data: updatedLicense, error: updErr } = await novaHostAdmin
       .from('licenses')
       .update({
           status: 'active',

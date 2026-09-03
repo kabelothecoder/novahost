@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { novaHost } from "@/integrations/novahost/client";
 import { 
   ArrowLeft, 
   Key, 
@@ -40,7 +40,7 @@ function TradeLogsDisplay({ licenseKey }: { licenseKey: string }) {
     
     // Initial fetch
     const fetchLogs = async () => {
-      const { data } = await supabase
+      const { data } = await novaHost
         .from('trade_logs')
         .select('*')
         .eq('license_key', licenseKey)
@@ -51,7 +51,7 @@ function TradeLogsDisplay({ licenseKey }: { licenseKey: string }) {
     fetchLogs();
 
     // Subscribe
-    const channel = supabase
+    const channel = novaHost
       .channel(`trade_logs_${licenseKey}`)
       .on(
         'postgres_changes',
@@ -63,7 +63,7 @@ function TradeLogsDisplay({ licenseKey }: { licenseKey: string }) {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      novaHost.removeChannel(channel);
     };
   }, [licenseKey]);
 
@@ -112,7 +112,7 @@ export default function LicenseDetails() {
         setIsLoading(false);
         return;
       }
-      const { data: lic, error } = await supabase
+      const { data: lic, error } = await novaHost
         .from('licenses')
         .select('id, license_key, metadata, status, issued_at, expires_at, product_id, plan_id')
         .eq('license_key', licenseId)
@@ -123,9 +123,9 @@ export default function LicenseDetails() {
         return;
       }
       const [productRes, planRes, countRes] = await Promise.all([
-        supabase.from('expert_advisors').select('name, description').eq('id', lic.product_id).maybeSingle(),
-        supabase.from('plans').select('name').eq('id', lic.plan_id).maybeSingle(),
-        supabase.from('device_activations').select('*', { head: true, count: 'exact' }).eq('license_id', lic.id),
+        novaHost.from('expert_advisors').select('name, description').eq('id', lic.product_id).maybeSingle(),
+        novaHost.from('plans').select('name').eq('id', lic.plan_id).maybeSingle(),
+        novaHost.from('device_activations').select('*', { head: true, count: 'exact' }).eq('license_id', lic.id),
       ]);
       const product = productRes.data;
       const plan = planRes.data;
@@ -196,7 +196,7 @@ export default function LicenseDetails() {
 
   const handleDeactivate = async () => {
     if (!license) return;
-    const { error } = await supabase.from('licenses').update({ status: 'suspended' }).eq('id', license.id);
+    const { error } = await novaHost.from('licenses').update({ status: 'suspended' }).eq('id', license.id);
     if (error) {
       toast({ title: 'Failed', description: error.message, variant: 'destructive' });
       return;

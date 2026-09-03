@@ -10,7 +10,7 @@ data class ChartRequest(
 
 @Serializable
 data class ChartAnalysisRequest(
-    val imagePath: String? = null, // Supabase Storage Path
+    val imagePath: String? = null, // NovaHost storage path
     val pair: String? = null
 )
 

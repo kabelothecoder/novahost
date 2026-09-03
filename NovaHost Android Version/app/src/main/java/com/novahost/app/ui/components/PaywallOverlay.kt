@@ -103,7 +103,11 @@ const val REACTIVATION_PRICE_LABEL = "R150"
  * @param gate           what the view model is doing right now.
  * @param initialEmail   pre-fills the field on a return visit.
  * @param onCheckAccess  "Check my access" — verifies an existing purchase.
- * @param onBuy          "Buy app access — R599" — starts a Payfast checkout.
+ * @param onBuy          the primary purchase. R599 normally; on a paid email
+ *                       sitting on another handset it starts the R150 move by
+ *                       emailing a confirmation code.
+ * @param onSubmitMoveCode  the six digits from that email.
+ * @param onCancelMove   back out of code entry to try a different email.
  * @param onGranted      access confirmed; the host should dismiss the gate.
  * @param onCheckoutOpened  the browser has been handed the URL, clear the state.
  */
@@ -113,11 +117,14 @@ fun PaywallOverlay(
     initialEmail: String,
     onCheckAccess: (String) -> Unit,
     onBuy: (String) -> Unit,
+    onSubmitMoveCode: (String) -> Unit,
+    onCancelMove: () -> Unit,
     onGranted: () -> Unit,
     onCheckoutOpened: () -> Unit
 ) {
     val context = LocalContext.current
     var email by remember { mutableStateOf(initialEmail) }
+    var moveCode by remember { mutableStateOf("") }
 
     // A checkout URL is a one-shot instruction, not a piece of screen state.
     LaunchedEffect(gate.stage, gate.checkout) {
@@ -134,6 +141,16 @@ fun PaywallOverlay(
 
     val busy = gate.stage == GateStage.CHECKING || gate.stage == GateStage.VERIFYING
     val denial = gate.message.takeIf { gate.stage == GateStage.DENIED }
+
+    /** Waiting on the six digits we just emailed. */
+    val awaitingCode = gate.stage == GateStage.MOVE_CODE_ENTRY
+
+    // A paid email on the wrong handset is a R150 move, not a second R599
+    // purchase -- but only when the server says the move is actually available.
+    // On cooldown or out of allowance there is nothing to sell, and offering the
+    // button anyway would take the user to a checkout that refuses them.
+    val isDeviceMove = gate.reason == "device_mismatch"
+    val moveOffered = isDeviceMove && (gate.move?.eligible ?: true)
 
     Box(
         modifier = Modifier
@@ -191,7 +208,7 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Unlock NovaHost",
+                    if (awaitingCode) "Confirm it's you" else "Unlock NovaHost",
                     color = GateInk,
                     fontSize = 25.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -200,7 +217,12 @@ fun PaywallOverlay(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Enter your email to check your app access, or buy it if you haven't yet.",
+                    when {
+                        awaitingCode ->
+                            gate.message ?: "Enter the 6-digit code we emailed you."
+                        else ->
+                            "Enter your email to check your app access, or buy it if you haven't yet."
+                    },
                     color = GateMuted,
                     fontSize = 14.sp,
                     lineHeight = 21.sp,
@@ -209,12 +231,24 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                GateEmailField(
-                    value = email,
-                    onValue = { email = it },
-                    enabled = !busy,
-                    hasError = denial != null
-                )
+                if (awaitingCode) {
+                    GateCodeField(
+                        value = moveCode,
+                        onValue = { entered ->
+                            // Digits only, six of them. Pasting the whole line
+                            // out of an email should not fail on a stray space.
+                            moveCode = entered.filter { it.isDigit() }.take(6)
+                        },
+                        enabled = !busy
+                    )
+                } else {
+                    GateEmailField(
+                        value = email,
+                        onValue = { email = it },
+                        enabled = !busy,
+                        hasError = denial != null
+                    )
+                }
 
                 AnimatedVisibility(visible = denial != null, enter = fadeIn(), exit = fadeOut()) {
                     Row(
@@ -244,33 +278,54 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(10.dp))
 
-                GatePrimaryButton(
-                    label = when (gate.stage) {
-                        GateStage.CHECKING -> "Checking..."
-                        GateStage.VERIFYING -> "Confirming payment..."
-                        else -> "Check my access"
-                    },
-                    busy = busy,
-                    enabled = !busy,
-                    onClick = { onCheckAccess(email) }
-                )
+                if (awaitingCode) {
+                    GatePrimaryButton(
+                        label = if (busy) "Opening checkout..." else "Confirm & pay $REACTIVATION_PRICE_LABEL",
+                        busy = busy,
+                        enabled = !busy && moveCode.length == 6,
+                        onClick = { onSubmitMoveCode(moveCode) }
+                    )
 
-                Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(10.dp))
 
-                // A paid email on the wrong handset is a R150 move, not a second
-                // R599 purchase, and the checkout the server hands back prices
-                // it that way. The button says what will actually be charged.
-                val isDeviceMove = gate.reason == "device_mismatch"
+                    GateSecondaryButton(
+                        label = "Use a different email",
+                        enabled = !busy,
+                        onClick = {
+                            moveCode = ""
+                            onCancelMove()
+                        }
+                    )
+                } else {
+                    GatePrimaryButton(
+                        label = when (gate.stage) {
+                            GateStage.CHECKING -> "Checking..."
+                            GateStage.VERIFYING -> "Confirming payment..."
+                            else -> "Check my access"
+                        },
+                        busy = busy,
+                        enabled = !busy,
+                        onClick = { onCheckAccess(email) }
+                    )
 
-                GateSecondaryButton(
-                    label = if (isDeviceMove) {
-                        "Move to this device — $REACTIVATION_PRICE_LABEL"
-                    } else {
-                        "Buy app access — $APP_PRICE_LABEL"
-                    },
-                    enabled = !busy,
-                    onClick = { onBuy(email) }
-                )
+                    Spacer(Modifier.height(10.dp))
+
+                    // The button says what will actually be charged. A move is
+                    // only offered when the server says one is available -- on
+                    // cooldown or out of allowance the only honest thing on
+                    // screen is the message above and the support link below.
+                    if (!isDeviceMove || moveOffered) {
+                        GateSecondaryButton(
+                            label = if (isDeviceMove) {
+                                "Move to this device — $REACTIVATION_PRICE_LABEL"
+                            } else {
+                                "Buy app access — $APP_PRICE_LABEL"
+                            },
+                            enabled = !busy,
+                            onClick = { onBuy(email) }
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(12.dp))
 
@@ -721,6 +776,66 @@ private fun GateEmailField(
             ) {
                 Icon(Icons.Rounded.Close, contentDescription = "Clear", tint = GateMuted, modifier = Modifier.size(12.dp))
             }
+        }
+    }
+}
+
+/**
+ * The six-digit move code.
+ *
+ * Wide letter spacing and a monospace face so the digits read as a code rather
+ * than a number, and so a mistyped one is easy to spot before paying.
+ */
+@Composable
+private fun GateCodeField(
+    value: String,
+    onValue: (String) -> Unit,
+    enabled: Boolean
+) {
+    var focused by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(GateGround)
+            .border(
+                if (focused) 1.5.dp else 0.dp,
+                if (focused) GateAccent else Color.Transparent,
+                RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (value.isEmpty()) {
+                Text(
+                    "------",
+                    color = GateFaint,
+                    fontSize = 26.sp,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 10.sp
+                )
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValue,
+                enabled = enabled,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(
+                    color = GateInk,
+                    fontSize = 26.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 10.sp,
+                    textAlign = TextAlign.Center
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(GateAccent),
+                modifier = Modifier.onFocusChanged { focused = it.isFocused }
+            )
         }
     }
 }

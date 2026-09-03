@@ -98,7 +98,7 @@ import com.novahost.app.R
 import com.novahost.app.navigation.Routes
 import com.novahost.app.sdk.LicenseActivationRequest
 import com.novahost.app.sdk.LicenseActivationResponse
-import com.novahost.app.sdk.SupabaseSetup
+import com.novahost.app.sdk.NovaHostBackend
 import com.novahost.app.ui.components.LightStatusBarEffect
 import com.novahost.app.ui.components.StaggerIn
 import com.novahost.app.ui.theme.MonoFamily
@@ -1177,15 +1177,15 @@ private suspend fun activateLicence(
             LicenseActivationRequest(license_key = issuedKey, android_id = androidId)
         )
 
-        val response = SupabaseSetup.client.httpClient.post(
-            "${com.novahost.app.BuildConfig.SUPABASE_URL}/functions/v1/validate-license"
+        val response = NovaHostBackend.client.httpClient.post(
+            "${com.novahost.app.BuildConfig.NOVAHOST_API_URL}/functions/v1/validate-license"
         ) {
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
             header(
                 HttpHeaders.Authorization,
-                "Bearer ${com.novahost.app.BuildConfig.SUPABASE_ANON_KEY}"
+                "Bearer ${com.novahost.app.BuildConfig.NOVAHOST_API_KEY}"
             )
-            header("apikey", com.novahost.app.BuildConfig.SUPABASE_ANON_KEY)
+            header("apikey", com.novahost.app.BuildConfig.NOVAHOST_API_KEY)
             setBody(payload)
         }
 
