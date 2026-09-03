@@ -30,6 +30,7 @@ import Terms from "@/pages/Terms";
 import Privacy from "@/pages/Privacy";
 import Refunds from "@/pages/Refunds";
 import Contact from "@/pages/Contact";
+import AdminAccess from "@/pages/AdminAccess";
 
 const queryClient = new QueryClient();
 
@@ -125,6 +126,7 @@ function AppRoutes() {
         <Route path="feedback" element={<Feedback />} />
         <Route path="dashboard/ea/:id/manage" element={<ManageEA />} />
         <Route path="dispatcher/licenses" element={<LicenseManagement />} />
+        <Route path="admin/access" element={<AdminAccess />} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>

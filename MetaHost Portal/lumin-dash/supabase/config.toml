@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.admin-licenses]
 verify_jwt = true
+
+[functions.admin-grant-access]
+verify_jwt = true

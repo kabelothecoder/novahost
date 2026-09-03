@@ -10,9 +10,11 @@ import {
   SlidersHorizontal,
   Zap,
   Shield,
+  ShieldCheck,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import { cn } from "@/lib/utils";
 
 import {
@@ -63,11 +65,21 @@ const navGroups: Array<{
   },
 ];
 
+// Shown only to accounts in `admin_users` (see useIsAdmin). The page and its
+// edge function both re-check server-side, so this is UI tidiness, not a gate.
+const adminGroup = {
+  label: "Admin",
+  items: [{ title: "Comp Access", url: "/admin/access", icon: ShieldCheck }],
+};
+
 export function AppSidebar() {
   const { state } = useSidebar();
   const { pathname } = useLocation();
   const isMobile = useIsMobile();
   const isCollapsed = state === "collapsed" && !isMobile;
+  const { isAdmin } = useIsAdmin();
+
+  const groups = isAdmin ? [...navGroups, adminGroup] : navGroups;
 
   // The dashboard is the only route that must match exactly; every other entry
   // should stay lit while you are on one of its detail pages.
@@ -104,7 +116,7 @@ export function AppSidebar() {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 py-4">
-          {navGroups.map((group) => (
+          {groups.map((group) => (
             <div key={group.label} className="mb-5 last:mb-0">
               {!isCollapsed && (
                 <p className="section-label px-2 pb-1.5">{group.label}</p>
