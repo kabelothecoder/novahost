@@ -33,3 +33,50 @@ content_path = "./templates/email_change.html"
 [auth.email.template.reauthentication]
 subject = "Your NovaHost verification code"
 content_path = "./templates/reauthentication.html"
+
+# ─── Security notification templates ─────────────────────────────────────
+# A different section from the six above (`auth.email.notification.*`, not
+# `auth.email.template.*`) -- the section key also drops the `_notification`
+# suffix that the filename and the Management API's field names keep.
+#
+# `enabled = true` here governs ONLY the local dev stack started by
+# `supabase start`. It has no effect on the linked remote project -- that is
+# controlled separately by `mailer_notifications_<key>_enabled`, which lives
+# in Authentication > Emails (if exposed there) or the Management API, and
+# which nothing in this repo flips automatically. Content without the
+# matching remote flag on is written but never sent. See templates/README.md.
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Your NovaHost password was changed"
+content_path = "./templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "Your NovaHost email address was changed"
+content_path = "./templates/email_changed_notification.html"
+
+[auth.email.notification.phone_changed]
+enabled = true
+subject = "Your NovaHost phone number was changed"
+content_path = "./templates/phone_changed_notification.html"
+
+[auth.email.notification.identity_linked]
+enabled = true
+subject = "A sign-in method was linked to your NovaHost account"
+content_path = "./templates/identity_linked_notification.html"
+
+[auth.email.notification.identity_unlinked]
+enabled = true
+subject = "A sign-in method was removed from your NovaHost account"
+content_path = "./templates/identity_unlinked_notification.html"
+
+[auth.email.notification.mfa_factor_enrolled]
+enabled = true
+subject = "A verification method was added to your NovaHost account"
+content_path = "./templates/mfa_factor_enrolled_notification.html"
+
+[auth.email.notification.mfa_factor_unenrolled]
+enabled = true
+subject = "A verification method was removed from your NovaHost account"
+content_path = "./templates/mfa_factor_unenrolled_notification.html"

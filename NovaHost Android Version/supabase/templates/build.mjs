@@ -1,15 +1,25 @@
 /**
- * Builds the six NovaHost-branded auth email templates.
+ * Builds the thirteen NovaHost-branded auth email templates: six workflow
+ * emails (something needs the recipient to act) and seven security
+ * notifications (something already happened; recipient only needs to know).
  *
  * The auth provider's template system has no includes -- each template is one
  * standalone HTML string pasted into Authentication > Emails (or referenced
  * from config.toml). That means the ~120 lines of shell markup have to be
- * duplicated into every file. Generating them from one source keeps the six in
- * sync; edit THIS file, run `node build.mjs`, commit the output.
+ * duplicated into every file. Generating them from one source keeps the
+ * thirteen in sync; edit THIS file, run `node build.mjs`, commit the output.
  *
  * Design language is lifted from the shipped licence-key email
  * (supabase/functions/send-license-email) so a buyer who gets a licence key and
  * then resets their password sees the same brand both times.
+ *
+ * The two groups look deliberately different in one respect: the six workflow
+ * emails end in a filled gradient button, because they ask for one specific
+ * action. The seven notifications end in an outlined, unfilled button --
+ * same shape, no fill -- because there is nothing to act on; a loud button
+ * would misstate that. Neither group's provider passes it a `ConfirmationURL`
+ * at all, which is *why* the outline exists: it links `{{ .SiteURL }}`
+ * instead, a plain way back into the app rather than a call to action.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -67,6 +77,7 @@ const heading = (title, lede) => `
           </tr>`;
 
 // Dark label on the gradient: #07070E over cyan/violet/pink all clear AA.
+// Reserved for the six workflow emails -- one specific action, one loud button.
 const button = (label) => `
           <tr>
             <td style="padding:28px 36px 0 36px;">
@@ -74,6 +85,25 @@ const button = (label) => `
                 <tr>
                   <td style="background-color:${C.violet};background-image:${VISOR};border-radius:999px;">
                     <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 30px;font-family:${FONT};font-size:15px;font-weight:700;color:${C.ink};text-decoration:none;">
+                      ${label}
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>`;
+
+// Outline-only counterpart, same shape, no fill. Used by the seven security
+// notifications, none of which receive a `ConfirmationURL` -- there is
+// nothing to confirm, so this links `.SiteURL` as a quiet way back into the
+// app rather than a call to action.
+const secondaryButton = (label) => `
+          <tr>
+            <td style="padding:26px 36px 0 36px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border:1px solid ${C.codeLine};border-radius:999px;">
+                    <a href="{{ .SiteURL }}" style="display:inline-block;padding:12px 28px;font-family:${FONT};font-size:14px;font-weight:600;color:${C.cyan};text-decoration:none;">
                       ${label}
                     </a>
                   </td>
@@ -98,8 +128,37 @@ const codeBlock = (label, value, opts = {}) => `
             </td>
           </tr>`;
 
+// Two labelled rows in one card -- "before" then "after". Shared by the
+// email-change confirmation link, and by the email/phone-changed
+// notifications that report a completed change.
+const factPair = (labelA, valueA, labelB, valueB, opts = {}) => `
+          <tr>
+            <td style="padding:${opts.tight ? '22px' : '26px'} 36px 0 36px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.ink};border:1px solid ${C.codeLine};border-radius:10px;">
+                <tr>
+                  <td style="padding:16px 18px 6px 18px;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.label};">${labelA}</td>
+                </tr>
+                <tr>
+                  <td style="padding:0 18px 14px 18px;font-family:${MONO};font-size:14px;color:${C.bodySoft};word-break:break-all;">${valueA}</td>
+                </tr>
+                <tr>
+                  <td style="padding:0 18px;"><div style="border-top:1px solid ${C.codeLine};font-size:0;line-height:0;">&nbsp;</div></td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 18px 6px 18px;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.label};">${labelB}</td>
+                </tr>
+                <tr>
+                  <td style="padding:0 18px 16px 18px;font-family:${MONO};font-size:14px;font-weight:700;color:${C.cyan};word-break:break-all;">${valueB}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>`;
+
 // The raw link. Some corporate mail gateways rewrite or strip anchor hrefs;
 // printing the URL as text gives the recipient a path that survives that.
+// Workflow emails only -- the notifications' secondaryButton has no matching
+// fallback because .SiteURL is a destination, not a one-time token URL; a
+// recipient who cannot click it can just navigate to the app directly.
 const fallbackLink = `
           <tr>
             <td style="padding:24px 36px 0 36px;">
@@ -171,11 +230,17 @@ ${rows.join('\n')}
 </html>
 `;
 
-// --- The six templates --------------------------------------------------
-// Filenames match the provider's own template keys so the config.toml wiring
-// is obvious at a glance.
+// --- The thirteen templates ----------------------------------------------
+// Filenames match the provider's own template keys so the config.toml and
+// deploy.mjs wiring is obvious at a glance. The seven notification filenames
+// keep the `_notification` suffix that the Management API's field names use
+// (`mailer_templates_<key>_content`) even though config.toml's own section
+// key drops it (`[auth.email.notification.password_changed]`) -- the doc's
+// own example does the same mismatch, since content_path is just a path.
 
 const templates = {
+  // ── Six workflow emails: something needs the recipient to act ─────────
+
   confirmation: shell({
     title: 'Confirm your NovaHost account',
     preheader: 'One tap to confirm your email and finish setting up NovaHost.',
@@ -260,30 +325,7 @@ const templates = {
         'Confirm your new address',
         'You asked to move your NovaHost account to a new email address. Confirm it below and sign-ins, licence keys and receipts all follow it.'
       ),
-      // A from/to block rather than prose: the whole point of this mail is
-      // letting the reader spot an address they did not choose.
-      `
-          <tr>
-            <td style="padding:26px 36px 0 36px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.ink};border:1px solid ${C.codeLine};border-radius:10px;">
-                <tr>
-                  <td style="padding:16px 18px 6px 18px;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.label};">Current</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 18px 14px 18px;font-family:${MONO};font-size:14px;color:${C.bodySoft};word-break:break-all;">{{ .Email }}</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 18px;"><div style="border-top:1px solid ${C.codeLine};font-size:0;line-height:0;">&nbsp;</div></td>
-                </tr>
-                <tr>
-                  <td style="padding:14px 18px 6px 18px;font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.label};">New</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 18px 16px 18px;font-family:${MONO};font-size:14px;font-weight:700;color:${C.cyan};word-break:break-all;">{{ .NewEmail }}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>`,
+      factPair('Current', '{{ .Email }}', 'New', '{{ .NewEmail }}'),
       button('Confirm the change'),
       codeBlock('Or enter this code', '{{ .Token }}', { tight: true }),
       fallbackLink,
@@ -305,6 +347,111 @@ const templates = {
         'This code expires in one hour and works once. NovaHost will never ask you for it over chat, phone or email.',
         'If you did not start this, ignore the code and change your password.',
       ]),
+    ],
+  }),
+
+  // ── Seven security notifications: something already happened ──────────
+  // Every one of these is OFF at the project level until its matching
+  // `mailer_notifications_<key>_enabled` flag is turned on -- building the
+  // template is necessary but not sufficient. See templates/README.md.
+  // None receives a `ConfirmationURL`; none has a fallback link for the same
+  // reason `secondaryButton` above is outline-only, not filled.
+
+  password_changed_notification: shell({
+    title: 'Your NovaHost password was changed',
+    preheader: 'Your NovaHost password was just changed. If this was not you, act now.',
+    rows: [
+      eyebrow('Security notification'),
+      heading(
+        'Your password was changed',
+        `The password for <strong style="color:${C.strong};">{{ .Email }}</strong> was just changed. If this was you, no action is needed.`
+      ),
+      secondaryButton('Open NovaHost'),
+      footer([
+        'If you did not make this change, whoever did may now control this account. Open NovaHost, choose Forgot password to reset it, and contact support right away.',
+      ]),
+    ],
+  }),
+
+  email_changed_notification: shell({
+    title: 'Your NovaHost email address was changed',
+    preheader: 'The email address on your NovaHost account was just changed.',
+    rows: [
+      eyebrow('Security notification'),
+      heading('Your email address was changed', 'Your NovaHost account now signs in with a different address.'),
+      factPair('Previous address', '{{ .OldEmail }}', 'New address', '{{ .Email }}'),
+      secondaryButton('Open NovaHost'),
+      footer([
+        'If you did not make this change, your account may be compromised. Open NovaHost, reset your password immediately, and contact support.',
+      ]),
+    ],
+  }),
+
+  phone_changed_notification: shell({
+    title: 'Your NovaHost phone number was changed',
+    preheader: 'The phone number on your NovaHost account was just changed.',
+    rows: [
+      eyebrow('Security notification'),
+      heading('Your phone number was changed', 'Your NovaHost account now uses a different phone number.'),
+      factPair('Previous number', '{{ .OldPhone }}', 'New number', '{{ .Phone }}'),
+      secondaryButton('Open NovaHost'),
+      footer(['If you did not make this change, open NovaHost, reset your password, and contact support.']),
+    ],
+  }),
+
+  identity_linked_notification: shell({
+    title: 'A sign-in method was linked to your NovaHost account',
+    preheader: 'A new sign-in method was linked to your NovaHost account.',
+    rows: [
+      eyebrow('Security notification'),
+      heading(
+        'A sign-in method was linked',
+        `<strong style="color:${C.strong};">{{ .Provider }}</strong> can now be used to sign in to {{ .Email }}.`
+      ),
+      secondaryButton('Open NovaHost'),
+      footer(['If you did not do this, remove it from Settings in NovaHost and contact support.']),
+    ],
+  }),
+
+  identity_unlinked_notification: shell({
+    title: 'A sign-in method was removed from your NovaHost account',
+    preheader: 'A sign-in method was removed from your NovaHost account.',
+    rows: [
+      eyebrow('Security notification'),
+      heading(
+        'A sign-in method was removed',
+        `<strong style="color:${C.strong};">{{ .Provider }}</strong> can no longer be used to sign in to {{ .Email }}.`
+      ),
+      secondaryButton('Open NovaHost'),
+      footer(['If you did not do this, your account may be compromised &mdash; contact support.']),
+    ],
+  }),
+
+  mfa_factor_enrolled_notification: shell({
+    title: 'A verification method was added to your NovaHost account',
+    preheader: 'A new verification method was added to your NovaHost account.',
+    rows: [
+      eyebrow('Security notification'),
+      heading(
+        'A verification method was added',
+        `A new <strong style="color:${C.strong};">{{ .FactorType }}</strong> verification method was added to your account.`
+      ),
+      secondaryButton('Open NovaHost'),
+      footer(['If you did not add this, remove it from Settings in NovaHost and contact support immediately.']),
+    ],
+  }),
+
+  mfa_factor_unenrolled_notification: shell({
+    title: 'A verification method was removed from your NovaHost account',
+    preheader: 'A verification method was removed from your NovaHost account.',
+    rows: [
+      eyebrow('Security notification'),
+      heading(
+        'A verification method was removed',
+        `A <strong style="color:${C.strong};">{{ .FactorType }}</strong> verification method was removed from your account.`
+      ),
+      secondaryButton('Open NovaHost'),
+      footer(['If you did not remove this, your account may be less protected than you expect &mdash; contact support.']),
     ],
   }),
 };
