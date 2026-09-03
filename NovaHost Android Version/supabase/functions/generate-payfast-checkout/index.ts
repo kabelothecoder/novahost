@@ -40,8 +40,8 @@ const PAYFAST_URL = "https://www.payfast.co.za/eng/process";
  * R599/R349 labels from PaywallOverlay.kt, not these. Keep in sync with
  * payfast-webhook.EXPECTED_AMOUNT. */
 const PRICES = {
-  APP: { amount: "600.00", item_name: "NovaHost App Access (once-off)", custom_str1: "LIFETIME" },
-  SCANNER: { amount: "350.00", item_name: "NovaHost AI Chart Scanner (once-off)", custom_str1: "SCANNER" },
+  APP: { amount: "600.00", item_name: "NovaHost App Access", custom_str1: "LIFETIME" },
+  SCANNER: { amount: "350.00", item_name: "NovaHost AI Chart Scanner", custom_str1: "SCANNER" },
   REACTIVATE: { amount: "150.00", item_name: "NovaHost Device Reactivation", custom_str1: "REACTIVATION" },
 } as const;
 
@@ -125,19 +125,16 @@ async function moveEligibility(
 /**
  * Percent-encoding that matches PHP's `urlencode`, which is what Payfast hashes.
  *
- * This one character class is why nobody has ever completed an R599 or R349
- * purchase. `encodeURIComponent` leaves `! ' ( ) *` unescaped; PHP escapes all
- * five. Two of the three item names below contain "(once-off)", so the app and
- * the scanner were signed over `...Scanner+(once-off)` while the browser
- * submitted `...Scanner+%28once-off%29`, and Payfast answered every one of them
- * with "Generated signature does not match submitted signature".
+ * `encodeURIComponent` leaves `! ' ( ) *` unescaped; PHP escapes all five, so
+ * this re-escapes them, and the outgoing URL query is built with this SAME
+ * function so the signature string and the query never disagree on a character.
  *
- * Payfast's own checkout page confirms it: signing with this encoder is
- * accepted, signing with the bare `encodeURIComponent` is refused.
- *
- * "NovaHost Device Reactivation" has no parentheses -- which is the entire
- * reason the R150 device moves are the only payments that have gone through
- * recently, and why this looked like a product problem rather than a bug.
+ * The parentheses were still a live blocker on PRODUCTION: an item_name of
+ * "NovaHost App Access (once-off)" -- signed as `%28once-off%29` and submitted
+ * the same -- was answered with 400 "Generated signature does not match
+ * submitted signature", while the identical checkout with the parens dropped
+ * went straight through. Sandbox had accepted both. So the item_names are kept
+ * parenthesis-free (belt) and this encoder escapes parens anyway (braces).
  */
 function payfastEncode(value: string): string {
   return encodeURIComponent(value.trim())
@@ -386,13 +383,12 @@ serve(async (req: Request) => {
       custom_str3: cleanEmail,
     };
 
-    payload.signature = generatePayfastSignature(payload, PASSPHRASE);
-
     // Built with the same encoder the signature was hashed with, rather than
     // through URLSearchParams. The two disagree on exactly the characters that
     // broke this -- URLSearchParams escapes parentheses, encodeURIComponent did
     // not -- and a checkout URL whose encoding differs from its own signature is
     // the failure this function just came out of. One encoder, both places.
+    payload.signature = generatePayfastSignature(payload, PASSPHRASE);
     const query = Object.entries(payload)
       .map(([key, value]) => `${key}=${payfastEncode(value)}`)
       .join("&");
