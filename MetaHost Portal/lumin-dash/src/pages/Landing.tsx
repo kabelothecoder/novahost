@@ -730,26 +730,66 @@ export default function Landing() {
       </section>
 
       {/* ═══ FOOTER ══════════════════════════════════════════════════════════ */}
-      <footer className="border-t border-[#14171E] px-6 py-10">
-        <div className="mx-auto flex max-w-[1140px] flex-col items-center justify-between gap-5 sm:flex-row">
-          <Wordmark />
-          <nav className="flex flex-wrap items-center justify-center gap-6">
-            {/*
-              Privacy / Terms / Contact are deliberately absent rather than
-              linked to "#". They need real pages before they go back in — a
-              paid product needs published terms, not a link that goes nowhere.
-            */}
-            {NAV.map(([, label, href]) => (
-              <a
-                key={href}
-                href={href}
-                className="text-[13.5px] text-[#6C7484] transition-colors hover:text-[#A9B0BF]"
-              >
-                {label}
-              </a>
-            ))}
-          </nav>
-          <p className="text-[13px] text-[#5B6272]">&copy; {new Date().getFullYear()} NovaHost</p>
+      <footer className="border-t border-[#14171E] px-6 py-12">
+        <div className="mx-auto max-w-[1140px]">
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            <Wordmark />
+
+            <div className="flex flex-wrap gap-x-14 gap-y-8">
+              <nav className="flex flex-col gap-3">
+                <p
+                  className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#4E5568]"
+                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                >
+                  Product
+                </p>
+                {NAV.map(([, label, href]) => (
+                  <a
+                    key={href}
+                    href={href}
+                    className="text-[13.5px] text-[#6C7484] transition-colors hover:text-[#A9B0BF]"
+                  >
+                    {label}
+                  </a>
+                ))}
+              </nav>
+
+              <nav className="flex flex-col gap-3">
+                <p
+                  className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#4E5568]"
+                  style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                >
+                  Legal
+                </p>
+                {[
+                  ["Terms of Service", "/terms"],
+                  ["Privacy Policy", "/privacy"],
+                  ["Refund Policy", "/refunds"],
+                  ["Contact", "/contact"],
+                ].map(([label, to]) => (
+                  <Link
+                    key={to}
+                    to={to}
+                    className="text-[13.5px] text-[#6C7484] transition-colors hover:text-[#A9B0BF]"
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </nav>
+            </div>
+          </div>
+
+          <div className="mt-10 border-t border-[#14171E] pt-7">
+            <p className="max-w-[70ch] text-[12px] leading-relaxed text-[#5B6272]">
+              Trading forex and CFDs carries a high risk of loss and is not suitable for everyone.
+              NovaHost is software for hosting and copying trades &mdash; it is not a broker or a
+              financial services provider, and nothing in it is financial advice. Past performance is
+              not a reliable indicator of future results.
+            </p>
+            <p className="mt-4 text-[13px] text-[#5B6272]">
+              &copy; {new Date().getFullYear()} NovaHost. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </div>

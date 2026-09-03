@@ -26,6 +26,10 @@ import UpdatePassword from "@/pages/UpdatePassword";
 import NotFound from "@/pages/NotFound";
 import Landing from "@/pages/Landing";
 import LicenseManagement from "@/pages/LicenseManagement";
+import Terms from "@/pages/Terms";
+import Privacy from "@/pages/Privacy";
+import Refunds from "@/pages/Refunds";
+import Contact from "@/pages/Contact";
 
 const queryClient = new QueryClient();
 
@@ -84,6 +88,10 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/landing" element={<Landing />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/refunds" element={<Refunds />} />
+      <Route path="/contact" element={<Contact />} />
       <Route path="/login" element={
         <PublicRoute>
           <Login />
