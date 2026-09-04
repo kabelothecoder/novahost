@@ -324,7 +324,12 @@ fun MetaTraderConnectScreen(
                                             token = sessionToken
                                         )
                                         TerminalPrefs.saveConfig(context, config)
-                                        MetaAPIManager.startBalanceSync(linkedAccount)
+                                        // The account has only just registered, so the
+                                        // broker session may still be coming up and this
+                                        // can legitimately come back empty. Every sizing
+                                        // screen refreshes on entry, so a miss here costs
+                                        // nothing -- it is only a head start.
+                                        MetaAPIManager.refreshAccount(context)
                                         linkState = LinkState.Linked(
                                             server = linkedServer,
                                             platform = selectedPlatform,

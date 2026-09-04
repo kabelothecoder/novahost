@@ -168,6 +168,33 @@ function requestIdFrom(seed: string): number {
   return Math.abs(h | 0) % (MAX_REQUEST_ID + 1)
 }
 
+/**
+ * The smallest volume increment any broker on this platform accepts.
+ *
+ * Every account seen here quotes `stepVolume: 0.01` and `minimalVolume: 0.01`.
+ * It is a constant rather than a per-symbol read on purpose: this runs on the
+ * hot path ahead of the order, and an extra round trip to `/symbols/{name}` to
+ * confirm a value that has never varied would cost every trade latency to
+ * protect against a book nobody trades. `explainRejection` still reads the real
+ * spec on the way out, so a broker that genuinely differs is reported by name
+ * rather than silently mis-sized.
+ */
+const LOT_STEP = 0.01
+
+/**
+ * The nearest tradeable volume at or below [value].
+ *
+ * Down, never up: [value] is already the user's risk budget expressed in lots,
+ * and rounding up spends more of their account than they authorised.
+ */
+function toLotStep(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return LOT_STEP
+  // Scaled to integers before flooring -- 0.07/0.01 is 6.999999999999999 in
+  // binary floating point, and flooring that gives 0.06.
+  const steps = Math.floor(Math.round(value * 1000) / (LOT_STEP * 1000))
+  return Math.max(LOT_STEP, Math.round(steps * LOT_STEP * 100) / 100)
+}
+
 /** The canonical NovaHost name for an instrument: letters and digits, upper case. */
 function baseSymbol(pair: unknown): string {
   return String(pair ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
@@ -885,6 +912,31 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ---- Lot step --------------------------------------------------------
+    //
+    // Brokers accept volume in discrete increments, and until here nothing
+    // guaranteed one. `smart_lot_size` is the calculator's raw quotient -- a
+    // full-precision double such as 0.015560200210315327 -- and the ceiling
+    // above assigns it straight into `effectiveLots`. That number went to the
+    // broker verbatim. Gold on a live book here quotes `stepVolume: 0.01`, so
+    // it is not a size the account can trade under any circumstances, and
+    // MetaCopier refuses it without ever mentioning volume.
+    //
+    // Outside the `symbolCfg` block deliberately: a licence that has never
+    // synced its plan has no config row, and its orders are sized entirely by
+    // the handset -- which is exactly the case with nothing else checking.
+    //
+    // Rounded DOWN, for the same reason the app's own sizing floors: rounding
+    // up puts the position above the budget the user set, and a limit breached
+    // by half of all roundings is not a limit.
+    const steppedLots = toLotStep(effectiveLots)
+    if (steppedLots !== effectiveLots) {
+      console.log(
+        `[metacopier-execute] ${cleanPair} volume ${effectiveLots} -> ${steppedLots} (lot step)`
+      )
+      effectiveLots = steppedLots
+    }
+
     // ---- Bracket sanity ------------------------------------------------------
     // Caught here rather than at the broker: a rejected order costs the signal,
     // and "invalid stops" arrives from MetaTrader as a bare numeric code that
@@ -1145,28 +1197,78 @@ Deno.serve(async (req: Request) => {
     if (!placed) {
       const symbolTried = attempted[attempted.length - 1] ?? cleanPair
 
-      // MetaCopier reports faults as bracketed codes, e.g. ["[UNKNOWN_SYMBOL]"].
-      // Translated here because the alternative the subscriber sees is a raw
-      // MetaTrader number -- 130, 131, 134, 4109 -- which tells them nothing
-      // about which of these they can actually fix.
       // MetaCopier reports faults as bracketed codes, e.g. ["[UNKNOWN_SYMBOL]"],
       // but plain-language validation errors arrive unbracketed. Both are
       // matched, because the second kind is what a malformed request produces
       // and it is the kind that reads as "the broker refused" when it is really
-      // "we sent something invalid".
+      // "we sent something invalid". Translated here because the alternative the
+      // subscriber sees is a raw MetaTrader number -- 130, 131, 134, 4109 --
+      // which tells them nothing about which of these they can actually fix.
       const codes = (lastDetail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
       const hit = (needle: string) => codes.some((c) => c.includes(needle))
       const says = (re: RegExp) => re.test(lastDetail)
 
-      let code = codes[0] ?? 'BROKER_REJECTED'
-      let message = 'Trade could not be placed with the broker.'
+      // ---- What the broker actually said, in words ---------------------------
+      //
+      // MetaCopier answers a refusal with `{"errors":[...]}`, and the entries are
+      // NOT always bracketed tokens. A real broker sentence arrives there too:
+      //
+      //     {"errors":["Autotrading disabled by server"]}
+      //
+      // Nothing above read that shape. `codes` came back empty, every `hit`
+      // missed, and four live orders on a healthy account were reported to the
+      // subscriber as "your broker refused the order without giving a reason --
+      // check the symbol's trading hours and your free margin". The broker had
+      // given the reason, in English, in the very first field of the response,
+      // and it was neither trading hours nor margin. The user retried four times
+      // chasing two things that were never wrong.
+      //
+      // So the prose is extracted up front and kept. It is the most specific
+      // thing anyone will ever have about the refusal, and it is only ever
+      // replaced below by a message that is MORE specific -- never by a generic.
+      const brokerSays = ((): string | null => {
+        try {
+          const parsed = JSON.parse(lastDetail) as Record<string, unknown>
+          const errs = parsed?.errors
+          const first = Array.isArray(errs)
+            ? errs.map((e) => String(e ?? '').trim()).find((e) => e.length > 0)
+            : typeof errs === 'string' ? errs.trim() : null
+          if (!first) return null
+          // A bare `[TOKEN]` is a code, not a sentence -- it is handled below and
+          // would only read as noise if quoted back at the user.
+          return /^\[[A-Z0-9_]+\]$/.test(first) ? null : first
+        } catch {
+          return null
+        }
+      })()
 
-      // Connection state first -- it is the most common cause and the most
+      let code = codes[0] ?? 'BROKER_REJECTED'
+      let message = brokerSays
+        ? `Your broker refused the order on ${symbolTried}: ${brokerSays}`
+        : 'Trade could not be placed with the broker.'
+
+      // ---- Autotrading switched off at the broker ----------------------------
+      //
+      // Checked before anything else because it is terminal in a way none of the
+      // others are: the account is connected, funded, holds the symbol and has
+      // the right password, and not one order will ever fill. Every other branch
+      // here describes something the subscriber can change from their phone.
+      // This one they cannot -- only the broker can lift it -- so sending them to
+      // Trading Symbols or Broker Setup wastes their evening.
+      if (says(/auto\s*-?\s*trading\s+(is\s+)?disabled|trading\s+(is\s+)?disabled\s+by\s+server|algo(rithmic)?\s+trading\s+(is\s+)?(disabled|not\s+allowed)/i)) {
+        code = 'AUTOTRADING_DISABLED'
+        message =
+          `Your broker has automated trading switched off on this account, so no order ` +
+          `NovaHost sends can be filled. Ask your broker to enable algorithmic (EA) ` +
+          `trading on it, or link a licence to an account that allows it. Nothing is ` +
+          `wrong with your licence, your balance or your symbols.`
+      }
+      // Connection state next -- it is the most common cause and the most
       // actionable, and MetaCopier spells its token `[ACCOUNT_IS_NOT_CONNTECTED]`
       // (their typo, "CONNTECTED"). The previous check looked for `NOT_CONNECTED`
       // and missed it on every live account, so every reconnect-window failure
       // fell through to the catch-all "Trade could not be placed with the broker".
-      if (hit('CONNTECT') || hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
+      else if (hit('CONNTECT') || hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
         code = 'ACCOUNT_DISCONNECTED'
         message = "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
       } else if (hit('SYMBOL')) {
@@ -1219,9 +1321,16 @@ Deno.serve(async (req: Request) => {
           message = explained.message
         } else {
           code = 'BROKER_REJECTED'
-          message =
-            `Your broker refused the order on ${symbolTried} without giving a reason. ` +
-            `Check the symbol's trading hours and your free margin.`
+          // "Without giving a reason" is only true when the broker gave none.
+          // Where it said something -- see `brokerSays` above -- that sentence
+          // stands, and the two guesses appended here are not sent instead of
+          // it. Telling somebody to check their trading hours when the response
+          // said "Autotrading disabled by server" is not a fallback, it is a
+          // wrong answer with more confidence than the right one.
+          message = brokerSays
+            ? `Your broker refused the order on ${symbolTried}: ${brokerSays}`
+            : `Your broker refused the order on ${symbolTried} without giving a reason. ` +
+              `Check the symbol's trading hours and your free margin.`
         }
       }
 

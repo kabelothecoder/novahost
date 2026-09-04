@@ -106,6 +106,8 @@ fun PairManagementScreen(
     }
 
     val terminalBalance by MetaAPIManager.balance.collectAsState()
+    /** The unit [terminalBalance] is quoted in. Adopted with it, never apart. */
+    val terminalCurrency by MetaAPIManager.accountCurrency.collectAsState()
     val sessions by viewModel.marketSessions.collectAsState()
     val events by viewModel.economicCalendar.collectAsState()
 
@@ -132,11 +134,27 @@ fun PairManagementScreen(
         }
     }
 
+    // Ask the broker what the account actually holds. Until `broker-account`
+    // existed nothing ever answered this -- `MetaAPIManager.balance` was fed
+    // only by a realtime subscription to a table that has never had a row -- so
+    // the seed below could not fire and the plan sized off whatever the user
+    // had typed, or off nothing.
+    LaunchedEffect(Unit) { MetaAPIManager.refreshAccount(context) }
+
     // Seed the balance from the linked terminal, once, and only when the user
     // has not typed one. Their figure outranks the broker's.
-    LaunchedEffect(terminalBalance) {
+    //
+    // The CURRENCY is seeded with it. Taking the number alone is how a R596
+    // account gets sized as though it held $596 -- every lot roughly eighteen
+    // times too big, and every figure on screen still looking plausible.
+    LaunchedEffect(terminalBalance, terminalCurrency) {
         if (plan.balance <= 0.0 && terminalBalance > 0.0) {
-            plan = plan.copy(balance = terminalBalance)
+            plan = plan.copy(
+                balance = terminalBalance,
+                currency = terminalCurrency
+                    .takeIf { it in com.novahost.app.sdk.FxRates.SUPPORTED }
+                    ?: plan.currency
+            )
         }
     }
 

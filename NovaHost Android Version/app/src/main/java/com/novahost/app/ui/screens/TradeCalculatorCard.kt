@@ -73,6 +73,16 @@ import java.util.Locale
 fun TradeCalculatorCard(
     accent: Color,
     terminalBalance: Double,
+    /**
+     * What [terminalBalance] is denominated in, straight from the broker.
+     *
+     * Adopted with the figure and never separately. Every live account on this
+     * platform reports ZAR, and filling R596.29 into a field labelled dollars
+     * would size each position about eighteen times too large -- the exact fault
+     * the currency picker below was added to prevent, reintroduced by the back
+     * door if the number arrives without its unit.
+     */
+    terminalCurrency: String = "USD",
     onPerTradeRiskPercent: (Double) -> Unit,
     /**
      * The balance the sizing should actually use.
@@ -128,6 +138,33 @@ fun TradeCalculatorCard(
             (prefs.getString("calc_currency", "USD") ?: "USD")
                 .takeIf { it in FxRates.SUPPORTED } ?: "USD"
         )
+    }
+
+    /**
+     * Adopts the broker's own balance once it arrives, if the user has none.
+     *
+     * The balance is read asynchronously, so it is still 0.0 when this card is
+     * first composed and `balanceText` above cannot see it. Without this the
+     * field stayed empty, the scanner fell through to a stand-in $10,000, and
+     * every plan was sized against an account the subscriber does not have.
+     *
+     * Two rules, both deliberate:
+     *
+     *  - A figure the user typed is NEVER overwritten. They may be sizing for an
+     *    account they have not linked, or for part of the one they have, and
+     *    replacing that with the broker's number would overrule a person who
+     *    made a decision.
+     *  - The currency moves with the figure. Adopting a rand balance while the
+     *    picker still says USD is worse than adopting nothing at all: it looks
+     *    right and sizes eighteen times too large.
+     */
+    LaunchedEffect(terminalBalance, terminalCurrency) {
+        if (terminalBalance <= 0.0) return@LaunchedEffect
+        if (prefs.getString("calc_balance", null)?.isNotBlank() == true) return@LaunchedEffect
+        if (balanceText.isNotBlank()) return@LaunchedEffect
+
+        balanceText = String.format(Locale.US, "%.0f", terminalBalance)
+        currency = terminalCurrency.takeIf { it in FxRates.SUPPORTED } ?: currency
     }
 
     // Units of [currency] per 1 USD. Refetched when the picker moves; cached and

@@ -57,6 +57,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -152,6 +153,12 @@ fun SymbolScannerScreen(
     val isPremium by mainViewModel.isPremium.collectAsState()
     val hasScanner by mainViewModel.hasScanner.collectAsState()
     val balance by MetaAPIManager.balance.collectAsState()
+    /**
+     * What [balance] is denominated in. Every live account here is ZAR, and a
+     * rand figure read as dollars sizes every position about eighteen times too
+     * large -- so the unit travels with the number, never separately.
+     */
+    val balanceCurrency by MetaAPIManager.accountCurrency.collectAsState()
     val livePrices by ForexRepository.livePrices.collectAsState()
     val calendar by ForexRepository.economicCalendar.collectAsState()
     // Whether the calendar was read at all, not whether it came back empty. The
@@ -254,6 +261,22 @@ fun SymbolScannerScreen(
         chartUri = uri
         errorMessage = null
     }
+
+    /**
+     * Ask the broker what this account actually holds, before anything is sized.
+     *
+     * Every figure on this screen is a fraction of a balance, so the balance is
+     * the one input worth a round trip on entry. Without it the fallback chain
+     * ends at a stand-in $10,000 and quietly sizes a R596 account as though it
+     * held ten thousand dollars -- which is what put roughly 0.3 lots of gold in
+     * front of a live subscriber on every scan.
+     *
+     * Fire and forget: `refreshAccount` leaves the existing figures untouched
+     * when it cannot reach the broker, and the calculator below still accepts a
+     * typed balance either way. A slow or absent broker costs precision here,
+     * never the scan.
+     */
+    LaunchedEffect(Unit) { MetaAPIManager.refreshAccount(context) }
 
     // The plan and everything scored off it are derived, never stored. The
     // allocation rail on the plan state rebalances live, and a stored plan would
@@ -456,6 +479,7 @@ fun SymbolScannerScreen(
                             .edit().putString("scan_strategy", it.name).apply()
                     },
                     balance = balance,
+                    balanceCurrency = balanceCurrency,
                     onRisk = { riskPercent = it },
                     onBalance = { sizingBalance = it },
                     onCurrency = { code, rate -> displayCurrency = code; displayRate = rate },
@@ -690,6 +714,8 @@ private fun ScanInputState(
     strategy: ScanStrategy,
     onStrategy: (ScanStrategy) -> Unit,
     balance: Double,
+    /** The currency [balance] is quoted in, from the broker. */
+    balanceCurrency: String,
     onRisk: (Double) -> Unit,
     onBalance: (Double) -> Unit,
     onCurrency: (String, Double) -> Unit,
@@ -782,6 +808,7 @@ private fun ScanInputState(
             TradeCalculatorCard(
                 accent = accent,
                 terminalBalance = balance,
+                terminalCurrency = balanceCurrency,
                 onPerTradeRiskPercent = onRisk,
                 onBalance = onBalance,
                 onCurrency = onCurrency

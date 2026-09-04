@@ -147,6 +147,12 @@ object TradeFeed {
                 fromServer ?: "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
             "ACCOUNT_WRONG_CREDENTIALS" ->
                 fromServer ?: "Your broker rejected the saved login. Reconnect with your trading (master) password."
+            // The one rejection nothing on this device can fix. Worded so the
+            // user stops adjusting settings that were never wrong: the account
+            // is connected, funded and correctly linked, and the broker is
+            // refusing on principle.
+            "AUTOTRADING_DISABLED" ->
+                fromServer ?: "Your broker has automated trading switched off on this account. Ask them to enable algorithmic (EA) trading -- nothing on your side needs changing."
             "ACCOUNT_READONLY" ->
                 fromServer ?: "This account can't place orders -- it's linked with an investor (read-only) password, or the broker disabled trading on it."
             "MARKET_CLOSED" ->
