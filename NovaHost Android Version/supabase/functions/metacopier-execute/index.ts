@@ -57,7 +57,8 @@ function isPending(orderType: string): boolean {
  * open-position endpoint, and their modify endpoint accepts only volume, open
  * price, take profit and stop loss, so it cannot be rewritten afterwards
  * either. Everything after the second `|` is the part we control, and this
- * function is all of it.
+ * function is all of it. See [magicFor] for the undecorated half of a trade's
+ * identity.
  *
  * The suffix is protected and the robot name is what gets shortened -- losing
  * the tail of a long robot name is survivable, losing "-NovaHost" defeats the
@@ -166,6 +167,55 @@ function requestIdFrom(seed: string): number {
     h = Math.imul(h, 16777619)
   }
   return Math.abs(h | 0) % (MAX_REQUEST_ID + 1)
+}
+
+/**
+ * MetaTrader's own field for "which robot placed this".
+ *
+ * The comment cannot carry that job alone. MetaCopier prepends
+ * `API|<requestId>|` to every comment on the open-position endpoint -- their
+ * schema documents it, their modify endpoint explicitly cannot rewrite it
+ * ("only volume, open price, take profit, and stop loss can be modified"), and
+ * the `hideComment` / `customComment` switches they do offer apply only to the
+ * copier path, which NovaHost does not use. So a trade reads as
+ * `API|780|QuantumBreaker-NovaHost` in the terminal and there is no request we
+ * can send that changes it.
+ *
+ * The magic number is the field MetaTrader provides for exactly this, it has
+ * its own column, and nothing decorates it. Filtering, reporting and "was this
+ * mine or the robot's" all work off it in every terminal and every third-party
+ * tool.
+ *
+ * The namespace is the point: every NovaHost trade begins 77, so the whole
+ * platform's activity is one filter, while the six digits after it are derived
+ * from the robot so two robots on one account stay distinguishable.
+ *
+ * Kept under eight digits deliberately. MT5 stores the magic as a 64-bit value
+ * but MT4 stores it as a signed 32-bit int (ceiling 2,147,483,647), and a magic
+ * that overflows on MT4 is silently truncated into somebody else's namespace.
+ */
+const MAGIC_PREFIX = 77
+const MAGIC_ROBOT_RANGE = 1_000_000
+
+/**
+ * A stable magic number for one robot. Same robot, same number, forever.
+ *
+ * Derived rather than stored because it has to be identical on every account
+ * this robot ever trades, including accounts linked before the column existed --
+ * and a value computed from the id is that, with nothing to migrate.
+ */
+function magicFor(eaId: unknown): string {
+  const seed = String(eaId ?? '').trim()
+  if (!seed) return String(MAGIC_PREFIX * MAGIC_ROBOT_RANGE)
+
+  // Same FNV-1a as requestIdFrom, for the same reason: cheap, stable, and
+  // dependency-free.
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return String(MAGIC_PREFIX * MAGIC_ROBOT_RANGE + (Math.abs(h | 0) % MAGIC_ROBOT_RANGE))
 }
 
 /**
@@ -1021,6 +1071,10 @@ Deno.serve(async (req: Request) => {
       takeProfit: stops.tp,               // 0 => no take profit
       requestId,
       comment: tradeComment(license),
+      // The clean half of the trade's identity. The comment arrives in the
+      // terminal wearing MetaCopier's `API|<requestId>|` prefix and nothing we
+      // send can strip it; this field carries no decoration at all.
+      magicNumber: magicFor(license.ea_id),
     })
 
     const symbol = candidates[0]
