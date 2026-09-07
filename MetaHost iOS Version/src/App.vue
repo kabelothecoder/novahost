@@ -1,8 +1,9 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell-light': isLightRoute }">
 
     <!-- Persistent background loop (subtle, blended) -->
     <video
+      v-if="!isLightRoute"
       autoplay
       muted
       loop
@@ -26,8 +27,9 @@
     <!-- Floating Dock — hidden on splash & activate -->
     <FloatingDock v-if="showDock" />
 
-    <!-- iOS Install Card -->
-    <iOSInstallCard v-if="showInstall" @dismiss="showInstall = false" />
+    <!-- iOS Install Card — onboarding teaches this as its own step, so the
+         floating card would be a duplicate prompt over the top of it. -->
+    <iOSInstallCard v-if="showInstall && !isLightRoute" @dismiss="showInstall = false" />
 
     <!-- SVG Filters for Gooey & Glitch -->
     <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
@@ -61,10 +63,20 @@ import { accent } from './stores/accent.js'
 
 const route   = useRoute()
 
-// Hide the dock on splash, onboarding AND the activation gate
-const showDock = computed(() =>
-  route.name !== 'splash' && route.name !== 'activate' && route.name !== 'onboarding'
-)
+// Hide the dock on splash, onboarding AND the activation gate.
+// `payment-return` is in here because it is reached from PayFast in a browser
+// that has usually never seen this app: the dock would offer navigation into
+// an unverified session, and its robot avatar reads as a second, competing
+// subject on a screen that has one thing to say.
+const HIDE_DOCK = ['splash', 'activate', 'onboarding', 'unlock', 'payment', 'payment-return']
+const showDock = computed(() => !HIDE_DOCK.includes(route.name))
+
+// Routes on the light Nova system rather than obsidian glass. The shell's
+// black gradient and the bg video would otherwise sit behind — and blur
+// through — the frosted Nova materials on onboarding, the gate and the
+// PayFast landing screen.
+const LIGHT_ROUTES = ['onboarding', 'unlock', 'payment', 'payment-return']
+const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 
 // Show iOS install hint on first visit (after 3s)
 const showInstall = ref(false)
@@ -111,6 +123,13 @@ if (isIOS && !isStandalone) {
   0%   { background-position: 0% 0%; }
   50%  { background-position: 100% 100%; }
   100% { background-position: 0% 100%; }
+}
+
+/* Light routes opt out of the obsidian shell entirely. */
+.app-shell-light {
+  background: #F4F7F9;
+  background-image: none;
+  animation: none;
 }
 
 /* ── Page transition ─────────────────────────────────────────────────────── */

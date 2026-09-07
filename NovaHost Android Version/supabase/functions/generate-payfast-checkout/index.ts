@@ -229,6 +229,23 @@ serve(async (req: Request) => {
     // The six digits from request-device-move's email. Only a move needs one.
     const moveCode = String(body.move_code ?? "").trim();
 
+    // Which client is paying, so payment-redirect knows what to send the
+    // browser back to. Android has a `metahost://` scheme to deep link into;
+    // the iOS PWA has nothing of the kind and needs a real page instead.
+    //
+    // Defaults to android because that is what every build predating this
+    // parameter sends, and their deep link must keep working. Anything
+    // unrecognised falls back to "web", which is the harmless branch -- a page
+    // rather than a scheme handoff that would dead-end in the browser.
+    //
+    // Constrained to a known token rather than interpolated: this value is
+    // pasted into return_url and cancel_url, which are then signed, and a raw
+    // string there is an attacker-shaped hole in the Payfast payload.
+    const rawPlatform = String(body.platform ?? "android").trim().toLowerCase();
+    const platform = rawPlatform === "android"
+      ? "android"
+      : (rawPlatform === "ios" ? "ios" : "web");
+
     if (!email || !androidId) {
       return json({ error: "Missing email or android_id" }, 400);
     }
@@ -369,8 +386,12 @@ serve(async (req: Request) => {
     const payload: Record<string, string> = {
       merchant_id: MERCHANT_ID,
       merchant_key: MERCHANT_KEY,
-      return_url: `${novaHostUrl}/functions/v1/payment-redirect?status=success`,
-      cancel_url: `${novaHostUrl}/functions/v1/payment-redirect?status=cancel`,
+      // `platform` rides along so the redirect can tell an android deep link
+      // from a PWA that needs a page. It is inside the signed value, which is
+      // fine -- payfastEncode escapes the whole URL identically for the hash
+      // and for the outgoing query, exactly as it already did for `status`.
+      return_url: `${novaHostUrl}/functions/v1/payment-redirect?status=success&platform=${platform}`,
+      cancel_url: `${novaHostUrl}/functions/v1/payment-redirect?status=cancel&platform=${platform}`,
       notify_url: `${novaHostUrl}/functions/v1/payfast-webhook`,
       email_address: email,
       // amount BEFORE item_name. This object's declaration order IS the

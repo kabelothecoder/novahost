@@ -4,9 +4,23 @@
     {
       "name": "mentor-portal",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "MetaHost Portal/lumin-dash",
       "port": 8080
+    },
+    {
+      "name": "novahost-ios",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "cwd": "MetaHost iOS Version",
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

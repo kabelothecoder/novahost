@@ -9,6 +9,14 @@
     <div class="scanner-scroll">
       <div class="scanner-content">
 
+        <!-- The add-on is sold here, in front of the thing it unlocks, rather
+             than as a plan card on the sign-in paywall. Everything below is
+             hidden until it is owned — there is no point offering a scan the
+             server will refuse. -->
+        <ScannerPaywall v-if="!hasScanner" @unlocked="onUnlocked" />
+
+        <template v-else>
+
         <!-- Scan Zone -->
         <div
           class="scan-zone"
@@ -75,20 +83,41 @@
           </div>
         </Transition>
 
+        </template>
+
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { authState } from '../services/authService'
+import ScannerPaywall from '../components/ScannerPaywall.vue'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+
+/**
+ * The add-on gate.
+ *
+ * Read from `authState` rather than a local copy so the whole app agrees:
+ * every entitlement answer refreshes it, including the one ScannerPaywall
+ * makes after a purchase settles. `analyze-chart` is the real authority — this
+ * only decides what to draw, and a client that lied to itself here would still
+ * be refused by the server.
+ */
+const hasScanner = computed(() => authState.hasScanner)
 
 const fileInput = ref(null)
 const previewImage = ref(null)
 const isScanning = ref(false)
 const verdict = ref(null)
+
+/** The purchase landed. Nothing to do but let the gate above fall away. */
+function onUnlocked () {
+  previewImage.value = null
+  verdict.value = null
+}
 
 function triggerFile() { if (!isScanning.value) fileInput.value.click() }
 

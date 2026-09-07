@@ -16,6 +16,17 @@ const routes = [
     meta: { public: true }
   },
   {
+    path: '/payment',
+    name: 'payment',
+    component: () => import('../views/PaymentView.vue'),
+  },
+  {
+    path: '/payment-return',
+    name: 'payment-return',
+    component: () => import('../views/PaymentReturnView.vue'),
+    meta: { public: true }
+  },
+  {
     path: '/onboarding',
     name: 'onboarding',
     component: () => import('../views/OnboardingView.vue'),
@@ -73,9 +84,28 @@ export const router = createRouter({
   routes,
 })
 
+/**
+ * The gate and the purchase screen it hands off to.
+ *
+ * Both have to be reachable while unverified, or the gate is a dead end for
+ * anyone who has not paid — which, until the entitlement check was fixed, was
+ * everybody.
+ */
+const GATE_ROUTES = ['unlock', 'payment']
+
 // ── Smart Shield Guard ────────────────────────────────────────────────────────
 router.beforeEach(async (to, from, next) => {
   if (to.name === 'splash') return next()
+
+  // PayFast's landing page, and the one route nothing may redirect away from
+  // — not even onboarding.
+  //
+  // It is reached in a browser that has usually never seen this app: a
+  // standalone PWA breaks out to Safari for the cross-origin checkout, and
+  // Safari keeps its own storage bucket, so ONBOARDING_COMPLETED is missing
+  // and the check below would sit a paying customer down in front of the
+  // setup wizard. The screen verifies nothing, so there is nothing to guard.
+  if (to.name === 'payment-return') return next()
 
   // Check if onboarding is completed
   const onboardingCompleted = localStorage.getItem('ONBOARDING_COMPLETED') === 'true'
@@ -84,7 +114,7 @@ router.beforeEach(async (to, from, next) => {
   }
   if (to.name === 'onboarding') return next()
 
-  if (to.meta.public && to.name !== 'unlock') {
+  if (to.meta.public && !GATE_ROUTES.includes(to.name)) {
     return next()
   }
 
@@ -95,12 +125,18 @@ router.beforeEach(async (to, from, next) => {
 
   // Check Supabase subscription state
   if (!authState.isVerified) {
-    if (to.name !== 'unlock') {
+    if (!GATE_ROUTES.includes(to.name)) {
       return next({ name: 'unlock' })
     }
     return next()
   }
   if (to.name === 'unlock') return next({ name: 'home' })
+
+  // Payment stays reachable after the gate opens so the setup steps below
+  // cannot bounce a verified user out of a purchase already in flight. The
+  // R349 scanner no longer routes here — it is sold inside the scanner screen
+  // by ScannerPaywall.vue, which runs its own checkout in place.
+  if (to.name === 'payment') return next()
 
   const parentSetupCompleted = localStorage.getItem('PARENT_SETUP_COMPLETED') === 'true'
   if (!parentSetupCompleted && to.name !== 'parent-setup') {
