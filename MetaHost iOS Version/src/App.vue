@@ -3,7 +3,7 @@
 
     <!-- Persistent background loop (subtle, blended) -->
     <video
-      v-if="!isLightRoute"
+      v-if="!isLightRoute && !isCommandRoute"
       autoplay
       muted
       loop
@@ -14,18 +14,41 @@
       <source :src="'/bg_loop.mp4'" type="video/mp4">
     </video>
 
-    <!-- Router View with slide-scale spring transition -->
+    <!-- Router View with a cross-fade transition.
+         NOT `mode="out-in"` — that mounts the incoming view only after
+         the outgoing one's leave transition ends, and Vue waits on
+         requestAnimationFrame for that. In any context where rAF is
+         throttled (a backgrounded tab, an occluded webview) the leave
+         never resolves, the enter never fires, and the app is left
+         blank with no view mounted at all. The default overlapping mode
+         mounts the new view immediately; the old one fades out over it. -->
     <RouterView v-slot="{ Component, route }">
-      <Transition name="page" mode="out-in">
+      <Transition name="page">
         <component :is="Component" :key="route.name" />
       </Transition>
     </RouterView>
 
-    <!-- Floating Pulse HUD — hidden on splash & activate -->
-    <FloatingPulseHUD v-if="showDock" />
+    <!-- Floating Pulse HUD — hidden on splash, onboarding and the gate, and on
+         the command-system routes: it pins its own robot avatar at
+         z-index 9999, directly over a Home whose entire subject is
+         already that robot. Two robot portraits on one screen, the
+         floating one landing in the middle of the licence rows. Same
+         reasoning this file already applies to payment-return. -->
+    <FloatingPulseHUD v-if="showDock && !isCommandRoute" />
 
-    <!-- Floating Dock — hidden on splash & activate -->
-    <FloatingDock v-if="showDock" />
+    <!-- Floating Dock — hidden on splash, onboarding and the gate.
+         Wrapped in a `.cmd` context because the dock now uses command
+         tokens and those are declared on `.cmd`, not :root — only the
+         five runtime tokens (accent, glow) are global. The wrapper is a
+         plain div on purpose: a transform or filter here would become
+         the containing block for the dock's `position: fixed`.
+
+         Scheme follows the user only on command routes. The other five
+         views the dock appears on are obsidian and dark-only, so a light
+         dock would be the single pale object on a black screen. -->
+    <div v-if="showDock" class="cmd dock-host" :data-scheme="dockScheme">
+      <FloatingDock />
+    </div>
 
     <!-- iOS Install Card — onboarding teaches this as its own step, so the
          floating card would be a duplicate prompt over the top of it. -->
@@ -60,15 +83,16 @@ import FloatingDock from './components/FloatingDock.vue'
 import FloatingPulseHUD from './components/FloatingPulseHUD.vue'
 import iOSInstallCard from './components/iOSInstallCard.vue'
 import { accent } from './stores/accent.js'
+import { resolvedScheme } from './stores/theme.js'
 
 const route   = useRoute()
 
-// Hide the dock on splash, onboarding AND the activation gate.
-// `payment-return` is in here because it is reached from PayFast in a browser
-// that has usually never seen this app: the dock would offer navigation into
-// an unverified session, and its robot avatar reads as a second, competing
+// Hide the dock on splash, onboarding, the licence-key gate and the payment
+// screen. `payment-return` is in here because it is reached from PayFast in a
+// browser that has usually never seen this app: the dock would offer navigation
+// into an unverified session, and its robot avatar reads as a second, competing
 // subject on a screen that has one thing to say.
-const HIDE_DOCK = ['splash', 'activate', 'onboarding', 'unlock', 'payment', 'payment-return']
+const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return']
 const showDock = computed(() => !HIDE_DOCK.includes(route.name))
 
 // Routes on the light Nova system rather than obsidian glass. The shell's
@@ -77,6 +101,15 @@ const showDock = computed(() => !HIDE_DOCK.includes(route.name))
 // PayFast landing screen.
 const LIGHT_ROUTES = ['onboarding', 'unlock', 'payment', 'payment-return']
 const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
+
+// Routes on the command.css system. They paint their own opaque canvas
+// and their own backdrop, so the shell's bg_loop video is pure waste
+// behind them — and worse, it would be blurred through by every glass
+// card on the screen, which is not the material HomeBackdrop composes.
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets']
+const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
+
+const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))
 
 // Show iOS install hint on first visit (after 3s)
 const showInstall = ref(false)
@@ -108,6 +141,7 @@ if (isIOS && !isStandalone) {
 }
 
 .app-shell {
+  position: relative; /* containing block for the leaving view below */
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -125,6 +159,15 @@ if (isIOS && !isStandalone) {
   100% { background-position: 0% 100%; }
 }
 
+/* The dock's token context, not a surface. `.cmd` paints
+   `background: var(--cc-canvas)`, which on a wrapper whose only child is
+   `position: fixed` would be a zero-height no-op today — but would become
+   a full-bleed canvas the moment anything else was put inside it. */
+.dock-host {
+  background: none;
+  height: 0;
+}
+
 /* Light routes opt out of the obsidian shell entirely. */
 .app-shell-light {
   background: #F4F7F9;
@@ -132,10 +175,19 @@ if (isIOS && !isStandalone) {
   animation: none;
 }
 
-/* ── Page transition ─────────────────────────────────────────────────────── */
+/* ── Page transition ───────────────────────────────────────────────────────
+   Enter and leave overlap (no `mode="out-in"`). The leaving view is taken
+   out of flow and laid over the top so the two do not stack vertically
+   during the ~220ms crossover; it fades and scales away to reveal the
+   entering view beneath it. */
 .page-enter-active,
 .page-leave-active {
   transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.page-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
 }
 .page-enter-from {
   opacity: 0;

@@ -1,17 +1,11 @@
 import { reactive, watch } from 'vue'
 import { secStorage } from '../utils/secStorage.js'
+import { SWATCHES, DEFAULT_ACCENT, swatchByName } from './palette.js'
 
-// 8 accent colors — Crimson is first (default)
-export const SWATCHES = [
-  { name: 'Crimson', hex: '#FF003C', rgb: '255, 0, 60'    },
-  { name: 'Cyan',    hex: '#00E5FF', rgb: '0, 229, 255'   },
-  { name: 'Violet',  hex: '#7C3AED', rgb: '124, 58, 237'  },
-  { name: 'Emerald', hex: '#00FF87', rgb: '0, 255, 135'   },
-  { name: 'Gold',    hex: '#FFB800', rgb: '255, 184, 0'   },
-  { name: 'Ice',     hex: '#A5F3FC', rgb: '165, 243, 252' },
-  { name: 'Plasma',  hex: '#E879F9', rgb: '232, 121, 249' },
-  { name: 'Amber',   hex: '#FB923C', rgb: '251, 146, 60'  },
-]
+// The palette moved to ./palette.js so `theme.js` (command.css) and this
+// store (glass.css) cannot drift apart. Re-exported because nine views
+// and SettingsView import SWATCHES from here — that contract is kept.
+export { SWATCHES }
 
 export const VIDEO_BG_OPTIONS = [
   { id: 'mesh',      name: 'Nebula Mesh',   type: 'canvas' },
@@ -27,8 +21,7 @@ export const VIDEO_BG_OPTIONS = [
 // ── Identity bootstrap from secStorage ─────────────────────────────────────
 // Priority: Robot license accent → user manual pick (which is also stored via secStorage now) → default Amber
 const savedRobotAccent = secStorage.getItem('ACCENT_COLOR')
-const activeAccentName = savedRobotAccent || 'Amber'
-const initialAccent    = SWATCHES.find(s => s.name === activeAccentName) || SWATCHES[0]
+const initialAccent    = swatchByName(savedRobotAccent || DEFAULT_ACCENT)
 
 // Robot identity from license
 const savedRobotName   = secStorage.getItem('ROBOT_NAME')  || 'MetaBot'

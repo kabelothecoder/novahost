@@ -446,7 +446,7 @@ function ringStyle(scale) {
   background: none;
   border: none;
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 16px; /* 16px floor: iOS Safari zooms the viewport on focus below this, and never zooms back */
   outline: none;
 }
 .input-fallback input::placeholder { color: rgba(255,255,255,0.3); }

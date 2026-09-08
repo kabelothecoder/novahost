@@ -193,7 +193,7 @@ h1, h2, h3, h4, h5, h6 {
   padding: 12px 16px;
   color: #E8F0FF;
   font-family: var(--font-mono);
-  font-size: 0.9rem;
+  font-size: 16px; /* 16px floor: iOS Safari zooms the viewport on focus below this, and never zooms back */
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
   -webkit-backdrop-filter: blur(var(--blur-glass));

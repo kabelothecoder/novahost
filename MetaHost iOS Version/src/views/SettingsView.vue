@@ -1,371 +1,377 @@
-﻿<template>
-  <div class="settings-view">
-
-    <header class="screen-header">
-      <h2 class="screen-title">Vibe Engine</h2>
-      <span class="screen-sub">Personalise your NovaHost experience</span>
+<template>
+  <div
+    class="cmd settings"
+    :data-scheme="resolvedScheme"
+    :data-card="theme.cardStyle"
+    :data-motion="theme.motion"
+  >
+    <header class="st-head">
+      <h1 class="cc-title">Settings</h1>
+      <span class="cc-caption">{{ robot.name }}</span>
     </header>
 
-    <div class="settings-scroll">
-
-      <!-- ── LIVE PREVIEW ── -->
-      <div class="preview-card" :style="previewCardStyle">
-        <span class="preview-tag">LIVE PREVIEW</span>
-        <div class="preview-inner">
-          <div class="preview-avatar">
-            <img src="/robot_avatar.png" alt="Preview" />
-            <div class="preview-avatar-ring"></div>
-          </div>
-          <div class="preview-info">
-            <span class="preview-name" :style="{ color: accent.current.hex }">NovaHost EA v6</span>
-            <span class="preview-sub">{{ accent.current.name }} · AI Online</span>
-          </div>
-          <div class="preview-pill" :style="{ borderColor: accent.current.hex + '60', color: accent.current.hex }">
-            <span class="preview-dot" :style="{ background: accent.current.hex }"></span>
-            LIVE
-          </div>
-        </div>
+    <div class="st-body">
+      <!-- ── TOOLS ──────────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Tools</span>
+      <div class="st-group">
+        <button v-for="t in tools" :key="t.to" class="st-row cc-card" @click="go(t.to)">
+          <span class="st-icon" v-html="t.icon"></span>
+          <span class="st-copy">
+            <span class="st-name">{{ t.name }}</span>
+            <span class="cc-caption">{{ t.desc }}</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
       </div>
 
-      <!-- ── ACCENT COLOR ── -->
-      <div class="section-card">
-        <div class="section-head">
-          <span class="section-label">ACCENT COLOR</span>
-          <span class="section-val" :style="{ color: accent.current.hex }">{{ accent.current.name }}</span>
-        </div>
-        <div class="swatch-grid">
+      <!-- ── APPEARANCE ─────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Appearance</span>
+      <div class="st-group">
+        <button class="st-row cc-card" @click="sheetOpen = true">
+          <span class="st-icon" v-html="ICON_LAYERS"></span>
+          <span class="st-copy">
+            <span class="st-name">Interface Style</span>
+            <span class="cc-caption">{{ styleSummary }}</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row cc-card" @click="go('/arrange-widgets')">
+          <span class="st-icon" v-html="ICON_GRID"></span>
+          <span class="st-copy">
+            <span class="st-name">Arrange Widgets</span>
+            <span class="cc-caption">{{ arrangeSummary }}</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+      </div>
+
+      <!-- ── ADVANCED ───────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Advanced</span>
+      <div class="st-group">
+        <div class="st-row cc-card">
+          <span class="st-copy">
+            <span class="st-name">Haptic feedback</span>
+            <span class="cc-caption">Vibrate on actions</span>
+          </span>
           <button
-            v-for="sw in SWATCHES"
-            :key="sw.name"
-            class="swatch-btn"
-            :class="{ active: accent.current.name === sw.name }"
-            :style="{ background: sw.hex }"
-            :title="sw.name"
-            @click="setAccent(sw)"
-          >
-            <svg v-if="accent.current.name === sw.name" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </button>
+            class="st-switch"
+            :class="{ 'is-on': theme.haptics }"
+            role="switch"
+            :aria-checked="theme.haptics"
+            aria-label="Haptic feedback"
+            @click="theme.haptics = !theme.haptics"
+          ><span class="st-knob"></span></button>
         </div>
-        <!-- Color name labels -->
-        <div class="swatch-names">
-          <span
-            v-for="sw in SWATCHES"
-            :key="sw.name + '_label'"
-            class="swatch-name-label"
-            :style="accent.current.name === sw.name ? { color: sw.hex } : {}"
-          >{{ sw.name }}</span>
-        </div>
-      </div>
 
-      <!-- ── BACKGROUND LOOP ── -->
-      <div class="section-card">
-        <div class="section-head">
-          <span class="section-label">BACKGROUND LOOP</span>
-          <span class="section-val">{{ accent.videoBg.name }}</span>
-        </div>
-        <div class="bg-picker-grid">
+        <!-- Reports the browser's real permission state instead of a
+             switch that pretends to own it: once notifications are
+             denied, only the OS can grant them back and a toggle here
+             would be a lie. -->
+        <div class="st-row cc-card">
+          <span class="st-copy">
+            <span class="st-name">Notifications</span>
+            <span class="cc-caption">{{ notifCaption }}</span>
+          </span>
           <button
-            v-for="(bg, i) in VIDEO_BG_OPTIONS"
-            :key="bg.id"
-            class="bg-tile"
-            :class="{ active: accent.videoBg.id === bg.id }"
-            @click="accent.videoBg = bg"
-          >
-            <div class="bg-swatch" :style="bgTileStyle(i)" />
-            <span class="bg-name">{{ bg.name }}</span>
-          </button>
+            v-if="notifPermission === 'default'"
+            class="st-mini"
+            @click="askNotifications"
+          >Enable</button>
+          <span v-else class="cc-chip" :class="{ 'cc-chip-accent': notifPermission === 'granted' }">
+            {{ notifPermission === 'granted' ? 'On' : 'Blocked' }}
+          </span>
+        </div>
+
+        <!-- Credentials. Kept here rather than dropped: the doc's
+             Settings has no place for them, but they are the only way
+             to connect MetaAPI and there is no other screen that
+             collects them. -->
+        <div class="st-row st-row-col cc-card">
+          <span class="st-name">MetaAPI</span>
+          <label class="st-field">
+            <span class="cc-label">Token</span>
+            <input
+              type="password"
+              class="cc-recess st-input"
+              v-model="apiKeys.metaapi"
+              placeholder="sk-…"
+              autocomplete="off"
+              spellcheck="false"
+              @blur="saveKey('METAAPI_TOKEN', apiKeys.metaapi)"
+            />
+          </label>
+          <label class="st-field">
+            <span class="cc-label">Account ID</span>
+            <input
+              type="text"
+              class="cc-recess st-input"
+              v-model="apiKeys.accountId"
+              placeholder="Account ID"
+              autocomplete="off"
+              spellcheck="false"
+              @blur="saveKey('METAAPI_ACCOUNT_ID', apiKeys.accountId)"
+            />
+          </label>
+        </div>
+
+        <div class="st-row st-row-col cc-card">
+          <span class="st-name">ElevenLabs</span>
+          <label class="st-field">
+            <span class="cc-label">API key</span>
+            <input
+              type="password"
+              class="cc-recess st-input"
+              v-model="apiKeys.elevenlabs"
+              placeholder="Optional — the robot falls back to system speech"
+              autocomplete="off"
+              spellcheck="false"
+              @blur="saveKey('ELEVENLABS_API_KEY', apiKeys.elevenlabs)"
+            />
+          </label>
         </div>
       </div>
 
-      <!-- ── DISPLAY SETTINGS ── -->
-      <div class="section-card">
-        <div class="section-head"><span class="section-label">DISPLAY</span></div>
-        <div class="toggle-list">
-          <div v-for="tog in toggles" :key="tog.id" class="toggle-row">
-            <div class="toggle-info">
-              <span class="toggle-name">{{ tog.name }}</span>
-              <span class="toggle-desc">{{ tog.desc }}</span>
-            </div>
-            <button
-              class="toggle-pill"
-              :class="{ on: tog.value }"
-              @click="tog.value = !tog.value"
-              :style="tog.value ? { background: accent.current.hex, boxShadow: `0 0 16px ${accent.current.hex}60` } : {}"
-            >
-              <span class="pill-knob" />
-            </button>
-          </div>
-        </div>
+      <!-- ── ABOUT ──────────────────────────────────────────────────── -->
+      <span class="cc-label st-section">About</span>
+      <div class="st-group">
+        <button class="st-row cc-card" @click="go('/support')">
+          <span class="st-icon" v-html="ICON_HELP"></span>
+          <span class="st-copy">
+            <span class="st-name">Support</span>
+            <span class="cc-caption">Device moves, licence help</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row cc-card st-danger" @click="signOut">
+          <span class="st-copy">
+            <span class="st-name">Sign out</span>
+            <span class="cc-caption">Clears this device's licence and session</span>
+          </span>
+        </button>
       </div>
 
-      <!-- ── API KEYS ── -->
-      <div class="section-card">
-        <div class="section-head"><span class="section-label">API CREDENTIALS</span></div>
-        <div class="api-fields">
-          <div class="form-field">
-            <label class="form-label">METAAPI TOKEN</label>
-            <input type="password" class="field-glass" v-model="apiKeys.metaapi" placeholder="sk-..." @blur="saveKey('METAAPI_TOKEN', apiKeys.metaapi)" />
-          </div>
-          <div class="form-field">
-            <label class="form-label">METAAPI ACCOUNT ID</label>
-            <input type="text" class="field-glass" v-model="apiKeys.accountId" placeholder="Account ID..." @blur="saveKey('METAAPI_ACCOUNT_ID', apiKeys.accountId)" />
-          </div>
-          <div class="form-field">
-            <label class="form-label">ELEVENLABS API KEY</label>
-            <input type="password" class="field-glass" v-model="apiKeys.elevenlabs" placeholder="....." @blur="saveKey('ELEVENLABS_API_KEY', apiKeys.elevenlabs)" />
-          </div>
-        </div>
-      </div>
-
-      <!-- App version footer -->
-      <div class="app-footer">
-        <span class="app-version">NovaHost EA v6 · Build 42</span>
-        <span class="app-copy">© 2025 monga_za</span>
-      </div>
-
+      <p class="cc-caption st-version">NovaHost · {{ version }}</p>
     </div>
+
+    <InterfaceStyleSheet v-if="sheetOpen" @close="sheetOpen = false" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
-import { accent, SWATCHES, VIDEO_BG_OPTIONS } from '../stores/accent.js'
+import { useRouter } from 'vue-router'
+import {
+  theme, resolvedScheme, activeLayout, REORDERABLE, GLOW_MODES,
+} from '../stores/theme.js'
+import { robot } from '../stores/robot.js'
+import { logout } from '../services/authService.js'
+import { haptic } from '../composables/useSpeech.js'
+import InterfaceStyleSheet from '../components/settings/InterfaceStyleSheet.vue'
 
-function setAccent(sw) { accent.current = sw }
+const router = useRouter()
+const sheetOpen = ref(false)
+/* A literal, not a build define: this project has no version metadata
+   wired into the build (package.json is still 0.0.0), and a define
+   pointing at that would print "NovaHost · 0.0.0". */
+const version = 'v6'
 
-const toggles = ref([
-  { id: 'haptic',        name: 'Haptic Feedback',  desc: 'Vibrate on actions',      value: true  },
-  { id: 'reduce',        name: 'Reduce Motion',     desc: 'Disable some animations', value: false },
-  { id: 'darkbg',        name: 'Ultra Dark Mode',   desc: 'Maximum contrast',        value: true  },
-  { id: 'notifications', name: 'Notifications',     desc: 'EA alerts and signals',   value: true  },
-])
+const CHEV = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
+const ICON_LAYERS = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`
+const ICON_GRID = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`
+const ICON_HELP = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4"/><line x1="12" y1="17" x2="12" y2="17"/></svg>`
 
+const tools = [
+  {
+    to: '/scanner', name: 'Chart Scanner', desc: 'AI chart analysis & auto trade',
+    icon: `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><polyline points="7 14 10 11 13 14 17 9"/></svg>`,
+  },
+  {
+    to: '/pairs', name: 'Trading Quotes', desc: 'Live pairs and symbol config',
+    icon: `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+  },
+  {
+    to: '/terminal', name: 'Terminal', desc: 'Broker link and service events',
+    icon: `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+  },
+]
+
+const styleSummary = computed(() => {
+  const glow = GLOW_MODES.find(g => g.id === theme.glowMode)?.name || 'Medium'
+  return `${activeLayout.value.name} · ${theme.accent.name} · ${glow} glow`
+})
+
+const arrangeSummary = computed(() => {
+  const cfg = theme.widgets[theme.layout]
+  if (!cfg) return ''
+  return `${REORDERABLE.length - cfg.hidden.length} shown · ${cfg.hidden.length} hidden`
+})
+
+/* ── Notifications ────────────────────────────────────────────────── */
+const notifSupported = typeof Notification !== 'undefined'
+const notifPermission = ref(notifSupported ? Notification.permission : 'unsupported')
+
+const notifCaption = computed(() => {
+  switch (notifPermission.value) {
+    case 'granted':     return 'Signal and trade alerts are on'
+    case 'denied':      return 'Blocked — turn on in your device settings'
+    case 'unsupported': return 'Not supported on this device'
+    default:            return 'Get alerted when a signal arrives'
+  }
+})
+
+async function askNotifications() {
+  if (!notifSupported) return
+  try {
+    notifPermission.value = await Notification.requestPermission()
+  } catch (err) {
+    console.warn('Notification permission:', err)
+  }
+}
+
+/* ── Credentials ──────────────────────────────────────────────────── */
 const apiKeys = ref({
   metaapi:    localStorage.getItem('METAAPI_TOKEN') || '',
   accountId:  localStorage.getItem('METAAPI_ACCOUNT_ID') || '',
   elevenlabs: localStorage.getItem('ELEVENLABS_API_KEY') || '',
 })
-function saveKey(key, val) { if (val) localStorage.setItem(key, val) }
 
-const previewCardStyle = computed(() => ({
-  borderColor: accent.current.hex + '35',
-  boxShadow: `0 0 28px ${accent.current.hex}15`,
-}))
+/* Writes an empty value too, so clearing a field actually clears the
+   credential. The previous version skipped falsy values, which made a
+   wrong key impossible to remove from the UI. */
+function saveKey(key, val) {
+  const v = (val || '').trim()
+  if (v) localStorage.setItem(key, v)
+  else localStorage.removeItem(key)
+}
 
-function bgTileStyle(i) {
-  const hues = [195, 265, 142, 45, 350, 120, 300, 30]
-  const h = hues[i % hues.length]
-  return { background: `radial-gradient(circle at 40% 40%, hsla(${h},85%,65%,0.6), hsla(${h+40},70%,40%,0.2), #010A15)` }
+function go(to) { haptic(20); router.push(to) }
+
+function signOut() {
+  logout()
+  router.replace({ name: 'unlock' })
 }
 </script>
 
 <style scoped>
-.settings-view {
+.settings {
   width: 100%;
-  min-height: 100dvh;
-  display: flex; flex-direction: column;
-  background: transparent;
-}
-
-.screen-header {
-  padding: calc(env(safe-area-inset-top, 16px) + 16px) 20px 0;
-}
-.screen-title { font-size: 1.3rem; font-weight: 800; color: #E8F0FF; margin: 0; }
-.screen-sub {
-  font-family: 'Courier New', monospace; font-size: 0.65rem;
-  color: rgba(var(--accent-rgb), 0.5); letter-spacing: 0.1em;
-  display: block; margin-top: 2px;
-}
-
-.settings-scroll {
-  flex: 1; overflow-y: auto;
+  height: 100dvh;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  padding: 16px 16px 130px;
-  display: flex; flex-direction: column; gap: 14px;
+  background: var(--cc-canvas);
 }
 
-/* ── Preview ── */
-.preview-card {
-  border-radius: 18px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid transparent;
-  padding: 16px;
-  transition: all 0.4s ease;
-}
-.preview-tag {
-  font-family: 'Courier New', monospace;
-  font-size: 0.56rem; letter-spacing: 0.2em;
-  color: rgba(var(--accent-rgb), 0.45);
-  display: block; margin-bottom: 12px;
-}
-.preview-inner {
-  display: flex; align-items: center; gap: 14px;
-}
-.preview-avatar {
-  position: relative; width: 50px; height: 50px;
-  border-radius: 50%; overflow: visible; flex-shrink: 0;
-}
-.preview-avatar img {
-  width: 100%; height: 100%;
-  border-radius: 50%; object-fit: cover;
-  border: 2px solid rgba(var(--accent-rgb), 0.5);
-}
-.preview-avatar-ring {
-  position: absolute; inset: -5px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(var(--accent-rgb), 0.25);
-  pointer-events: none;
-}
-.preview-info { flex: 1; }
-.preview-name { display: block; font-size: 0.92rem; font-weight: 800; transition: color 0.3s ease; }
-.preview-sub { display: block; font-family: 'Courier New', monospace; font-size: 0.65rem; color: rgba(232,240,255,0.35); margin-top: 2px; }
-.preview-pill {
-  padding: 5px 10px;
-  border-radius: 100px;
-  border: 1px solid;
-  font-family: 'Courier New', monospace;
-  font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em;
-  display: flex; align-items: center; gap: 5px;
-  transition: all 0.3s ease;
-}
-.preview-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-
-/* Sections */
-.section-card {
-  border-radius: 18px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.07);
-  padding: 18px;
-}
-.section-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 16px;
-}
-.section-label {
-  font-family: 'Courier New', monospace;
-  font-size: 0.6rem; letter-spacing: 0.2em;
-  color: rgba(var(--accent-rgb), 0.45);
-}
-.section-val {
-  font-family: 'Courier New', monospace;
-  font-size: 0.75rem; color: rgba(232,240,255,0.55);
-  transition: color 0.3s ease;
+.st-head {
+  padding: calc(var(--cc-safe-top) + 18px) 20px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-/* Swatches */
-.swatch-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
+.st-body {
+  padding: 12px 16px calc(var(--cc-safe-bottom) + 120px);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
-.swatch-btn {
-  aspect-ratio: 1;
-  border-radius: 50%;
-  border: 2.5px solid transparent;
+
+.st-section { margin: 14px 4px 4px }
+.st-group { display: flex; flex-direction: column; gap: 8px }
+
+.st-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
   cursor: pointer;
-  position: relative; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.swatch-btn.active {
-  border-color: rgba(255,255,255,0.85);
-  transform: scale(1.18);
-  box-shadow: 0 0 18px currentColor, 0 4px 12px rgba(0,0,0,0.4);
+.st-row-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 11px;
+  cursor: default;
 }
 
-.swatch-names {
+.st-icon {
+  flex: none;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 8px;
-  margin-top: 6px;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: var(--cc-r-tile);
+  color: var(--cc-accent-text);
+  background: var(--cc-accent-dim);
 }
-.swatch-name-label {
-  font-family: 'Courier New', monospace;
-  font-size: 0.42rem; text-align: center;
-  color: rgba(255,255,255,0.3);
-  transition: color 0.25s ease;
+
+.st-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.st-name {
+  font-size: 14px; font-weight: 600; color: var(--cc-ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.st-chev { flex: none; color: var(--cc-ink-5); display: grid; place-items: center }
 
-/* BG Picker */
-.bg-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+/* ── Switch ──────────────────────────────────────────────────────── */
+.st-switch {
+  flex: none;
+  position: relative;
+  width: 46px; height: 28px;
+  padding: 0;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-r-chip);
+  background: var(--cc-track);
+  cursor: pointer;
 }
-.bg-tile {
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
-  border: 1.5px solid transparent; border-radius: 12px;
-  padding: 5px; cursor: pointer; background: transparent;
-  transition: all 0.25s ease;
+.st-switch.is-on {
+  background: var(--cc-accent);
+  border-color: var(--cc-accent);
+  box-shadow: var(--cc-glow-edge);
 }
-.bg-tile.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
+.st-knob {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--cc-ink);
+  /* transform only — a background/colour transition here reads from a
+     scheme token and would keep the old scheme's value after a swap. */
+  transition: transform 200ms var(--cc-spring);
 }
-.bg-swatch {
-  width: 100%; aspect-ratio: 1; border-radius: 8px;
+.st-switch.is-on .st-knob {
+  transform: translateX(18px);
+  background: var(--cc-accent-ink);
 }
-.bg-name {
-  font-family: 'Courier New', monospace;
-  font-size: 0.52rem; color: rgba(232,240,255,0.4); text-align: center; line-height: 1.2;
-}
-.bg-tile.active .bg-name { color: var(--accent); }
 
-/* Toggles */
-.toggle-list { display: flex; flex-direction: column; gap: 14px; }
-.toggle-row { display: flex; align-items: center; justify-content: space-between; }
-.toggle-info { display: flex; flex-direction: column; }
-.toggle-name { font-size: 0.9rem; color: #E8F0FF; font-weight: 500; }
-.toggle-desc { font-size: 0.68rem; color: rgba(232,240,255,0.33); margin-top: 1px; }
-.toggle-pill {
-  width: 46px; height: 26px; border-radius: 100px;
-  background: rgba(255,255,255,0.1);
-  border: none; cursor: pointer; position: relative;
-  transition: all 0.3s ease; flex-shrink: 0;
+.st-mini {
+  flex: none;
+  padding: 7px 14px;
+  border: none;
+  border-radius: var(--cc-r-chip);
+  background: var(--cc-accent);
+  color: var(--cc-accent-ink);
+  font-family: var(--cc-font);
+  font-size: 12px; font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
 }
-.pill-knob {
-  position: absolute; top: 3px; left: 3px;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: rgba(255,255,255,0.7);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.toggle-pill.on .pill-knob { transform: translateX(20px); background: rgba(0,0,0,0.85); }
 
-/* API Fields */
-.api-fields { display: flex; flex-direction: column; gap: 12px; }
-.form-field { display: flex; flex-direction: column; gap: 6px; }
-.form-label {
-  font-family: 'Courier New', monospace;
-  font-size: 0.58rem; letter-spacing: 0.16em;
-  color: rgba(var(--accent-rgb), 0.5);
+/* ── Fields ──────────────────────────────────────────────────────── */
+.st-field { display: flex; flex-direction: column; gap: 6px }
+.st-input {
+  width: 100%;
+  padding: 11px 13px;
+  /* 16px floor is enforced globally in command.css: anything smaller
+     makes iOS Safari zoom the viewport on focus and never zoom back. */
+  font-family: var(--cc-mono);
 }
-.field-glass {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.09);
-  border-radius: 11px; color: #E8F0FF;
-  padding: 11px 14px;
-  font-size: 0.85rem;
-  font-family: 'Courier New', monospace;
-  width: 100%; outline: none;
-  transition: border-color 0.2s ease;
-}
-.field-glass::placeholder { color: rgba(255,255,255,0.2); }
-.field-glass:focus { border-color: rgba(var(--accent-rgb), 0.5); }
 
-/* Footer */
-.app-footer {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 8px;
-}
-.app-version {
-  font-family: 'Courier New', monospace;
-  font-size: 0.62rem; color: rgba(255,255,255,0.2);
-  letter-spacing: 0.1em;
-}
-.app-copy {
-  font-family: 'Courier New', monospace;
-  font-size: 0.55rem; color: rgba(255,255,255,0.15);
+.st-danger .st-name { color: var(--cc-sell) }
+
+.st-version {
+  margin: 18px 0 0;
+  text-align: center;
+  color: var(--cc-ink-4);
 }
 </style>

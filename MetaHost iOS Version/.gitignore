@@ -16,6 +16,14 @@ dist-ssr
 .env
 .env.local
 
+# Local HTTPS dev certificates.
+# `certs/` holds PRIVATE KEYS (rootCA-key.pem, dev-key.pem). Committing
+# them would publish a CA that is installed as a trusted root on real
+# phones — anyone with the key could then mint a certificate for any
+# domain those devices would silently accept. Regenerate per machine
+# instead; see the note in vite.config.js.
+certs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -26,3 +34,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Dev CA public certificate, staged in public/ only so a phone can
+# download and trust it. Delete it once installed — it has no business
+# in a production build. (Public cert, no key: harmless if it leaks,
+# but it should not ship.)
+public/NovaHost-Dev-CA.crt

@@ -1,0 +1,573 @@
+/* =================================================================
+   NovaHost — HOME COMMAND CENTER
+   Ported from the Claude Design doc "NovaHost Home Customization"
+   (Android/Compose spec) to the iOS PWA.
+
+   Scoped under `.cmd` for the same reason nova.css is scoped under
+   `.nova`: glass.css owns unprefixed globals (--accent, --surface-1,
+   --obsidian) and sets `body { letter-spacing: -0.02em }`, which leaks
+   into anything that does not reset it. Three systems now coexist:
+
+     glass.css   .  obsidian neon    .  --*        .  9 untouched views
+     nova.css    .  Apple light      .  --nv-*     .  onboarding + gate
+     command.css .  command center   .  --cc-*     .  Home + Settings
+
+   Dark is the default scheme. Light is an explicit opt-in, carried on
+   the same element as `data-scheme="light"` — NOT a media query, because
+   the scheme is a stored user setting, not a system preference.
+   ================================================================= */
+
+/* ── Runtime tokens ───────────────────────────────────────────────────
+   These five are written by stores/theme.js as INLINE styles on the
+   document element, so they must be declared on :root and nowhere else.
+
+   They lived on `.cmd` at first, which silently broke them: `.cmd` is a
+   descendant of :root, so its own declaration overrode the inherited
+   runtime value for its whole subtree — the accent picker moved the
+   token on :root and every control inside Home kept painting the
+   stylesheet default. A declaration in `.cmd[data-scheme="light"]`
+   would clobber them the same way, which is why the light block below
+   does not restate the accent: theme.js already resolves accent-text
+   per scheme and is the single authority for all five.               */
+:root {
+  --cc-accent:      #5C9CE6;
+  --cc-accent-rgb:  92, 156, 230;
+  --cc-accent-ink:  #0B0B0D;   /* text ON an accent fill */
+  --cc-accent-text: #5C9CE6;   /* accent used AS text    */
+  --cc-glow:        1;         /* off 0 · soft .5 · medium 1 · intense 1.6 */
+}
+
+.cmd {
+  /* ── Surfaces ──────────────────────────────────────────────────── */
+  --cc-canvas:        #0E0E11;   /* app background                   */
+  --cc-canvas-2:      #131317;   /* raised region, sheet ground      */
+  --cc-card:          #16161A;   /* the doc's solid card             */
+  --cc-card-2:        #1C1C21;   /* pill track, nested fill          */
+  --cc-track:         #1C1C21;
+  --cc-recess:        #101013;   /* input wells — see note below     */
+
+  /* ── Borders ───────────────────────────────────────────────────── */
+  --cc-border:        #26262E;
+  --cc-border-soft:   #202027;
+  --cc-border-strong: #33333D;
+
+  /* ── Ink ───────────────────────────────────────────────────────────
+     Steps 1-4 all clear 4.5:1 against both --cc-canvas and the raised
+     --cc-canvas-2 a sheet sits on, so ANY of them is safe for small
+     text. Step 5 does NOT and is for non-text only — chevrons, rules,
+     disabled marks. Measured, not eyeballed: ink-4 was #6E6E78, which
+     came straight from the design doc's annotation grey and failed at
+     3.68:1 behind every caption and tab label in the app.             */
+  --cc-ink:           #F4F4F6;   /* headings, live values      15.1:1 */
+  --cc-ink-2:         #E8E8EA;   /* body                       13.4:1 */
+  --cc-ink-3:         #9A9AA4;   /* secondary                   6.9:1 */
+  --cc-ink-4:         #8A8A94;   /* captions, labels            5.4:1 */
+  --cc-ink-5:         #6E6E78;   /* NON-TEXT only               3.7:1 */
+
+  /* ── Glass ─────────────────────────────────────────────────────────
+     The doc ships flat #16161A cards. Glass is this port's addition,
+     and it only reads if there is colour behind it — HomeBackdrop is
+     what supplies that. Over flat canvas a dark glass is just a grey
+     panel, which is why --cc-card is kept as the Solid fallback.      */
+  --cc-glass-fill:    rgba(22, 22, 26, 0.62);
+  --cc-glass-blur:    blur(30px) saturate(180%);
+  --cc-glass-thin:    rgba(22, 22, 26, 0.48);
+  --cc-glass-thin-blur: blur(18px) saturate(170%);
+  /* The three edges that sell a material: a bright specular lip on
+     top, a dark seat underneath, a rim around the whole shape. */
+  --cc-glass-lip:     rgba(255, 255, 255, 0.10);
+  --cc-glass-seat:    rgba(0, 0, 0, 0.30);
+  --cc-glass-rim:     rgba(255, 255, 255, 0.09);
+
+  /* ── Accent ────────────────────────────────────────────────────────
+     Derived only. The four source tokens are on :root — see the note
+     at the top of this file for why they must not be restated here.   */
+  --cc-accent-dim:    rgba(var(--cc-accent-rgb), 0.12);
+  --cc-accent-line:   rgba(var(--cc-accent-rgb), 0.40);
+
+  /* ── Glow ──────────────────────────────────────────────────────────
+     Everything glowing derives from the single `--cc-glow` multiplier
+     on :root, so one setting moves the whole screen at once.          */
+  --cc-glow-halo:
+    0 0 calc(20px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.42 * var(--cc-glow))),
+    0 0 calc(48px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.18 * var(--cc-glow)));
+  --cc-glow-edge:
+    0 0 calc(12px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.30 * var(--cc-glow)));
+  --cc-glow-text:
+    0 0 calc(14px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.45 * var(--cc-glow)));
+
+  /* ── Status ────────────────────────────────────────────────────────
+     Buy/sell are deliberately NOT the accent — a user on the crimson
+     accent must still be able to tell a BUY row from a SELL row.      */
+  --cc-buy:           #3FD6A8;
+  --cc-buy-dim:       rgba(63, 214, 168, 0.14);
+  --cc-sell:          #E0544E;
+  --cc-sell-dim:      rgba(224, 84, 78, 0.14);
+  --cc-live:          #3FD6A8;
+  --cc-warn:          #E8A33D;
+  --cc-idle:          #6E6E78;
+
+  /* ── Scrim ─────────────────────────────────────────────────────────
+     The doc's notes call the contrast floor over mentor art
+     "not optional". These are the two gradients that enforce it.      */
+  --cc-scrim-top:     linear-gradient(180deg, rgba(14,14,17,0.86) 0%, rgba(14,14,17,0.55) 44%, transparent 100%);
+  --cc-scrim-bottom:  linear-gradient(0deg,   rgba(14,14,17,0.94) 0%, rgba(14,14,17,0.70) 38%, transparent 100%);
+  --cc-scrim-flat:    rgba(14, 14, 17, 0.58);
+
+  /* ── Elevation ─────────────────────────────────────────────────── */
+  --cc-shadow-card:   0 8px 20px rgba(0, 0, 0, 0.34);
+  --cc-shadow-raised: 0 16px 36px rgba(0, 0, 0, 0.42);
+  --cc-shadow-float:  0 24px 56px rgba(0, 0, 0, 0.50);
+  --cc-shadow-sheet:  0 -12px 40px rgba(0, 0, 0, 0.44);
+
+  /* ── Radius ────────────────────────────────────────────────────── */
+  --cc-r-chip:        999px;
+  --cc-r-card:        18px;
+  --cc-r-card-lg:     22px;
+  --cc-r-sheet:       28px;
+  --cc-r-tile:        12px;
+
+  /* ── Type ──────────────────────────────────────────────────────────
+     SF Pro for UI, monospace for anything a trader reads as a figure —
+     prices, pings, timestamps. Tabular numerals are load-bearing on
+     the signal rows: proportional digits make a column of prices
+     visibly ragged.                                                   */
+  --cc-font:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+              "Segoe UI", system-ui, sans-serif;
+  --cc-mono:  ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* ── Motion — iOS curves ───────────────────────────────────────── */
+  --cc-ease:      cubic-bezier(0.32, 0.72, 0, 1);
+  --cc-ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --cc-spring:    cubic-bezier(0.34, 1.40, 0.64, 1);
+
+  /* ── Safe areas ────────────────────────────────────────────────── */
+  --cc-safe-top:    env(safe-area-inset-top, 0px);
+  --cc-safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  font-family: var(--cc-font);
+  color: var(--cc-ink-2);
+  background: var(--cc-canvas);
+  /* glass.css sets this on body and it leaks. SF Pro is already
+     optically tracked; classes opt back in where they want it. */
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* =================================================================
+   LIGHT SCHEME
+   An explicit opt-in, not prefers-color-scheme. Values come from the
+   nova.css register so the app has one light identity, not two.
+   ================================================================= */
+.cmd[data-scheme="light"] {
+  --cc-canvas:        #F4F7F9;
+  --cc-canvas-2:      #EEF2F7;
+  --cc-card:          #FFFFFF;
+  --cc-card-2:        #F1F5FA;
+  --cc-track:         #EBEEF2;
+  --cc-recess:        #F1F4F8;
+
+  --cc-border:        #E2E8F0;
+  --cc-border-soft:   #E9EDF2;
+  --cc-border-strong: #CBD5E1;
+
+  /* The light scale needed the bigger correction: ink-4 was #8A94A6,
+     a pleasant grey that measured 2.72:1 on this canvas. Each step is
+     darkened one place, and the old ink-4 becomes the non-text step. */
+  --cc-ink:           #14171A;   /* 15.1:1 */
+  --cc-ink-2:         #1A1D20;   /* 14.3:1 */
+  --cc-ink-3:         #46505E;   /*  7.1:1 */
+  --cc-ink-4:         #5C6674;   /*  5.0:1 */
+  --cc-ink-5:         #8A94A6;   /* NON-TEXT only — 2.7:1 */
+
+  --cc-glass-fill:    rgba(255, 255, 255, 0.62);
+  --cc-glass-blur:    blur(36px) saturate(200%);
+  --cc-glass-thin:    rgba(255, 255, 255, 0.54);
+  --cc-glass-thin-blur: blur(18px) saturate(190%);
+  --cc-glass-lip:     rgba(255, 255, 255, 0.75);
+  --cc-glass-seat:    rgba(20, 22, 26, 0.05);
+  --cc-glass-rim:     rgba(255, 255, 255, 0.45);
+
+  /* --cc-accent-ink / --cc-accent-text are deliberately NOT restated
+     here. theme.js resolves both per scheme from the active swatch and
+     writes them to :root; a declaration on this element would win over
+     that inline value and pin light mode to one swatch's colours. */
+
+  --cc-buy:           #238055;
+  --cc-buy-dim:       rgba(47, 163, 107, 0.12);
+  --cc-sell:          #C13A52;
+  --cc-sell-dim:      rgba(214, 69, 93, 0.10);
+  --cc-live:          #238055;
+  --cc-warn:          #A9701F;
+  --cc-idle:          #8A94A6;
+
+  --cc-scrim-top:     linear-gradient(180deg, rgba(244,247,249,0.90) 0%, rgba(244,247,249,0.58) 44%, transparent 100%);
+  --cc-scrim-bottom:  linear-gradient(0deg,   rgba(244,247,249,0.96) 0%, rgba(244,247,249,0.74) 38%, transparent 100%);
+  --cc-scrim-flat:    rgba(244, 247, 249, 0.62);
+
+  --cc-shadow-card:   0 8px 18px rgba(20, 22, 26, 0.10);
+  --cc-shadow-raised: 0 16px 34px rgba(20, 22, 26, 0.14);
+  --cc-shadow-float:  0 24px 52px rgba(20, 22, 26, 0.16);
+  --cc-shadow-sheet:  0 -10px 30px rgba(20, 22, 26, 0.08);
+
+  color: var(--cc-ink-2);
+}
+
+/* =================================================================
+   TRANSITION FREEZE — applied by stores/theme.js around token writes.
+
+   A CSS transition on a property whose value comes from a custom
+   property does NOT re-run when that custom property changes: the
+   element keeps painting the value it had before the change, and not
+   as an interpolation — it settles on the stale value and stays there
+   until something else invalidates it. Verified in this app: with
+   `transition: color` on a button reading var(--cc-ink-2), switching
+   Light -> Dark left the label at #1A1D20 (light ink) while the token
+   on every ancestor already read #E8E8EA.
+
+   Every scheme, accent and glow change therefore repaints inside this
+   class, which is added, flushed, and removed two frames later. The
+   interaction transitions (press, hover) are unaffected because those
+   do not change tokens.
+   ================================================================= */
+.cc-no-transition .cmd,
+.cc-no-transition .cmd *,
+.cc-no-transition .cmd *::before,
+.cc-no-transition .cmd *::after {
+  transition: none !important;
+}
+
+/* The route transition in glass.css is declared `transition: all 0.38s`,
+   and a command-system view's root element IS the transitioned element.
+   `all` covers background-color and every other token-driven property,
+   so a scheme change landing while those classes are on the root
+   animated the canvas — and then stuck on the previous scheme's colour,
+   the same stale-custom-property failure described above but applied to
+   every property at once.
+
+   Narrowed to what a page transition actually needs. The animation is
+   unchanged; only its property list is. */
+.cmd.page-enter-active,
+.cmd.page-leave-active {
+  transition-property: opacity, transform;
+}
+
+/* =================================================================
+   CARD STYLE
+   The doc's Card Style setting, plus Glass as this port's default.
+   Driven by one attribute on the root so a single toggle repaints
+   every surface at once — and so a layout never has to know which
+   style is active.
+   ================================================================= */
+.cc-card {
+  border-radius: var(--cc-r-card);
+  transition: background 240ms var(--cc-ease), box-shadow 240ms var(--cc-ease),
+              border-color 240ms var(--cc-ease);
+}
+
+/* — Glass (default) — */
+.cmd[data-card="glass"] .cc-card,
+.cmd:not([data-card]) .cc-card {
+  background: var(--cc-glass-fill);
+  -webkit-backdrop-filter: var(--cc-glass-blur);
+  backdrop-filter: var(--cc-glass-blur);
+  border: 0.5px solid var(--cc-glass-rim);
+  box-shadow:
+    inset 0  1px 0 var(--cc-glass-lip),
+    inset 0 -1px 0 var(--cc-glass-seat),
+    var(--cc-shadow-raised);
+}
+
+/* — Neon border: every edge glows, surface stays near-opaque so the
+     glow reads as an edge rather than a wash. — */
+.cmd[data-card="neon"] .cc-card {
+  background: var(--cc-card);
+  border: 1px solid var(--cc-accent-line);
+  box-shadow:
+    var(--cc-glow-edge),
+    inset 0 0 calc(18px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.08 * var(--cc-glow))),
+    var(--cc-shadow-card);
+}
+
+/* — Solid: the doc as drawn. — */
+.cmd[data-card="solid"] .cc-card {
+  background: var(--cc-card);
+  border: 1px solid var(--cc-border);
+  box-shadow: var(--cc-shadow-card);
+}
+
+/* No backdrop-filter (older WebKit, some in-app browsers) — fall back
+   to the opaque card so glass never renders as an unreadable smear. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cmd[data-card="glass"] .cc-card,
+  .cmd:not([data-card]) .cc-card {
+    background: var(--cc-card);
+    border: 1px solid var(--cc-border);
+  }
+}
+
+/* Thin material — chips, pills, the nav. Always glass-flavoured
+   regardless of Card Style: these are chrome, not content, and the
+   doc's Solid setting is about data panels. */
+.cc-thin {
+  background: var(--cc-glass-thin);
+  -webkit-backdrop-filter: var(--cc-glass-thin-blur);
+  backdrop-filter: var(--cc-glass-thin-blur);
+  border: 0.5px solid var(--cc-glass-rim);
+  box-shadow:
+    inset 0 1px 0 var(--cc-glass-lip),
+    var(--cc-shadow-card);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cc-thin { background: var(--cc-card-2); border: 1px solid var(--cc-border); }
+}
+
+/* A field inside a glass card cannot be glass itself — a nested
+   backdrop-filter only blurs its parent's flat fill, so there is no
+   second material to see. Draw it as a recess instead: darker than
+   the card, with an inner top shadow. (Same finding as nova.css.) */
+.cc-recess {
+  background: var(--cc-recess);
+  border: 1px solid var(--cc-border-soft);
+  border-radius: var(--cc-r-tile);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.30);
+}
+.cmd[data-scheme="light"] .cc-recess {
+  box-shadow: inset 0 1px 3px rgba(20, 22, 26, 0.06);
+}
+
+/* =================================================================
+   GROUND — the base under a widget stack on an art-forward layout
+
+   A single glass card over mentor art reads correctly: the art is what
+   it refracts. A COLUMN of them does not — the same art shows through
+   every card in the stack, so the robot's face lands in the middle of
+   a licence row and the whole column turns to soup.
+
+   The ground restores an opaque base under the stack while still
+   feathering into the art at its top edge, so the transition from
+   "art" to "content" is a gradient rather than a hard seam. It runs
+   off the bottom of the layout so scrolling never reveals its end.
+   ================================================================= */
+.cc-ground {
+  position: relative;
+  /* Grows to absorb the column's leftover height, so the ground always
+     reaches the bottom of the layout's content box no matter how few
+     widgets are shown. */
+  flex: 1 0 auto;
+
+  /* Escapes the layout's side padding so the ground is full-bleed — one
+     inset from the edges would read as an oversized card rather than as
+     ground. Layouts that use different padding override the variable. */
+  margin-left: calc(-1 * var(--cc-ground-inset, 20px));
+  margin-right: calc(-1 * var(--cc-ground-inset, 20px));
+  padding: 34px var(--cc-ground-inset, 20px) 0;
+
+  /* A real background, NOT an absolutely-positioned pseudo-element.
+     A pseudo overshooting the element (to cover the fixed backdrop
+     below) contributes to the scroll container's scrollable overflow,
+     which added an empty screen-height of scroll past the content. */
+  background: linear-gradient(
+    180deg,
+    transparent 0,
+    var(--cc-canvas) 34px,
+    var(--cc-canvas) 100%
+  );
+}
+
+/* =================================================================
+   TYPE SCALE
+   ================================================================= */
+.cc-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cc-ink-4);
+}
+.cc-label-accent { color: var(--cc-accent-text); }
+
+.cc-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.14;
+  color: var(--cc-ink);
+}
+.cc-heading {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--cc-ink-2);
+}
+.cc-body {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--cc-ink-3);
+  text-wrap: pretty;
+}
+.cc-caption {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--cc-ink-4);
+}
+
+/* Figures. Tabular numerals so a column of prices lines up — without
+   this, proportional digits make the signal rows visibly ragged. */
+.cc-figure {
+  font-family: var(--cc-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+  color: var(--cc-ink);
+}
+.cc-mono {
+  font-family: var(--cc-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--cc-ink-4);
+}
+
+/* =================================================================
+   SCRIM — the contrast floor over mentor art
+   The doc's notes: accent x art x glow multiply into combinations that
+   go illegible, so text over art gets a scrim unconditionally rather
+   than when it "looks like it needs one".
+   ================================================================= */
+.cc-scrim-t,
+.cc-scrim-b {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.cc-scrim-t { top: 0;    height: 42%; background: var(--cc-scrim-top); }
+.cc-scrim-b { bottom: 0; height: 58%; background: var(--cc-scrim-bottom); }
+
+/* For text sitting directly on art with no gradient behind it. */
+.cc-ink-shadow { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55); }
+.cmd[data-scheme="light"] .cc-ink-shadow { text-shadow: 0 1px 10px rgba(255, 255, 255, 0.75); }
+
+/* =================================================================
+   CONTROLS
+   ================================================================= */
+.cc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--cc-r-chip);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--cc-ink-3);
+  background: var(--cc-card-2);
+  border: 1px solid var(--cc-border);
+  white-space: nowrap;
+}
+.cc-chip-accent {
+  color: var(--cc-accent-text);
+  background: var(--cc-accent-dim);
+  border-color: var(--cc-accent-line);
+}
+
+.cc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cc-idle);
+  flex: none;
+}
+.cc-dot-live {
+  background: var(--cc-live);
+  box-shadow: 0 0 10px var(--cc-live);
+  animation: ccPulse 2.2s var(--cc-ease) infinite;
+}
+
+/* The one obvious glowing control the doc asks every layout to have. */
+.cc-ignition {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--cc-font);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: var(--cc-accent-ink);
+  background: var(--cc-accent);
+  border-radius: var(--cc-r-chip);
+  box-shadow: var(--cc-glow-halo);
+  transition: transform 220ms var(--cc-spring), box-shadow 240ms var(--cc-ease),
+              background 240ms var(--cc-ease);
+}
+.cc-ignition:active { transform: scale(0.965); }
+.cc-ignition[data-running="true"] {
+  color: var(--cc-ink);
+  background: var(--cc-sell);
+  box-shadow: 0 0 calc(20px * var(--cc-glow)) var(--cc-sell-dim);
+}
+
+/* =================================================================
+   MOTION
+   ================================================================= */
+@keyframes ccPulse  { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+@keyframes ccUp     { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+@keyframes ccFade   { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ccSheet  { from { opacity: 0; transform: translateY(28px) } to { opacity: 1; transform: none } }
+@keyframes ccHalo   { 0%, 100% { transform: scale(1); opacity: 0.5 } 50% { transform: scale(1.12); opacity: 0.85 } }
+/* Counter-phased drifts for the accent pools behind glass. translate3d
+   keeps them on the compositor so the blur above is not re-rasterised
+   every frame. */
+@keyframes ccDriftA { 0%, 100% { transform: translate3d(0,0,0) scale(1) }    50% { transform: translate3d(4%, -5%, 0) scale(1.13) } }
+@keyframes ccDriftB { 0%, 100% { transform: translate3d(0,0,0) scale(1.08) } 50% { transform: translate3d(-5%, 4%, 0) scale(1) } }
+
+.cc-stagger > * { animation: ccUp 440ms var(--cc-ease) both; }
+.cc-stagger > *:nth-child(1) { animation-delay:  40ms }
+.cc-stagger > *:nth-child(2) { animation-delay:  90ms }
+.cc-stagger > *:nth-child(3) { animation-delay: 140ms }
+.cc-stagger > *:nth-child(4) { animation-delay: 190ms }
+.cc-stagger > *:nth-child(5) { animation-delay: 240ms }
+.cc-stagger > *:nth-child(6) { animation-delay: 290ms }
+.cc-stagger > *:nth-child(7) { animation-delay: 340ms }
+
+/* The OS preference, and the in-app override from the Modes tab. Both
+   are honoured; the in-app one can only ADD calm, never override a
+   system request for it. */
+@media (prefers-reduced-motion: reduce) {
+  .cmd *,
+  .cmd *::before,
+  .cmd *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.cmd[data-motion="reduced"] *,
+.cmd[data-motion="reduced"] *::before,
+.cmd[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* =================================================================
+   iOS FIELD FLOOR
+   Any input under 16px makes Safari zoom the viewport on focus and
+   never zoom back. Six sites in this app were below it once already.
+   ================================================================= */
+.cmd input,
+.cmd textarea,
+.cmd select {
+  font-family: var(--cc-font);
+  font-size: 16px;
+  color: var(--cc-ink);
+}
+.cmd input::placeholder,
+.cmd textarea::placeholder { color: var(--cc-ink-4); }

@@ -178,7 +178,7 @@ const allowedPairs = computed(() => {
   border-radius: 10px;
   color: #E8F0FF;
   padding: 10px 14px;
-  font-size: 0.9rem;
+  font-size: 16px; /* 16px floor: iOS Safari zooms the viewport on focus below this, and never zooms back */
   font-family: 'Courier New', monospace;
   width: 100%;
   outline: none;

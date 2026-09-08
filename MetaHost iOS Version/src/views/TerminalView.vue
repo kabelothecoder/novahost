@@ -325,7 +325,7 @@ function disconnect(id) {
   border-radius: 11px;
   color: #E8F0FF;
   padding: 12px 14px;
-  font-size: 0.9rem;
+  font-size: 16px; /* 16px floor: iOS Safari zooms the viewport on focus below this, and never zooms back */
   font-family: 'Courier New', monospace;
   width: 100%; outline: none;
   transition: border-color 0.2s ease;
