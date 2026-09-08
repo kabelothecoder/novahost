@@ -64,6 +64,13 @@ yarn-error.log*
 # Parked nested-repo git dirs (temporary, restored after the monorepo commit)
 .git_parked/
 
+# ─── MetaHost Portal — its own repo now ───────────────────────────
+# The landing + mentor portal live in github.com/kabelothecoder/Novahost-landing-portal
+# (checked out at "MetaHost Portal/", which has its own .git). This repo no longer
+# tracks that subtree; edit it from inside that folder. Full pre-split history of
+# the folder remains in this repo's log up to commit abb8b07.
+/MetaHost Portal/
+
 # Upload-key coordinates for the release signing config. Never commit.
 keystore.properties
 
