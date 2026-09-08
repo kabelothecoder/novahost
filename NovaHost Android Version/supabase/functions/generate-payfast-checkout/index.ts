@@ -228,6 +228,10 @@ serve(async (req: Request) => {
     const requested = String(body.product ?? "APP").trim().toUpperCase();
     // The six digits from request-device-move's email. Only a move needs one.
     const moveCode = String(body.move_code ?? "").trim();
+    // The mentor-issued key the iOS onboarding gates entry on. Required for an
+    // ios checkout (see the enforcement block below), optional for android/web
+    // to keep their existing flow working. Upper-cased to match `licenses`.
+    const licenseKey = String(body.license_key ?? body.licenseKey ?? "").trim().toUpperCase();
 
     // Which client is paying, so payment-redirect knows what to send the
     // browser back to. Android has a `metahost://` scheme to deep link into;
@@ -265,6 +269,46 @@ serve(async (req: Request) => {
     );
 
     const cleanEmail = email.toLowerCase();
+
+    // ── Licence key: required for ios, validated for anyone who sends one ────
+    //
+    // The iOS onboarding will not show a payment screen until a mentor-issued
+    // key has cleared `validate-license`, so a checkout request from it must
+    // carry that key and it must still be good. Enforced here as well as on the
+    // device because this endpoint is public and the only copy of the rule that
+    // matters is the one running while the money is about to move.
+    //
+    // Android and web are unchanged: they may omit `license_key` entirely. If
+    // they do send one it is still checked and recorded rather than trusted.
+    let validatedLicenseKey: string | null = null;
+    if (licenseKey) {
+      const { data: lic, error: licErr } = await novaHost
+        .from("licenses")
+        .select("status, expires_at")
+        .eq("license_key", licenseKey)
+        .maybeSingle();
+
+      if (licErr) {
+        console.error("[payfast] licence lookup failed:", licErr);
+        return json({ error: "Could not verify your licence key. Try again in a moment." }, 502);
+      }
+
+      const licenceExpired = lic?.expires_at != null && new Date(lic.expires_at) < new Date();
+      if (!lic || lic.status !== "active" || licenceExpired) {
+        return json(
+          { error: "That licence key is not active. Check it and try again.", code: "LICENSE_INVALID" },
+          400,
+        );
+      }
+      validatedLicenseKey = licenseKey;
+    }
+
+    if (platform === "ios" && !validatedLicenseKey) {
+      return json(
+        { error: "A valid licence key is required before checkout.", code: "LICENSE_REQUIRED" },
+        400,
+      );
+    }
 
     const { data: sub, error } = await novaHost
       .from("subscriptions")
@@ -403,6 +447,15 @@ serve(async (req: Request) => {
       custom_str2: androidId,
       custom_str3: cleanEmail,
     };
+
+    // custom_str4 carries the licence key back to payfast-webhook, which stamps
+    // it onto the subscription row as the audit link. Added ONLY when present:
+    // an empty pair here would be dropped from the signature string (blanks are
+    // skipped) but kept in the outgoing query, and a checkout URL whose query
+    // and signature disagree on one character is exactly the failure the
+    // encoder notes above exist to prevent. Sits right after custom_str3 so the
+    // signed field order stays custom_str1..4 in sequence.
+    if (validatedLicenseKey) payload.custom_str4 = validatedLicenseKey;
 
     // Built with the same encoder the signature was hashed with, rather than
     // through URLSearchParams. The two disagree on exactly the characters that

@@ -23,13 +23,44 @@
           </div>
         </div>
 
-        <p v-if="email" class="pay-for">
+        <!-- A move keeps the address the licence is registered to; a new
+             purchase collects it here — the licence key is already proven, this
+             is the account it binds to. -->
+        <p v-if="isMove && email" class="pay-for">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <rect x="2.1" y="4.3" width="15.8" height="11.4" rx="3.2" stroke="currentColor" stroke-width="1.6" />
             <path d="M3.4 6.4 L10 11 L16.6 6.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <span>{{ email }}</span>
         </p>
+
+        <div v-else class="pay-email" :class="{ 'pay-email-bad': emailTouched && !emailValid }">
+          <svg class="pay-email-glyph" width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <rect x="2.1" y="4.3" width="15.8" height="11.4" rx="3.2" stroke="currentColor" stroke-width="1.5" />
+            <path d="M3.4 6.4 L10 11 L16.6 6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <input
+            v-model.trim="email"
+            class="pay-email-input"
+            type="email"
+            inputmode="email"
+            placeholder="you@example.com"
+            autocomplete="email"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="go"
+            aria-label="Email to register your purchase to"
+            :disabled="busy"
+            @blur="emailTouched = true"
+            @input="notice = ''"
+          >
+          <svg v-if="emailValid" class="pay-email-tick" width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <circle cx="10" cy="10" r="9" fill="var(--nv-success)" />
+            <path d="M5.6 10.2 L8.6 13 L14.4 6.9" stroke="#FFFFFF" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </div>
 
         <!-- ── Plans ──────────────────────────────────────────────────────-->
         <div class="pay-plans" role="radiogroup" :aria-label="isMove ? 'Device move' : 'Choose what to buy'">
@@ -149,6 +180,7 @@ import { useRouter } from 'vue-router'
 import { supabase } from '../utils/supabaseClient'
 import { authState, verifySubscription } from '../services/authService'
 import { getDeviceId } from '../utils/deviceId'
+import { secStorage } from '../utils/secStorage'
 import { useKeyboardInset } from '../composables/useKeyboardInset.js'
 import NovaLogoMark from '../components/nova/NovaLogoMark.vue'
 import NovaCta from '../components/nova/NovaCta.vue'
@@ -158,7 +190,16 @@ const router = useRouter()
 const shell = ref(null)
 useKeyboardInset(shell)
 
-const email = computed(() => authState.email || '')
+/**
+ * The address the purchase registers to. The gate now takes a licence key, not
+ * an email, so this screen is where it is collected — prefilled from a previous
+ * attempt (PENDING_EMAIL) or from a returning session's stored address.
+ */
+const email = ref((authState.email || '').toLowerCase())
+const emailTouched = ref(false)
+const emailValid = computed(() =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.value.trim())
+)
 
 /** The gate got a `device_mismatch`: they have paid, just not here. */
 const isMove = computed(() => authState.reason === 'device_mismatch')
@@ -219,7 +260,7 @@ const body = computed(() => {
 const ctaLabel = computed(() => (needsCode.value ? 'Confirm & continue' : 'Continue to secure checkout'))
 
 const canPay = computed(() => {
-  if (!email.value) return false
+  if (!emailValid.value) return false
   if (needsCode.value) return /^\d{6}$/.test(moveCode.value.trim())
   return !!selected.value
 })
@@ -239,12 +280,23 @@ async function startCheckout () {
   notice.value = ''
   noticeBad.value = false
 
+  // Persist the address before leaving for PayFast: iOS breaks the checkout out
+  // to Safari, and a cold start on return re-seeds authState.email from this so
+  // initializeAuth can re-check entitlement without asking for it again.
+  const cleanEmail = email.value.trim().toLowerCase()
+  secStorage.setItem('PENDING_EMAIL', cleanEmail)
+  authState.email = cleanEmail
+
   try {
     const { data, error } = await supabase.functions.invoke('generate-payfast-checkout', {
       body: {
-        email: email.value,
+        email: cleanEmail,
         deviceId: getDeviceId(),
         product: selected.value,
+        // Gates the checkout server-side: generate-payfast-checkout refuses an
+        // ios request that does not carry a valid key, and payfast-webhook
+        // stamps it onto the subscription row as the audit link.
+        license_key: secStorage.getItem('LICENSE_KEY') || undefined,
         // Decides what PayFast sends the browser back to. Android has a
         // `metahost://` scheme to deep link into; we do not, and being sent to
         // one is the "invalid address" page every iOS payer used to land on.
@@ -360,9 +412,11 @@ function onVisible () {
 }
 
 onMounted(() => {
-  // Arriving with no email at all means the gate was skipped; it owns that
-  // input, so send them back rather than growing a second copy of it here.
-  if (!email.value) router.replace({ name: 'unlock' })
+  // Arriving without a validated licence key means the gate was skipped — it
+  // owns that step, and the checkout is refused without one anyway. The router
+  // guard already enforces this; the check here is defence in depth for a
+  // direct hash navigation.
+  if (!secStorage.getItem('LICENSE_KEY')) router.replace({ name: 'unlock' })
   document.addEventListener('visibilitychange', onVisible)
 })
 
@@ -476,6 +530,58 @@ onUnmounted(() => document.removeEventListener('visibilitychange', onVisible))
 }
 .pay-for svg { color: var(--nv-ink-3); }
 .pay-for span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Email field ─────────────────────────────────────────────────────── */
+/* A recess, same vocabulary as the gate's key field: darker fill, inner
+   shadow along the top, specular lip along the bottom. */
+.pay-email {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px auto 0;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(116, 134, 160, 0.13);
+  box-shadow:
+    inset 0  2px 5px rgba(20, 22, 26, 0.07),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.66);
+  transition: border-color 180ms var(--nv-ease-out), background-color 180ms linear, box-shadow 180ms var(--nv-ease-out);
+}
+.pay-email:focus-within {
+  border-color: rgba(92, 156, 230, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 4px rgba(92, 156, 230, 0.15);
+}
+.pay-email-bad,
+.pay-email-bad:focus-within {
+  border-color: rgba(214, 69, 93, 0.6);
+  background: rgba(214, 69, 93, 0.07);
+}
+
+.pay-email-glyph { flex: none; color: var(--nv-ink-3); transition: color 180ms linear; }
+.pay-email:focus-within .pay-email-glyph { color: var(--nv-accent); }
+.pay-email-bad .pay-email-glyph { color: var(--nv-danger); }
+
+.pay-email-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 15px 0;
+  font-family: inherit;
+  /* 16px floor, or iOS Safari zooms the viewport on focus. */
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--nv-ink);
+}
+.pay-email-input::placeholder { color: var(--nv-ink-disabled); }
+.pay-email-input:disabled { opacity: 0.6; }
+
+.pay-email-tick { flex: none; animation: nhPop 320ms var(--nv-spring) both; }
 
 /* ── Plan cards ──────────────────────────────────────────────────────── */
 .pay-plans { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }

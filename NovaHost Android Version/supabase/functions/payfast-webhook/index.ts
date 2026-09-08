@@ -278,6 +278,12 @@ serve(async (req: Request) => {
     const productType = data.custom_str1;   // LIFETIME | SCANNER | REACTIVATION
     const deviceId = data.custom_str2;      // android_id
     const customStr3 = data.custom_str3;    // APP EMAIL (from generate-payfast-checkout)
+    // The licence key the iOS onboarding gated this purchase on. Absent on
+    // android/web checkouts and on any checkout opened before that flow shipped,
+    // so it is optional everywhere below.
+    const licenseKeyFromCheckout = (data.custom_str4 && data.custom_str4.trim())
+      ? data.custom_str4.trim().toUpperCase()
+      : null;
 
     // Use the app's email (custom_str3) if available, fallback to Payfast email
     const appEmail = (customStr3 && customStr3.trim()) ? customStr3 : payfastEmail;
@@ -330,6 +336,11 @@ serve(async (req: Request) => {
         token_issued_at: deviceId ? now : null,
         updated_at: now,
       };
+
+      // The audit link back to the key that gated this purchase (iOS key-first
+      // onboarding). Only written when the checkout carried one, so an
+      // android/web purchase never nulls a value it does not own.
+      if (licenseKeyFromCheckout) upsertPayload.license_key = licenseKeyFromCheckout;
 
       const { data: result, error } = await novaHost
         .from("subscriptions")

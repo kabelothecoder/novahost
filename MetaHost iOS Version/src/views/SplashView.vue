@@ -29,11 +29,10 @@ import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 /**
- * @description SplashView — acts as the entry gate for the app.
- * After 1.5 s it hands off to OnboardingView for new users.
- * The router's Smart Shield guard will intercept and redirect
- * to /activate if the user has already completed onboarding but
- * lacks a valid license, or straight to /home if fully licensed.
+ * @description SplashView — the app's entry point. After 1.5 s it pushes to
+ * /onboarding; the router's Smart Shield guard then takes over and redirects
+ * to /unlock (no validated licence key), /payment (key but unpaid) or /home
+ * (fully in), per the locks in router/index.js.
  */
 const router = useRouter()
 let timer = null

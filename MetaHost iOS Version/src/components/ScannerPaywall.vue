@@ -98,6 +98,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../utils/supabaseClient'
 import { authState, verifySubscription } from '../services/authService'
 import { getDeviceId } from '../utils/deviceId'
+import { secStorage } from '../utils/secStorage'
 
 const emit = defineEmits(['unlocked'])
 
@@ -132,6 +133,10 @@ async function startCheckout () {
         email: email.value,
         deviceId: getDeviceId(),
         product: 'SCANNER',
+        // Every ios checkout carries the licence key that gated entry —
+        // generate-payfast-checkout refuses one that does not. By the time the
+        // scanner is on screen the key is long since stored.
+        license_key: secStorage.getItem('LICENSE_KEY') || undefined,
         // Sends the payer to a page rather than the android `metahost://`
         // deep link, which in Safari is an invalid-address error.
         platform: 'ios',

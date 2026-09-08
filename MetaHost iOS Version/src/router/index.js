@@ -1,6 +1,10 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { secStorage } from '../utils/secStorage.js'
 import { authState, initializeAuth } from '../services/authService.js'
+// TEMPORARY dev-only gate bypass. The `import.meta.env.DEV &&` guard at
+// its call site below makes Rollup drop this import from any production
+// build. Delete this line and the marked block together.
+import { devGateBypassActive } from '../utils/devGate.js'
 
 const routes = [
   {
@@ -33,16 +37,6 @@ const routes = [
     meta: { public: true }
   },
   {
-    path: '/parent-setup',
-    name: 'parent-setup',
-    component: () => import('../views/ParentSetupView.vue'),
-  },
-  {
-    path: '/child-handoff',
-    name: 'child-handoff',
-    component: () => import('../views/ChildHandoffView.vue'),
-  },
-  {
     path: '/home',
     name: 'home',
     component: () => import('../views/HomeView.vue'),
@@ -61,6 +55,11 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),
+  },
+  {
+    path: '/arrange-widgets',
+    name: 'arrange-widgets',
+    component: () => import('../views/ArrangeWidgetsView.vue'),
   },
   {
     path: '/support',
@@ -84,18 +83,31 @@ export const router = createRouter({
   routes,
 })
 
-/**
- * The gate and the purchase screen it hands off to.
- *
- * Both have to be reachable while unverified, or the gate is a dead end for
- * anyone who has not paid — which, until the entitlement check was fixed, was
- * everybody.
- */
-const GATE_ROUTES = ['unlock', 'payment']
-
 // ── Smart Shield Guard ────────────────────────────────────────────────────────
+//
+// Onboarding wizard → licence-key gate (/unlock) → email + PayFast (/payment)
+// → home. Two sequential locks after the wizard:
+//
+//   keyValidated  the mentor-issued key has cleared validate-license
+//   isVerified    a paid, device-matched purchase (check-subscription-status)
+//
+// Neither is skippable and the order is fixed: no key ⇒ /unlock, key but
+// unpaid ⇒ /payment, both ⇒ the app. `/payment` is NOT reachable without a
+// validated key — the checkout itself refuses one that does not carry a key.
 router.beforeEach(async (to, from, next) => {
   if (to.name === 'splash') return next()
+
+  // ── TEMPORARY dev-only gate bypass ─────────────────────────────────
+  // `?devgate=1` (once, from the address bar) waves everything past
+  // onboarding and the licence gate so the redesign can be reviewed on
+  // a device. `import.meta.env.DEV &&` short-circuits to `false` in a
+  // production build, which deletes devGate.js from the bundle. Remove
+  // this whole block and the import above before deploying.
+  if (import.meta.env.DEV && devGateBypassActive(to)) {
+    if (to.name === 'onboarding' || to.name === 'unlock') return next({ name: 'home' })
+    return next()
+  }
+  // ──────────────────────────────────────────────────────────────────
 
   // PayFast's landing page, and the one route nothing may redirect away from
   // — not even onboarding.
@@ -114,7 +126,9 @@ router.beforeEach(async (to, from, next) => {
   }
   if (to.name === 'onboarding') return next()
 
-  if (to.meta.public && !GATE_ROUTES.includes(to.name)) {
+  // Any other public route (none today beyond the ones handled above) is let
+  // through; `unlock` is handled explicitly once auth is known.
+  if (to.meta.public && to.name !== 'unlock') {
     return next()
   }
 
@@ -123,32 +137,29 @@ router.beforeEach(async (to, from, next) => {
     await initializeAuth()
   }
 
-  // Check Supabase subscription state
+  // ── Lock 1: the licence key ───────────────────────────────────────────────
+  // Nothing past the gate is reachable without one — `payment` included, since
+  // generate-payfast-checkout refuses an ios checkout that carries no key.
+  if (!authState.keyValidated) {
+    return to.name === 'unlock' ? next() : next({ name: 'unlock' })
+  }
+  // Key is in — the gate is behind them. Send them on to whichever lock is next.
+  if (to.name === 'unlock') {
+    return next({ name: authState.isVerified ? 'home' : 'payment' })
+  }
+
+  // ── Lock 2: payment ───────────────────────────────────────────────────────
+  // Key validated, no active purchase (or one that lives on another device —
+  // PaymentView reads authState.reason to show buy vs move). Checkout is the
+  // only place to go.
   if (!authState.isVerified) {
-    if (!GATE_ROUTES.includes(to.name)) {
-      return next({ name: 'unlock' })
-    }
-    return next()
+    return to.name === 'payment' ? next() : next({ name: 'payment' })
   }
-  if (to.name === 'unlock') return next({ name: 'home' })
-
-  // Payment stays reachable after the gate opens so the setup steps below
-  // cannot bounce a verified user out of a purchase already in flight. The
-  // R349 scanner no longer routes here — it is sold inside the scanner screen
-  // by ScannerPaywall.vue, which runs its own checkout in place.
-  if (to.name === 'payment') return next()
-
-  const parentSetupCompleted = localStorage.getItem('PARENT_SETUP_COMPLETED') === 'true'
-  if (!parentSetupCompleted && to.name !== 'parent-setup') {
-    return next({ name: 'parent-setup' })
+  // Fully in. Don't strand a verified user on the purchase screen — the
+  // scanner add-on is sold in place by ScannerPaywall.vue, nothing routes here.
+  if (to.name === 'payment') {
+    return next({ name: 'home' })
   }
-  if (to.name === 'parent-setup') return next()
-
-  const childHandoffCompleted = localStorage.getItem('CHILD_HANDOFF_COMPLETED') === 'true'
-  if (!childHandoffCompleted && to.name !== 'child-handoff') {
-    return next({ name: 'child-handoff' })
-  }
-  if (to.name === 'child-handoff') return next()
 
   next()
 })
