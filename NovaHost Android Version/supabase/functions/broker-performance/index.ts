@@ -55,6 +55,47 @@ function baseSymbol(s: unknown): string {
   return String(s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
 }
 
+/** Kept in step with `broker-positions`, `broker-quote` and `metacopier-execute`. */
+const SYMBOL_ALIASES: Record<string, string[]> = {
+  XAUUSD: ['XAUUSD', 'GOLDUSD', 'GOLD'],
+  XAGUSD: ['XAGUSD', 'SILVERUSD', 'SILVER'],
+  NAS100: ['NAS100', 'USTECH', 'USTEC', 'US100', 'NDX100', 'NASDAQ'],
+  US30:   ['US30', 'USA30', 'DJ30', 'WS30', 'DOW'],
+  SPX500: ['SPX500', 'USA500', 'US500', 'SP500'],
+  GER40:  ['GER40', 'GER30', 'DAX40', 'DE40', 'DAX'],
+  UK100:  ['UK100', 'FTSE100'],
+  JP225:  ['JP225', 'JPN225', 'NIKKEI'],
+  BTCUSD: ['BTCUSD', 'BTCUSDT', 'BITCOIN'],
+  ETHUSD: ['ETHUSD', 'ETHUSDT', 'ETHEREUM'],
+  VIX:    ['VIX'],
+}
+
+/**
+ * The canonical NovaHost name for whatever the broker called this instrument.
+ *
+ * A micro account lists gold as `XAUUSDm`, which strips to `XAUUSDM` -- a
+ * string that matches neither the allowance nor the symbol plan, both of
+ * which say `XAUUSD`. Aliases are matched longest-first; the fallback takes
+ * the first six letters of a plain FX pair.
+ */
+function canonicalSymbol(raw: unknown): string {
+  const s = baseSymbol(raw)
+  if (!s) return ''
+
+  const candidates: Array<[string, string]> = []
+  for (const [name, aliases] of Object.entries(SYMBOL_ALIASES)) {
+    for (const a of aliases) candidates.push([a, name])
+  }
+  candidates.sort((x, y) => y[0].length - x[0].length)
+
+  for (const [alias, name] of candidates) {
+    if (s === alias || s.startsWith(alias)) return name
+  }
+
+  if (/^[A-Z]{6}/.test(s)) return s.slice(0, 6)
+  return s
+}
+
 /** Kept byte-identical to `magicFor` in metacopier-execute and broker-positions. */
 function magicFor(eaId: unknown): string {
   const src = String(eaId ?? '')
@@ -210,7 +251,7 @@ Deno.serve(async (req: Request) => {
         return {
           id: String(p?.id ?? ''),
           symbol: String(p?.symbol ?? ''),
-          base: baseSymbol(p?.symbol),
+          base: canonicalSymbol(p?.symbol),
           side: /^Buy/.test(orderType) ? 'BUY' : /^Sell/.test(orderType) ? 'SELL' : '—',
           volume: num(p?.volume),
           open_price: num(p?.openPrice),

@@ -24,6 +24,8 @@ import { computed, defineAsyncComponent } from 'vue'
  * happen for a widget the user never asked for.
  */
 const REGISTRY = {
+  openTrades:   () => import('./widgets/OpenTradesWidget.vue'),
+  systemHealth: () => import('./widgets/SystemHealthWidget.vue'),
   robotList:    () => import('./widgets/RobotListWidget.vue'),
   fleetStatus:  () => import('./widgets/FleetStatusWidget.vue'),
   voiceConsole: () => import('./widgets/VoiceConsoleWidget.vue'),

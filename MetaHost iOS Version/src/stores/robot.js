@@ -49,10 +49,29 @@ export const robot = reactive({
    * the layouts omit the line rather than inventing one.
    */
   mentor: null,
+
+  /**
+   * Robot build version, for v2's "verified v6" badge on the hero art.
+   *
+   * Null until a licence supplies one — the doc's "v6" is sample copy.
+   * A hardcoded constant here would put a verification mark on every
+   * install claiming a version nothing checked, which is worse than no
+   * badge: the badge's whole meaning is that the licence vouched for it.
+   */
+  version: null,
 })
 
-/** Placeholder art. The doc's art modes all need *something* to crop. */
-export const FALLBACK_AVATAR = '/robot_avatar.png'
+/**
+ * Placeholder art. The doc's art modes all need *something* to crop.
+ *
+ * v2 of the design doc replaces the robot entirely — `assets/new_avatar.jpg`
+ * there, shipped here as `/robot_avatar_v2.jpg`. The swap is not just a
+ * filename: the old PNG was wide and top-heavy (767 KB), the new one is a
+ * 576x1024 PORTRAIT at 73 KB. Every crop tuned for the old aspect —
+ * `object-position: 50% 38%` — was pulling the frame down past the
+ * subject's face on a 9:16 source, so those move with it.
+ */
+export const FALLBACK_AVATAR = '/robot_avatar_v2.jpg'
 
 export const activeEa = computed(() =>
   robot.eaList.find(e => e.id === robot.activeEaId) || robot.eaList[0] || null

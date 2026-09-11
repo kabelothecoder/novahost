@@ -62,6 +62,13 @@ const routes = [
     component: () => import('../views/ArrangeWidgetsView.vue'),
   },
   {
+    /* The doc's danger screen. A route rather than a row in Settings so
+       the list of what gets erased can be read before anything is armed. */
+    path: '/sign-out',
+    name: 'sign-out',
+    component: () => import('../views/SignOutView.vue'),
+  },
+  {
     path: '/support',
     name: 'support',
     component: () => import('../views/SupportView.vue'),
@@ -75,6 +82,14 @@ const routes = [
     path: '/voice',
     name: 'voice',
     component: () => import('../views/VoiceView.vue'),
+  },
+  {
+    /* Open positions, the chart, and what the account has actually done.
+       Everything on it comes from the broker — it is the only place that
+       knows a position exists. */
+    path: '/trades',
+    name: 'trades',
+    component: () => import('../views/TradesView.vue'),
   },
 ]
 

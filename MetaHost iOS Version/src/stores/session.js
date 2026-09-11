@@ -19,7 +19,7 @@
  * them there. Same reasoning as robot.js — one source of truth.
  */
 
-import { reactive } from 'vue'
+import { reactive, computed } from 'vue'
 import { accent } from './accent.js'
 
 export const session = reactive({
@@ -55,6 +55,13 @@ export const session = reactive({
 
   /* ── Terminal events — the doc's Terminal Activity Log widget ───── */
   events: [],
+
+  /** Epoch ms the user last looked at the activity stream. Lives here
+   *  rather than in a layout for the same reason `isRunning` does: the
+   *  Command Deck's bell badge would reset to zero on every layout
+   *  change if the view owned it. Seeded to mount time so the badge
+   *  starts empty instead of counting a session's backlog. */
+  seenEventsAt: Date.now(),
 })
 
 /* ── Derived ─────────────────────────────────────────────────────── */
@@ -96,6 +103,19 @@ export function beatState() {
   return Date.now() - session.lastBeatAt < 90_000 ? 'ok' : 'stale'
 }
 
+/**
+ * Events the user has not looked at yet — the Command Deck's bell badge.
+ *
+ * A genuine `computed`, unlike the two above: it compares two pieces of
+ * REACTIVE state (`events` and `seenEventsAt`) and never reads the clock
+ * at evaluation time, so nothing here can cache against a frozen
+ * `Date.now()`. `pushEvent` stamps `at` when the event happens, which is
+ * what makes that possible.
+ */
+export const unseenEvents = computed(() =>
+  session.events.reduce((n, e) => (e.at > session.seenEventsAt ? n + 1 : n), 0),
+)
+
 /* ── Actions ─────────────────────────────────────────────────────── */
 
 export function startSession() {
@@ -118,4 +138,11 @@ export function pushEvent(text, kind = 'info') {
     kind,
   })
   if (session.events.length > 60) session.events.length = 60
+}
+
+/** Clears the bell badge. Called when the activity stream is actually
+ *  revealed, not when the layout mounts — a badge that clears itself
+ *  before anyone reads it is worse than no badge. */
+export function markEventsSeen() {
+  session.seenEventsAt = Date.now()
 }

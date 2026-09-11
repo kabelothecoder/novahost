@@ -106,7 +106,16 @@ const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 // and their own backdrop, so the shell's bg_loop video is pure waste
 // behind them — and worse, it would be blurred through by every glass
 // card on the screen, which is not the material HomeBackdrop composes.
-const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets']
+// `pairs` and `scanner` joined with their rewrites: both are command-system
+// screens now, and FloatingPulseHUD's z-index 9999 robot portrait was landing
+// in the middle of the allowance grid on one and over the verdict card on the
+// other — the same bleed-through this list already exists to stop on Home.
+// `sign-out` is a command-system screen too, and the HUD portrait landed
+// squarely on the list of what gets erased.
+// `trades` is the same story with the highest stakes yet: the portrait sat
+// directly over the equity figure, so the one number the screen exists to
+// report was the one thing covered up.
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades']
 const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
 
 const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))

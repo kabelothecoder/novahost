@@ -1,5 +1,56 @@
 <template>
-  <div class="pod" :class="`pod-${variant}`">
+  <!--
+    ORBIT — v2's Classic Core / Neon Frame treatment.
+
+    The doc replaces the pill with a 78px disc flanked by two quiet
+    satellites, all inside one glass card. Kept as a separate branch
+    rather than restyling the pill, because the pill is still what
+    Focus Engine and Full-Bleed draw and the two are not interchangeable
+    shapes.
+  -->
+  <div v-if="variant === 'orbit'" class="orbit cc-card">
+    <button class="orbit-side" @click="goQuotes">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+      <span>Pairs</span>
+    </button>
+
+    <button
+      ref="btn"
+      class="orbit-core"
+      :data-running="session.isRunning"
+      :aria-pressed="session.isRunning"
+      :aria-label="session.isRunning ? 'Stop robot' : 'Start robot'"
+      @click="toggle"
+    >
+      <svg v-if="!session.isRunning" width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M8 5v14l11-7z" />
+      </svg>
+      <svg v-else width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
+      </svg>
+      <span class="orbit-core-label">{{ session.isRunning ? 'STOP' : 'START' }}</span>
+    </button>
+
+    <button class="orbit-side" @click="$emit('assets')">
+      <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" /><line x1="12" y1="16" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12.01" y2="8" />
+      </svg>
+      <span>Info</span>
+    </button>
+
+    <span class="orbit-status cc-mono">
+      <span class="cc-dot" :class="{ 'cc-dot-live': session.isRunning }"></span>
+      {{ statusLine }}
+    </span>
+  </div>
+
+  <div v-else class="pod" :class="`pod-${variant}`">
     <!-- The one obvious glowing control the doc asks every layout to
          have. Everything else in the pod is secondary by construction. -->
     <button
@@ -24,7 +75,11 @@
       {{ statusLine }}
     </span>
 
-    <div class="pod-actions">
+    <!-- Command Deck draws its own four-up action centre, so the pod's
+         built-in pair would be a second, shorter copy of it directly
+         above. Hidden with v-if rather than CSS so the buttons leave
+         the tab order too. -->
+    <div v-if="variant !== 'bare'" class="pod-actions">
       <button class="pod-btn" @click="goQuotes">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -57,7 +112,7 @@ import { robot } from '../../../stores/robot.js'
 import { useSpeech, haptic } from '../../../composables/useSpeech.js'
 
 defineProps({
-  variant: { type: String, default: 'full' }, // 'full' | 'compact'
+  variant: { type: String, default: 'full' }, // 'full' | 'compact' | 'bare' | 'orbit'
 })
 const emit = defineEmits(['assets', 'toast'])
 
@@ -114,6 +169,112 @@ function goQuotes() {
 </script>
 
 <style scoped>
+/* ══ ORBIT ══════════════════════════════════════════════════════════
+   One glass card: two satellites and a disc, with the status line
+   spanning underneath. Grid rather than flex so the disc is centred on
+   the CARD, not on the space left over by the satellites — the two
+   labels are different widths ("Pairs" / "Info"), and with flex the
+   glowing control ends up a few pixels off-axis, which is visible
+   precisely because it is the one thing that glows.               */
+.orbit {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-items: center;
+  row-gap: 12px;
+  width: 100%;
+  padding: 16px 14px 14px;
+}
+
+.orbit-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* The disc is unmissable; these must still be reachable. */
+  min-width: 64px;
+  min-height: 58px;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  border-radius: var(--cc-r-tile);
+  color: var(--cc-ink-2);
+  cursor: pointer;
+  transition: transform 200ms var(--cc-spring);
+}
+.orbit-side:active { transform: scale(0.94) }
+.orbit-side span {
+  font-family: var(--cc-font);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--cc-ink-3);
+}
+
+/* The disc. A radial accent core over a dark well, ringed and haloed —
+   the doc's "one obvious glowing control". */
+.orbit-core {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: 1.5px solid var(--cc-accent);
+  background:
+    radial-gradient(circle at 50% 42%,
+      rgba(var(--cc-accent-rgb), 0.30) 0%,
+      rgba(var(--cc-accent-rgb), 0.10) 46%,
+      rgba(0, 0, 0, 0.72) 100%);
+  color: #FFF;
+  cursor: pointer;
+  box-shadow: var(--cc-glow-halo);
+  transition: transform 220ms var(--cc-spring), box-shadow 240ms var(--cc-ease),
+              border-color 240ms var(--cc-ease);
+}
+.orbit-core:active { transform: scale(0.955) }
+
+/* Running is a STOP affordance, so it leaves the accent entirely —
+   a red disc must not still be wearing the mentor's colour. */
+.orbit-core[data-running="true"] {
+  border-color: var(--cc-sell);
+  background:
+    radial-gradient(circle at 50% 42%,
+      rgba(224, 84, 78, 0.34) 0%,
+      rgba(224, 84, 78, 0.12) 46%,
+      rgba(0, 0, 0, 0.74) 100%);
+  box-shadow: 0 0 calc(26px * var(--cc-glow)) var(--cc-sell-dim);
+}
+
+.orbit-core-label {
+  font-family: var(--cc-font);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Spans all three columns, under the row. */
+.orbit-status {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-ink-3);
+}
+
+/* The disc keeps white ink on both schemes: its own well is dark in
+   light mode too, so the light scheme's ink tokens would vanish. */
+.cmd[data-scheme="light"] .orbit-core,
+.cmd[data-scheme="light"] .orbit-core-label { color: #FFF }
+
 .pod {
   display: flex;
   flex-direction: column;

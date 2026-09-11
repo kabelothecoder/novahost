@@ -26,11 +26,15 @@ import { accent } from './accent.js'
 /* ── Registries ──────────────────────────────────────────────────── */
 
 /**
- * The five layouts, in the order the picker shows them.
+ * The layouts, in the order the picker shows them.
  * `defaultArt` is the art mode each one is drawn around in the doc —
  * art mode is stored per layout, so switching layout restores the art
  * treatment that layout was designed for rather than carrying the last
  * one across.
+ *
+ * Command Deck is the one addition to the doc's five. It defaults to
+ * `avatar` for the same reason Signal Feed does: it leads with figures,
+ * and full-bleed art under a bento of glass cards is unreadable.
  */
 export const LAYOUTS = [
   { id: 'classic', name: 'Classic Core',  blurb: 'Reworked · text bottom nav', defaultArt: 'avatar' },
@@ -38,6 +42,7 @@ export const LAYOUTS = [
   { id: 'bleed',   name: 'Full-Bleed Art', blurb: 'The marketing screen',       defaultArt: 'bleed'  },
   { id: 'neon',    name: 'Neon Frame',    blurb: 'Circular art · text nav',     defaultArt: 'framed' },
   { id: 'feed',    name: 'Signal Feed',   blurb: 'Stats · live mentor signals', defaultArt: 'avatar' },
+  { id: 'deck',    name: 'Command Deck',  blurb: 'Bento · health, actions, activity', defaultArt: 'avatar' },
 ]
 
 export const ART_MODES = [
@@ -53,6 +58,8 @@ export const ART_MODES = [
 export const WIDGETS = [
   { id: 'robotHero',    name: 'Robot Hero',           desc: 'Art, name, mentor credit',        pinned: true  },
   { id: 'ignitionPod',  name: 'Ignition Pod',         desc: 'Quotes · Start/Stop · Asset Hub', pinned: true  },
+  { id: 'openTrades',   name: 'Open Trades',          desc: 'Live positions and floating P/L', pinned: false },
+  { id: 'systemHealth', name: 'System Health',        desc: 'Readiness score across checks',   pinned: false },
   { id: 'robotList',    name: 'Robot List',           desc: 'Licence-bound robots + connect',  pinned: false },
   { id: 'fleetStatus',  name: 'Fleet Status',         desc: 'Uptime · ping · heartbeat',       pinned: false },
   { id: 'voiceConsole', name: 'Voice Console',        desc: 'Waveform, push to talk',          pinned: false },
@@ -68,6 +75,121 @@ export const GLOW_MODES = [
   { id: 'medium',  name: 'Medium',  blurb: 'Balanced shine',       value: 1    },
   { id: 'intense', name: 'Intense', blurb: 'Full neon blast',      value: 1.6  },
 ]
+
+/**
+ * Gradient accents — the doc's six, with two retuned and an Off default.
+ *
+ * Values are rebuilt from the NovaHost swatches wherever the doc's ramp
+ * had an equivalent: its palette is the one palette.js replaced, for the
+ * reason recorded there. Rust keeps the doc's own values — no NovaHost
+ * swatch sits in that register, and "deep and matte" is the point of it.
+ *
+ * `ink` is the text colour ON the ramp, and it is MEASURED at five
+ * points across the ramp rather than at its two stops: text spans the
+ * whole gradient, and the middle of a two-stop ramp is not guaranteed to
+ * sit between its ends once both are in linear light. Two of the doc's
+ * six failed as drawn:
+ *
+ *   Forest  #3FA96B->#1C5638 failed with EVERY ink — 2.28 against black,
+ *           2.96 against white. Its midrange lands in the dead zone
+ *           where neither works, which picking a side does not fix.
+ *           Scaled to 0.70 of its own luminance; white is now 5.53.
+ *   Indigo  #4C6BFF->#5C9CE6 scraped 4.55 with black — a pass, but
+ *           inside the rounding of the floor. Its dark stop is lifted
+ *           20% toward periwinkle; black is now 5.15.
+ *
+ * Off is first and default, so an update repaints nobody's screen.
+ */
+export const GRADIENTS = [
+  { id: 'off',    name: 'Off',    blurb: 'Flat accent, no ramp', css: null,                                     ink: null      },
+  { id: 'nebula', name: 'Nebula', blurb: 'Blue into violet',     css: 'linear-gradient(135deg,#5C9CE6,#C77BE0)', ink: '#0B0B0D' }, //  6.63
+  { id: 'tide',   name: 'Tide',   blurb: 'Mint into cyan',       css: 'linear-gradient(135deg,#3FD6A8,#5AC8DE)', ink: '#0B0B0D' }, // 10.07
+  { id: 'ember',  name: 'Ember',  blurb: 'Coral into amber',     css: 'linear-gradient(135deg,#E0544E,#E8A33D)', ink: '#0B0B0D' }, //  5.19
+  { id: 'rust',   name: 'Rust',   blurb: 'Deep and matte',       css: 'linear-gradient(135deg,#B4472F,#5A1F16)', ink: '#FFFFFF' }, //  5.41
+  { id: 'forest', name: 'Forest', blurb: 'Green, low key',       css: 'linear-gradient(135deg,#2C764B,#143C27)', ink: '#FFFFFF' }, //  5.53
+  { id: 'indigo', name: 'Indigo', blurb: 'Blue into ice',        css: 'linear-gradient(135deg,#5877FF,#5C9CE6)', ink: '#0B0B0D' }, //  5.15
+]
+
+/**
+ * Background tones — the base the DARK scheme is built on.
+ *
+ * Light is untouched. Its canvas is a designed value from the nova.css
+ * register rather than a tint of the dark one, so tinting it would
+ * either break that identity or need a second set of five. The setting
+ * is dark-only and the picker says so rather than silently doing
+ * nothing.
+ *
+ * Each tone carries its whole ladder because the steps are not
+ * derivable from the canvas in CSS. They were generated by applying the
+ * shipped ladder's per-channel deltas to each base — which preserves
+ * both the hue and the separation between steps — then MEASURED against
+ * the ink scale: every tone holds ink 1-4 above 4.5:1 on canvas,
+ * canvas-2, card and card-2. Slate is the ceiling: it is the lightest of
+ * the five and puts ink-4 on card-2 at 4.54, so any tone lighter than
+ * this one needs the ink scale retuned with it.
+ *
+ * The doc's "Ink" (#0A0C10) is deliberately absent — it is within a hair
+ * of the shipped canvas, and a picker holding two entries nobody can
+ * tell apart is a defect, not a choice. Obsidian is that value, first
+ * and default so no existing install is repainted.
+ */
+export const TONES = [
+  { id: 'obsidian',  name: 'Obsidian',   blurb: 'The NovaHost default',
+    canvas: '#0E0E11', canvas2: '#131317', card: '#16161A', card2: '#1C1C21', recess: '#101013',
+    rgb: '14, 14, 17', cardRgb: '22, 22, 26' },
+  { id: 'navy',      name: 'Deep navy',  blurb: 'Cool, blue-black',
+    canvas: '#0C1424', canvas2: '#11192A', card: '#141C2D', card2: '#1A2234', recess: '#0E1626',
+    rgb: '12, 20, 36', cardRgb: '20, 28, 45' },
+  { id: 'slate',     name: 'Slate',      blurb: 'Neutral, lifted',
+    canvas: '#14161A', canvas2: '#191B20', card: '#1C1E23', card2: '#22242A', recess: '#16181C',
+    rgb: '20, 22, 26', cardRgb: '28, 30, 35' },
+  { id: 'aubergine', name: 'Aubergine',  blurb: 'Warm, violet-black',
+    canvas: '#150C1C', canvas2: '#1A1122', card: '#1D1425', card2: '#231A2C', recess: '#170E1E',
+    rgb: '21, 12, 28', cardRgb: '29, 20, 37' },
+  { id: 'teal',      name: 'Teal black', blurb: 'Deep, green-black',
+    canvas: '#08161A', canvas2: '#0D1B20', card: '#101E23', card2: '#16242A', recess: '#0A181C',
+    rgb: '8, 22, 26',  cardRgb: '16, 30, 35' },
+]
+
+/**
+ * Typefaces and colours for the robot's display name.
+ *
+ * Ids only — the VALUES live in command.css, keyed off `data-name-font`
+ * and `data-name-color` on the `.cmd` root, the same contract
+ * CARD_STYLES and GLOW_MODES already have with `data-card`. They cannot
+ * be written from here: their values reference --cc-font, --cc-ink and
+ * --cc-ink-3, which are declared on `.cmd`, and a runtime token written
+ * to :root cannot see them. Keeping the ids here and the values there
+ * also means a preview cannot disagree with the real thing — it sets
+ * the same attribute on a wrapper and puts .cc-name inside it.
+ *
+ * System is first and default. Three of the doc's five faces are
+ * already in the app's font link and cost nothing to offer; the two
+ * serifs are the only addition to the bundle.
+ */
+export const NAME_FONTS = [
+  { id: 'system',   name: 'System',    face: 'SF Pro' },
+  { id: 'oldmoney', name: 'Old money', face: 'Cormorant Garamond' },
+  { id: 'bodoni',   name: 'Bodoni',    face: 'Playfair Display' },
+  { id: 'grotesk',  name: 'Grotesk',   face: 'Space Grotesk' },
+  { id: 'neue',     name: 'Neue',      face: 'Inter' },
+  { id: 'terminal', name: 'Terminal',  face: 'JetBrains Mono' },
+]
+
+/** Named by role rather than by literal colour: the doc's White / Bone /
+ *  Ink only work because the Android screen is dark-only. */
+export const NAME_COLORS = [
+  { id: 'default', name: 'Default', blurb: 'Follows the scheme' },
+  { id: 'accent',  name: 'Accent',  blurb: 'Your accent colour' },
+  { id: 'warm',    name: 'Warm',    blurb: 'Bone on dark'       },
+  { id: 'muted',   name: 'Muted',   blurb: 'Recedes behind art' },
+]
+
+/** Multiplier bounds for the name — not the doc's absolute 24-72sp; see
+ *  the --cc-name-scale note in command.css. 0.8 keeps Signal Feed's 22px
+ *  name from dropping under 18px, 1.4 keeps Focus Engine's 46px clamp
+ *  inside a 390px viewport. */
+export const NAME_SCALE = { min: 0.8, max: 1.4, step: 0.1, default: 1 }
 
 export const CARD_STYLES = [
   { id: 'glass', name: 'Glass',       blurb: 'Frosted, blurs the art' },
@@ -88,15 +210,37 @@ export const SCHEMES = [
  * pinned widgets, Signal Feed is the dense one and shows everything.
  */
 const DEFAULT_HIDDEN = {
-  classic: ['terminalLog'],
-  focus:   ['robotList', 'fleetStatus', 'terminalLog'],
-  bleed:   ['robotList', 'fleetStatus', 'voiceConsole', 'chartScanner', 'terminalLog'],
-  neon:    ['voiceConsole', 'terminalLog'],
+  /* `systemHealth` is hidden in all five of the doc's layouts on
+     purpose: it arrived with Command Deck, and switching it on by
+     default would silently change five screens that were designed and
+     signed off without it. It is one tap away in Arrange Widgets.
+
+     `openTrades` deliberately does NOT follow that precedent, and is
+     absent from every list below so it shows everywhere including
+     `bleed`. The rule systemHealth follows is "a widget added later
+     should not redesign a signed-off screen", and it holds for a
+     readout nobody asked for. Open positions are not that: until this
+     build the product could not tell a user whether their money was in
+     a trade AT ALL — `trade_logs` has no writer and no rows, and the
+     executor forgets an order the moment the broker accepts it.
+     Defaulting the only answer to that question to hidden would ship
+     the feature switched off, and `bleed` is the default layout, so
+     most users would never see it. One extra card on the art screen is
+     the smaller cost. */
+  classic: ['systemHealth', 'terminalLog'],
+  focus:   ['systemHealth', 'robotList', 'fleetStatus', 'terminalLog'],
+  bleed:   ['systemHealth', 'robotList', 'fleetStatus', 'voiceConsole', 'chartScanner', 'terminalLog'],
+  neon:    ['systemHealth', 'voiceConsole', 'terminalLog'],
   /* Signal Feed draws its own fleet strip and terminal section as part
      of the layout, so the widget versions of both would render the
      same numbers twice on one screen. They remain available in Arrange
      Widgets for anyone who wants the card treatment instead. */
-  feed:    ['fleetStatus', 'terminalLog'],
+  feed:    ['systemHealth', 'fleetStatus', 'terminalLog'],
+  /* Command Deck draws the health ring, the four fleet tiles and the
+     activity stream as structure, so all three widget versions would
+     be duplicates. Robot List, Voice Console and Chart Scanner stack
+     below the deck as normal. */
+  deck:    ['systemHealth', 'fleetStatus', 'terminalLog'],
 }
 
 /* ── Persistence ─────────────────────────────────────────────────── */
@@ -113,11 +257,23 @@ const KEY = {
   widgets:  'CC_WIDGETS',
   motion:   'CC_MOTION',
   haptics:  'CC_HAPTICS',
+  gradient: 'CC_GRADIENT',
+  tone:     'CC_TONE',
+  nameFont: 'CC_NAME_FONT',
+  nameSize: 'CC_NAME_SCALE',
+  nameInk:  'CC_NAME_COLOR',
 }
 
 function readEnum(key, options, fallback) {
   const saved = secStorage.getItem(key)
   return options.some(o => o.id === saved) ? saved : fallback
+}
+
+/** NaN — an absent or corrupt stored value — falls to the default
+ *  rather than to `min`, so a first run gets the shipped size. */
+function clampScale(n) {
+  if (!Number.isFinite(n) || n <= 0) return NAME_SCALE.default
+  return Math.min(NAME_SCALE.max, Math.max(NAME_SCALE.min, n))
 }
 
 /** Seeds every layout that has no saved entry, so a layout added later
@@ -140,11 +296,28 @@ function seedWidgets(saved) {
   const out = {}
   for (const l of LAYOUTS) {
     const s = saved?.[l.id]
-    const order = Array.isArray(s?.order) ? s.order.filter(id => REORDERABLE.includes(id)) : []
-    for (const id of REORDERABLE) if (!order.includes(id)) order.push(id)
+    const stored = Array.isArray(s?.order) ? s.order.filter(id => REORDERABLE.includes(id)) : []
+    const order  = [...stored]
     const hidden = Array.isArray(s?.hidden)
       ? s.hidden.filter(id => REORDERABLE.includes(id))
       : [...DEFAULT_HIDDEN[l.id]]
+
+    /* A widget added to the registry AFTER this arrangement was saved
+       appears in neither stored list. Appending it to `order` alone
+       switched it ON for every user who had ever opened Arrange
+       Widgets, while a fresh install correctly got the layout default —
+       the same build showing two different Homes depending on whether
+       the user had touched the screen. It takes the layout's default
+       instead, and is only consulted for a genuinely stored
+       arrangement (`hidden` already came from the defaults otherwise). */
+    for (const id of REORDERABLE) {
+      if (order.includes(id)) continue
+      order.push(id)
+      if (stored.length && DEFAULT_HIDDEN[l.id].includes(id) && !hidden.includes(id)) {
+        hidden.push(id)
+      }
+    }
+
     out[l.id] = { order, hidden }
   }
   return out
@@ -160,6 +333,15 @@ export const theme = reactive({
   layout:     readEnum(KEY.layout, LAYOUTS,     'bleed'),
   art:        seedArt(secStorage.getItem(KEY.art, true)),
   widgets:    seedWidgets(secStorage.getItem(KEY.widgets, true)),
+
+  gradient:   readEnum(KEY.gradient, GRADIENTS,    'off'),
+  tone:       readEnum(KEY.tone,     TONES,        'obsidian'),
+  nameFont:   readEnum(KEY.nameFont, NAME_FONTS,   'system'),
+  nameColor:  readEnum(KEY.nameInk,  NAME_COLORS,  'default'),
+
+  /* Clamped on read, not just on write: a stored value from a build
+     with different bounds must not escape them, and Number('') is 0. */
+  nameScale:  clampScale(Number(secStorage.getItem(KEY.nameSize))),
 
   /* 'full' | 'reduced'. An in-app override, because the OS-level
      prefers-reduced-motion setting is all-or-nothing across every app
@@ -203,6 +385,27 @@ export const glowValue = computed(() =>
 export const activeLayout = computed(() =>
   LAYOUTS.find(l => l.id === theme.layout) || LAYOUTS[0]
 )
+
+export const activeGradient = computed(() =>
+  GRADIENTS.find(g => g.id === theme.gradient) || GRADIENTS[0]
+)
+
+export const activeTone = computed(() =>
+  TONES.find(t => t.id === theme.tone) || TONES[0]
+)
+
+export const activeNameFont = computed(() =>
+  NAME_FONTS.find(f => f.id === theme.nameFont) || NAME_FONTS[0]
+)
+
+export const activeNameColor = computed(() =>
+  NAME_COLORS.find(c => c.id === theme.nameColor) || NAME_COLORS[0]
+)
+
+/** The tone only reaches the screen on dark — light restates its own
+ *  ladder — so anything reporting the setting must say so rather than
+ *  show a value that is not being used. */
+export const toneApplies = computed(() => resolvedScheme.value === 'dark')
 
 /** Art mode for whichever layout is active — the doc's contextual card. */
 export const activeArtMode = computed({
@@ -279,15 +482,46 @@ function writeTokens() {
   root.setProperty('--cc-accent-text', light ? sw.text : sw.hex)
   root.setProperty('--cc-glow', String(glowValue.value))
 
+  /* Accent fill. Off restores the flat accent and its swatch ink — it
+     cannot just be left unset, because these are :root properties and a
+     stale value would survive the change. A gradient brings its OWN
+     measured ink: the swatch's is paired with the swatch, and Rust under
+     black ink is 1.54:1. */
+  const grad = activeGradient.value
+  root.setProperty('--cc-accent-fill',     grad.css || sw.hex)
+  root.setProperty('--cc-accent-fill-ink', grad.ink || sw.ink)
+
+  /* Background tone. Written on every scheme, not only dark: the light
+     block restates the whole ladder literally and ignores these, so
+     leaving them stale would repaint the wrong tone the moment the user
+     switched back. */
+  const tone = activeTone.value
+  root.setProperty('--cc-tone',          tone.canvas)
+  root.setProperty('--cc-tone-2',        tone.canvas2)
+  root.setProperty('--cc-tone-card',     tone.card)
+  root.setProperty('--cc-tone-card-2',   tone.card2)
+  root.setProperty('--cc-tone-recess',   tone.recess)
+  root.setProperty('--cc-tone-rgb',      tone.rgb)
+  root.setProperty('--cc-tone-card-rgb', tone.cardRgb)
+
+  /* Only the scale. The name's face and colour are data attributes on
+     the `.cmd` root — see NAME_FONTS for why they cannot be written
+     here. This one is a bare number, so it is safe. */
+  root.setProperty('--cc-name-scale', String(theme.nameScale))
+
   // PWA status bar / theme colour follows the canvas, not the accent —
   // accent.js points it at the accent for the obsidian views, and Home
-  // reclaims it while mounted.
+  // reclaims it while mounted. It has to follow the tone too, or a navy
+  // app sits under an obsidian status bar.
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', light ? '#F4F7F9' : '#0E0E11')
+  if (meta) meta.setAttribute('content', light ? '#F4F7F9' : tone.canvas)
 }
 
 watch(
-  () => [theme.accent, theme.glowMode, resolvedScheme.value],
+  () => [
+    theme.accent, theme.glowMode, resolvedScheme.value,
+    theme.gradient, theme.tone, theme.nameScale,
+  ],
   applyTokens,
   { immediate: true }
 )
@@ -305,6 +539,11 @@ watch(() => theme.cardStyle, v => secStorage.setItem(KEY.card,   v))
 watch(() => theme.layout,    v => secStorage.setItem(KEY.layout, v))
 watch(() => theme.motion,    v => secStorage.setItem(KEY.motion, v))
 watch(() => theme.haptics,   v => secStorage.setItem(KEY.haptics, String(v)))
+watch(() => theme.gradient,  v => secStorage.setItem(KEY.gradient, v))
+watch(() => theme.tone,      v => secStorage.setItem(KEY.tone,     v))
+watch(() => theme.nameFont,  v => secStorage.setItem(KEY.nameFont, v))
+watch(() => theme.nameColor, v => secStorage.setItem(KEY.nameInk,  v))
+watch(() => theme.nameScale, v => secStorage.setItem(KEY.nameSize, String(v)))
 watch(() => theme.accentOverridden, v => secStorage.setItem(KEY.override, String(v)))
 watch(() => theme.art,     v => secStorage.setItem(KEY.art,     v), { deep: true })
 watch(() => theme.widgets, v => secStorage.setItem(KEY.widgets, v), { deep: true })
@@ -347,6 +586,31 @@ export const isMentorAccent = computed(() =>
 watch(() => accent.current, (sw) => {
   if (sw && sw.name !== theme.accent.name) theme.accent = swatchByName(sw.name)
 })
+
+/**
+ * Erases every preference this store owns.
+ *
+ * Lives here rather than in the screen that offers it, because KEY is
+ * here: a list copied into a view goes stale the first time a setting is
+ * added, and the failure is silent — the erase quietly leaves something
+ * behind. `secStorage.clear()` is deliberately not used; it drops the
+ * install salt and DEVICE_ID with everything else, and a fresh device id
+ * reads as a new device on the licence.
+ *
+ * The in-memory state is NOT reset. Every value here is watched and
+ * re-persisted on change, so a caller that keeps running would write
+ * some of these straight back; the one caller reloads the app instead.
+ */
+export function clearPreferences() {
+  for (const k of Object.values(KEY)) secStorage.removeItem(k)
+}
+
+/** The only way the name scale should be written. A range input reports
+ *  its value as a STRING, and `theme.nameScale = '1.2'` would persist a
+ *  string that Number() later re-parses fine but `.toFixed()` throws on. */
+export function setNameScale(v) {
+  theme.nameScale = clampScale(Number(v))
+}
 
 export function toggleWidget(layoutId, widgetId) {
   const cfg = theme.widgets[layoutId]

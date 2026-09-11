@@ -103,8 +103,11 @@ const artSrc = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* app_logo-style art is wide and top-heavy; biasing the crop below
-     centre keeps the robot's face in frame on a tall phone. */
+  /* 38%, re-derived for v2's portrait art rather than inherited.
+     The source is 576x1024 (0.5625); a phone viewport is narrower than
+     that, so `cover` fills on HEIGHT and this Y is inert on a handset —
+     it only bites in a wide preview pane, where 38% keeps the eyeline
+     just above centre instead of cropping to the hoodie. */
   object-position: 50% 38%;
 }
 

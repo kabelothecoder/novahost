@@ -11,7 +11,7 @@
   <div class="feed">
     <header class="feed-head">
       <div class="feed-id">
-        <h1 class="feed-name">{{ robot.name }}</h1>
+        <h1 class="feed-name cc-name">{{ robot.name }}</h1>
         <span v-if="robot.mentor" class="feed-mentor cc-mono">{{ robot.mentor }}</span>
       </div>
       <button class="feed-cog" aria-label="Interface style" @click="$emit('interface')">
@@ -177,10 +177,10 @@ onMounted(loadRecentSignals)
 .feed-id { min-width: 0 }
 .feed-name {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--cc-name-scale));
   font-weight: 700;
   letter-spacing: -0.015em;
-  color: var(--cc-ink);
+  color: var(--cc-name-color);
   overflow-wrap: anywhere;
 }
 .feed-mentor {

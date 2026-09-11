@@ -12,7 +12,7 @@
     <HomeTopBar @interface="$emit('interface')" @robots="$emit('robots')" />
 
     <div class="focus-body">
-      <h1 class="focus-name cc-ink-shadow">
+      <h1 class="focus-name cc-name cc-ink-shadow">
         <span v-for="(line, i) in nameLines" :key="i" class="focus-line">{{ line }}</span>
       </h1>
 
@@ -90,11 +90,11 @@ const nameLines = computed(() => {
   gap: 2px;
   text-align: center;
   text-transform: uppercase;
-  color: var(--cc-ink);
+  color: var(--cc-name-color);
 }
 
 .focus-line {
-  font-size: clamp(30px, 11vw, 46px);
+  font-size: calc(clamp(30px, 11vw, 46px) * var(--cc-name-scale));
   font-weight: 800;
   line-height: 1.02;
   letter-spacing: -0.03em;
@@ -104,7 +104,12 @@ const nameLines = computed(() => {
 
 /* The first line takes the accent, so the eye lands on the name before
    the control — the doc's own emphasis. */
-.focus-line:first-child { color: var(--cc-accent-text) }
+/* Only while the name colour is Default. This layout tints the first
+   line so the eye lands on the name, but once someone has explicitly
+   PICKED a name colour, a half-accent name reads as a broken setting
+   rather than as a treatment — the accent option still gets both lines
+   accent, which is the same result by a different route. */
+[data-name-color="default"] .focus-line:first-child { color: var(--cc-accent-text) }
 
 .focus-pod { max-width: 300px }
 

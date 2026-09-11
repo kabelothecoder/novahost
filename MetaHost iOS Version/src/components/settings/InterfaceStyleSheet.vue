@@ -43,17 +43,17 @@
             v-for="t in TABS"
             :key="t.id"
             class="isheet-tab"
-            :class="{ 'is-on': tab === t.id }"
+            :class="{ 'is-on': pane === t.id }"
             role="tab"
-            :aria-selected="tab === t.id"
-            @click="tab = t.id"
+            :aria-selected="pane === t.id"
+            @click="pane = t.id"
           >{{ t.name }}</button>
         </div>
       </header>
 
       <div class="isheet-body">
         <!-- ── LAYOUTS ────────────────────────────────────────────── -->
-        <section v-if="tab === 'layouts'" class="isheet-pane">
+        <section v-if="pane === 'layouts'" class="isheet-pane">
           <div class="isheet-grid">
             <LayoutThumb
               v-for="l in LAYOUTS"
@@ -69,7 +69,7 @@
 
           <!-- Art mode is contextual, not a top-level setting: it is
                stored per layout, so this card always edits whichever
-               layout is selected above. Five per-layout settings stay
+               layout is selected above. Six per-layout settings stay
                one control. -->
           <div class="isheet-card cc-card">
             <div class="isheet-card-head">
@@ -103,14 +103,14 @@
         </section>
 
         <!-- ── COLOURS ────────────────────────────────────────────── -->
-        <section v-else-if="tab === 'colours'" class="isheet-pane">
+        <section v-else-if="pane === 'colours'" class="isheet-pane">
           <div class="isheet-card cc-card">
             <div class="isheet-card-head">
               <span class="cc-label">Accent Colour</span>
               <span class="cc-caption">{{ theme.accent.name }}</span>
             </div>
             <p class="cc-caption isheet-card-blurb">
-              Drives every glow, border and control across all five layouts.
+              Drives every glow, border and control across all six layouts.
             </p>
 
             <!-- Offered as unavailable rather than hidden when no licence
@@ -185,6 +185,133 @@
               >{{ c.name }}</button>
             </div>
           </div>
+
+          <!-- Gradient and Background are the doc's NAMED ROWS: name and
+               description beside every colour, nothing clipped. A grid of
+               dots cannot carry these — "Rust" and "Forest" are both dark
+               and unreadable at 22px, and a gradient is not a colour you
+               can sample at one point. -->
+          <span class="cc-label isheet-sec">Gradient accent</span>
+          <p class="cc-caption isheet-sec-blurb">
+            Paints the ignition button. Borders and glows keep the flat accent.
+          </p>
+          <div class="isheet-list cc-card">
+            <button
+              v-for="g in GRADIENTS"
+              :key="g.id"
+              class="isheet-pick"
+              @click="pick('gradient', g.id)"
+            >
+              <span class="isheet-pick-dot" :style="{ background: g.css || theme.accent.hex }"></span>
+              <span class="isheet-pick-copy">
+                <span class="isheet-pick-name">{{ g.name }}</span>
+                <span class="cc-caption">{{ g.blurb }}</span>
+              </span>
+              <span v-if="theme.gradient === g.id" class="isheet-tick" v-html="TICK"></span>
+            </button>
+          </div>
+
+          <span class="cc-label isheet-sec">Background</span>
+          <p class="cc-caption isheet-sec-blurb">
+            <template v-if="toneApplies">Base tone behind every screen.</template>
+            <template v-else>
+              Applies to the dark scheme only — light has its own canvas, so
+              nothing here changes while Light is on.
+            </template>
+          </p>
+          <div class="isheet-list cc-card">
+            <button
+              v-for="t in TONES"
+              :key="t.id"
+              class="isheet-pick"
+              @click="pick('tone', t.id)"
+            >
+              <!-- The tone's own ladder, not just its canvas: two steps
+                   side by side are what tell Obsidian from Slate. -->
+              <span class="isheet-pick-dot" :style="{ background: `linear-gradient(135deg, ${t.canvas} 50%, ${t.card2} 50%)` }"></span>
+              <span class="isheet-pick-copy">
+                <span class="isheet-pick-name">{{ t.name }}</span>
+                <span class="cc-caption">{{ t.blurb }}</span>
+              </span>
+              <span v-if="theme.tone === t.id" class="isheet-tick" v-html="TICK"></span>
+            </button>
+          </div>
+        </section>
+
+        <!-- ── TYPE ───────────────────────────────────────────────── -->
+        <section v-else-if="pane === 'type'" class="isheet-pane">
+          <div class="isheet-card cc-card">
+            <div class="isheet-card-head">
+              <span class="cc-label">Typeface</span>
+              <span class="cc-caption">{{ activeNameFont.name }}</span>
+            </div>
+            <p class="cc-caption isheet-card-blurb">
+              The doc's rule: set it in the real face. Each row is drawn by the
+              same rule Home uses, so a preview cannot lie about the result.
+            </p>
+          </div>
+
+          <div class="isheet-list cc-card">
+            <button
+              v-for="f in NAME_FONTS"
+              :key="f.id"
+              class="isheet-pick"
+              :data-name-font="f.id"
+              @click="pick('nameFont', f.id)"
+            >
+              <span class="isheet-pick-copy">
+                <span class="isheet-sample cc-name">{{ robot.name || 'Nova Edge' }}</span>
+                <span class="cc-caption">{{ f.name }} · {{ f.face }}</span>
+              </span>
+              <span v-if="theme.nameFont === f.id" class="isheet-tick" v-html="TICK"></span>
+            </button>
+          </div>
+
+          <div class="isheet-card cc-card">
+            <div class="isheet-card-head">
+              <span class="cc-label">Name size</span>
+              <span class="cc-caption">{{ theme.nameScale.toFixed(1) }}×</span>
+            </div>
+            <p class="cc-caption isheet-card-blurb">
+              A multiplier, not a fixed size — each layout draws the name at its
+              own scale and this moves all of them together.
+            </p>
+            <input
+              class="isheet-range"
+              type="range"
+              :min="NAME_SCALE.min"
+              :max="NAME_SCALE.max"
+              :step="NAME_SCALE.step"
+              :value="theme.nameScale"
+              aria-label="Name size"
+              @input="setNameScale($event.target.value)"
+            />
+            <div class="isheet-ticks cc-mono">
+              <span>{{ NAME_SCALE.min.toFixed(1) }}×</span>
+              <span>{{ NAME_SCALE.max.toFixed(1) }}×</span>
+            </div>
+          </div>
+
+          <span class="cc-label isheet-sec">Name colour</span>
+          <div class="isheet-list cc-card">
+            <button
+              v-for="c in NAME_COLORS"
+              :key="c.id"
+              class="isheet-pick"
+              :data-name-color="c.id"
+              @click="pick('nameColor', c.id)"
+            >
+              <!-- Painted by --cc-name-color inside this row's own
+                   attribute, so the dot is literally the colour the name
+                   will take. -->
+              <span class="isheet-pick-dot is-name"></span>
+              <span class="isheet-pick-copy">
+                <span class="isheet-pick-name">{{ c.name }}</span>
+                <span class="cc-caption">{{ c.blurb }}</span>
+              </span>
+              <span v-if="theme.nameColor === c.id" class="isheet-tick" v-html="TICK"></span>
+            </button>
+          </div>
         </section>
 
         <!-- ── MODES ──────────────────────────────────────────────── -->
@@ -241,9 +368,12 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   theme, LAYOUTS, ART_MODES, GLOW_MODES, CARD_STYLES, SCHEMES, SWATCHES,
-  activeLayout, activeArtMode, setAccent, useMentorAccent, isMentorAccent, resolvedScheme,
+  GRADIENTS, TONES, NAME_FONTS, NAME_COLORS, NAME_SCALE,
+  activeLayout, activeArtMode, activeNameFont, toneApplies,
+  setAccent, setNameScale, useMentorAccent, isMentorAccent, resolvedScheme,
   REORDERABLE,
 } from '../../stores/theme.js'
+import { robot } from '../../stores/robot.js'
 import { haptic } from '../../composables/useSpeech.js'
 import LayoutThumb from './LayoutThumb.vue'
 
@@ -251,11 +381,23 @@ const emit = defineEmits(['close'])
 const router = useRouter()
 
 const TABS = [
-  { id: 'layouts', name: 'Layouts' },
-  { id: 'colours', name: 'Colours' },
+  { id: 'layouts', name: 'Layout'  },
+  { id: 'colours', name: 'Colour'  },
+  { id: 'type',    name: 'Type'    },
   { id: 'modes',   name: 'Modes'   },
 ]
-const tab = ref('layouts')
+
+/* Which tab to open on. Settings' hub rows each name the tab that owns
+   them, so tapping "Gradient accent" lands on Colour rather than on
+   Layout with the setting somewhere below the fold. Home opens the sheet
+   with no tab and gets the default.
+
+   Validated rather than trusted: an id that no longer exists would
+   render a sheet with every pane hidden and no way to tell why. */
+const props = defineProps({
+  tab: { type: String, default: 'layouts' },
+})
+const pane = ref(TABS.some(t => t.id === props.tab) ? props.tab : 'layouts')
 
 const activeGlow = computed(() => GLOW_MODES.find(g => g.id === theme.glowMode) || GLOW_MODES[2])
 const activeCard = computed(() => CARD_STYLES.find(c => c.id === theme.cardStyle) || CARD_STYLES[0])
@@ -287,6 +429,17 @@ function pickAccent(sw) {
   setAccent(sw)
   haptic(20)
 }
+
+/* One writer for the four plain enum settings. Each is a validated id
+   straight from its own registry — the v-for is the only caller — so
+   there is nothing to re-check here. */
+function pick(key, id) {
+  if (theme[key] === id) return
+  theme[key] = id
+  haptic(20)
+}
+
+const TICK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`
 
 function goArrange() {
   emit('close')
@@ -465,6 +618,101 @@ function goArrange() {
 .isheet-swatch.is-on {
   border-color: var(--cc-ink);
   box-shadow: var(--cc-glow-edge);
+}
+
+/* ── Named rows ──────────────────────────────────────────────────────
+   The doc's "swatches are named rows": one panel, hairline dividers,
+   name and description beside every option. Used for the two settings a
+   dot cannot describe on its own — a gradient has no single colour to
+   sample, and Obsidian, Slate and Teal black are all near-black. */
+.isheet-sec { margin: 6px 2px -6px }
+.isheet-sec-blurb { margin: 0 2px }
+
+.isheet-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--cc-r-card-lg);
+}
+.isheet-pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 16px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms var(--cc-ease);
+}
+.isheet-pick + .isheet-pick { border-top: 1px solid var(--cc-border-soft) }
+.isheet-pick:active { background: var(--cc-accent-dim) }
+
+.isheet-pick-dot {
+  flex: none;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--cc-glass-rim);
+}
+/* Reads --cc-name-color from this row's own data-name-color, so the dot
+   is the exact colour the name will take rather than a copy of it. */
+.isheet-pick-dot.is-name { background: var(--cc-name-color) }
+
+.isheet-pick-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.isheet-pick-name { font-size: 15px; font-weight: 500; color: var(--cc-ink) }
+.isheet-tick { flex: none; color: var(--cc-accent-text); display: grid; place-items: center }
+
+/* The face preview. Sized here rather than left to --cc-name-scale: the
+   row is comparing typefaces, and a 1.4x sample would wrap and make the
+   comparison about line breaks. */
+.isheet-sample {
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Range ───────────────────────────────────────────────────────── */
+.isheet-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: none;
+  cursor: pointer;
+}
+.isheet-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--cc-r-chip);
+  background: var(--cc-track);
+}
+.isheet-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px; height: 22px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: var(--cc-accent);
+  box-shadow: var(--cc-glow-edge), var(--cc-shadow-card);
+}
+.isheet-range::-moz-range-track {
+  height: 4px;
+  border-radius: var(--cc-r-chip);
+  background: var(--cc-track);
+}
+.isheet-range::-moz-range-thumb {
+  width: 22px; height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: var(--cc-accent);
+}
+.isheet-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
 }
 
 /* ── Row ─────────────────────────────────────────────────────────── */

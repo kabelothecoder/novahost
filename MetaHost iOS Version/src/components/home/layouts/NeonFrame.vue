@@ -17,7 +17,8 @@
     <div class="neon-frame">
       <RobotHeroWidget size="md" />
 
-      <IgnitionPod class="neon-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
+      <!-- v2 draws Pairs · disc · Assets here too. -->
+      <IgnitionPod variant="orbit" class="neon-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
 
       <!-- The doc prints "CONNECTED · Exness · MT5 · 41273". None of
            that is on the client until the broker wiring lands, so the

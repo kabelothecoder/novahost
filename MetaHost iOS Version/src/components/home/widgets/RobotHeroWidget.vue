@@ -5,14 +5,31 @@
     <div v-if="mode !== 'bleed'" class="hero-art" :class="`art-${mode}`">
       <img :src="artSrc" alt="" decoding="async" @error="failed = true" />
       <span v-if="mode === 'framed'" class="hero-ring"></span>
+
+      <!--
+        v2's corner badge. It reports the LICENCE-BOUND robot's version
+        and only appears in Avatar mode, where there is a card corner to
+        pin it to — on the circular Framed crop it would clip.
+        Rendered only when the licence actually carries a version; the
+        doc's "v6" is sample copy, not a constant to hardcode.
+      -->
+      <span v-if="mode === 'avatar' && robot.version" class="hero-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 1.6l2.4 2.05 3.15-.35.9 3.05 2.9 1.3-1.35 2.9 1.35 2.9-2.9 1.3-.9 3.05-3.15-.35L12 19.5l-2.4-2.05-3.15.35-.9-3.05-2.9-1.3 1.35-2.9L2.65 7.65l2.9-1.3.9-3.05 3.15.35z" />
+          <path d="M10.6 14.2l-2.9-2.9 1.2-1.2 1.7 1.7 4-4 1.2 1.2z" fill="var(--cc-canvas)" />
+        </svg>
+        <span>{{ robot.version }}</span>
+      </span>
     </div>
 
     <div class="hero-copy">
-      <span v-if="robot.mentor" class="cc-label hero-mentor">
-        Mentor · {{ robot.mentor }}
-      </span>
+      <!-- v2 writes the mentor as a handle ("@swooshfx") rather than
+           "Mentor · Swoosh FX". The @ is added only when the stored
+           value is not already one, so a licence that supplies a real
+           handle is not turned into "@@name". -->
+      <span v-if="mentorHandle" class="cc-label hero-mentor">{{ mentorHandle }}</span>
 
-      <h1 class="hero-name" :class="{ 'cc-ink-shadow': mode === 'bleed' }">
+      <h1 class="hero-name cc-name" :class="{ 'cc-ink-shadow': mode === 'bleed' }">
         {{ robot.name }}
       </h1>
 
@@ -45,6 +62,15 @@ const mode = computed(() => activeArtMode.value)
 const artSrc = computed(() => {
   if (failed.value) return FALLBACK_AVATAR
   return activeEa.value?.avatar || robot.avatarUrl || FALLBACK_AVATAR
+})
+
+/** "@swooshfx". Spaces are stripped and the case lowered so a display
+ *  name ("Swoosh FX") still reads as a handle; an already-@-prefixed
+ *  value is passed through untouched. */
+const mentorHandle = computed(() => {
+  const m = (robot.mentor || '').trim()
+  if (!m) return ''
+  return m.startsWith('@') ? m : `@${m.replace(/\s+/g, '').toLowerCase()}`
 })
 
 const symbolLine = computed(() => {
@@ -127,24 +153,58 @@ const symbolLine = computed(() => {
   max-width: 100%;
 }
 
+/* A handle is a name, not a label — mono and un-tracked, the way v2
+   sets it, rather than the wide uppercase of .cc-label. */
 .hero-mentor {
+  font-family: var(--cc-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: var(--cc-accent-text);
 }
 
+/* ── Verified badge ──────────────────────────────────────────────── */
+.hero-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 6px;
+  border-radius: var(--cc-r-chip);
+  /* Its own scrim. This sits on raw mentor art, where neither the card
+     tokens nor the layout scrims reach. */
+  background: rgba(0, 0, 0, 0.52);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #FFF;
+}
+.hero-badge > span {
+  font-family: var(--cc-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #FFF;
+}
+.hero-badge svg { color: var(--cc-accent); flex: none }
+
 .hero-name {
   margin: 0;
-  font-size: 26px;
+  font-size: calc(26px * var(--cc-name-scale));
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.015em;
-  color: var(--cc-ink);
+  color: var(--cc-name-color);
   /* The doc's requirement that the robot name stay legible at
      thumbnail size — long names shrink rather than wrap to three
      lines and push the ignition control off screen. */
   overflow-wrap: anywhere;
 }
-.hero-lg .hero-name { font-size: 34px }
-.hero-sm .hero-name { font-size: 20px }
+.hero-lg .hero-name { font-size: calc(34px * var(--cc-name-scale)) }
+.hero-sm .hero-name { font-size: calc(20px * var(--cc-name-scale)) }
 
 .hero-symbols {
   margin: 0;

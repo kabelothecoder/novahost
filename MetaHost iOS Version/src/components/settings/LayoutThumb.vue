@@ -58,6 +58,26 @@
           <rect class="w-card" x="8" y="60" width="44" height="12" rx="2.5" />
           <rect class="w-card" x="8" y="75" width="44" height="12" rx="2.5" />
         </template>
+
+        <!-- The bento is the whole point of this layout, so the
+             wireframe leads with the uneven grid: one tall hero cell
+             carrying the gauge, a stack of stat tiles beside it. -->
+        <template v-else-if="id === 'deck'">
+          <rect class="w-card" x="8"  y="16" width="21" height="27" rx="3" />
+          <circle class="w-ring" cx="18.5" cy="29.5" r="6.5" />
+          <rect class="w-card" x="31" y="16" width="21" height="6" rx="2" />
+          <rect class="w-card" x="31" y="23" width="21" height="6" rx="2" />
+          <rect class="w-card" x="31" y="30" width="21" height="6" rx="2" />
+          <rect class="w-card" x="31" y="37" width="21" height="6" rx="2" />
+          <rect class="w-acc"  x="17" y="47" width="26" height="8" rx="4" />
+          <rect class="w-card" x="8"    y="59" width="9.5" height="9" rx="2" />
+          <rect class="w-card" x="19.3" y="59" width="9.5" height="9" rx="2" />
+          <rect class="w-card" x="30.6" y="59" width="9.5" height="9" rx="2" />
+          <rect class="w-card" x="41.9" y="59" width="9.5" height="9" rx="2" />
+          <rect class="w-card" x="8" y="72" width="44" height="9" rx="2.5" />
+          <rect class="w-card" x="8" y="83" width="44" height="9" rx="2.5" />
+          <rect class="w-dim"  x="8" y="95" width="30" height="3" rx="1.5" />
+        </template>
       </svg>
     </span>
 

@@ -61,6 +61,61 @@ function baseSymbol(s: unknown): string {
   return String(s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
 }
 
+/**
+ * Every name a broker might use for one NovaHost instrument.
+ *
+ * Kept in step with the tables in `broker-quote` and `metacopier-execute`. A
+ * position resolved under one name and a symbol plan written under another do
+ * not match, and the app then believes the user holds nothing.
+ */
+const SYMBOL_ALIASES: Record<string, string[]> = {
+  XAUUSD: ['XAUUSD', 'GOLDUSD', 'GOLD'],
+  XAGUSD: ['XAGUSD', 'SILVERUSD', 'SILVER'],
+  NAS100: ['NAS100', 'USTECH', 'USTEC', 'US100', 'NDX100', 'NASDAQ'],
+  US30:   ['US30', 'USA30', 'DJ30', 'WS30', 'DOW'],
+  SPX500: ['SPX500', 'USA500', 'US500', 'SP500'],
+  GER40:  ['GER40', 'GER30', 'DAX40', 'DE40', 'DAX'],
+  UK100:  ['UK100', 'FTSE100'],
+  JP225:  ['JP225', 'JPN225', 'NIKKEI'],
+  BTCUSD: ['BTCUSD', 'BTCUSDT', 'BITCOIN'],
+  ETHUSD: ['ETHUSD', 'ETHUSDT', 'ETHEREUM'],
+  VIX:    ['VIX'],
+}
+
+/**
+ * The canonical NovaHost name for whatever the broker called this instrument.
+ *
+ * `baseSymbol` alone is NOT enough and assuming it was is a real bug: a micro
+ * account lists gold as `XAUUSDm`, which strips to `XAUUSDM` -- a string that
+ * matches nothing. The allowance says `XAUUSD`, the symbol plan says `XAUUSD`,
+ * and the app concluded the user's open gold position was on an instrument it
+ * had never heard of. Observed on a live account.
+ *
+ * Aliases are matched longest-first so a shorter name can never claim a
+ * longer one's symbol. The final fallback takes the first six letters of a
+ * plain FX pair, which is what `EURUSDpro` and `GBPUSD.raw` need and what no
+ * alias table can enumerate.
+ */
+function canonicalSymbol(raw: unknown): string {
+  const s = baseSymbol(raw)
+  if (!s) return ''
+
+  const candidates: Array<[string, string]> = []
+  for (const [name, aliases] of Object.entries(SYMBOL_ALIASES)) {
+    for (const a of aliases) candidates.push([a, name])
+  }
+  candidates.sort((x, y) => y[0].length - x[0].length)
+
+  for (const [alias, name] of candidates) {
+    if (s === alias || s.startsWith(alias)) return name
+  }
+
+  // `EURUSDm`, `GBPUSD.pro` -> the pair. Only when the leading six are all
+  // letters, so an index like `US30cash` is never sliced into nonsense.
+  if (/^[A-Z]{6}/.test(s)) return s.slice(0, 6)
+  return s
+}
+
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
 
 /**
@@ -211,9 +266,11 @@ Deno.serve(async (req: Request) => {
       return {
         id: String(p?.id ?? ''),
         symbol: String(p?.symbol ?? ''),
-        /** The canonical name, so the app can match a position to a signal or
-         *  a symbol plan without re-deriving the broker's decoration. */
-        base: baseSymbol(p?.symbol),
+        /** The canonical name, so the app can match a position to a signal,
+         *  a symbol plan or the robot's allowance without re-deriving the
+         *  broker's decoration. `XAUUSDm` resolves to `XAUUSD`, not to the
+         *  `XAUUSDM` that matches nothing. */
+        base: canonicalSymbol(p?.symbol),
         side,
         pending,
         order_type: orderType,
