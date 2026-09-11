@@ -220,6 +220,33 @@
            own screen. -->
       <span class="cc-label st-section">Trading</span>
       <div class="st-panel cc-card">
+
+        <!-- ── Auto-execute ───────────────────────────────────────────
+             The only control in this app that spends money on its own, so
+             it says what it will do in the caption rather than relying on
+             the name, and it reports the server's answer instead of
+             assuming the flip worked. The server refuses to enable a
+             licence with no broker attached, and warns (without refusing)
+             when no symbol has a lot size — both arrive as `note`. -->
+        <div class="st-row is-static">
+          <span class="st-copy">
+            <span class="st-name">Auto-execute signals</span>
+            <span class="cc-caption">{{ autoExecCaption }}</span>
+          </span>
+          <button
+            class="st-switch"
+            :class="{ 'is-on': autoExec, 'is-busy': autoExecBusy }"
+            role="switch"
+            :aria-checked="autoExec"
+            :disabled="autoExecBusy || autoExec === null"
+            aria-label="Auto-execute signals"
+            @click="toggleAutoExec"
+          ><span class="st-knob"></span></button>
+        </div>
+        <p v-if="autoExecNote" class="st-note cc-caption" :class="{ 'is-bad': autoExecBad }">
+          {{ autoExecNote }}
+        </p>
+
         <button class="st-row" @click="go('/trades')">
           <span class="st-copy">
             <span class="st-name">Trades</span>
@@ -267,8 +294,9 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { loadLinkState, setAutoExecute } from '../services/brokerService.js'
 import {
   theme, resolvedScheme, activeLayout, activeArtMode, activeGradient, activeTone,
   activeNameFont, toneApplies, REORDERABLE, GLOW_MODES, CARD_STYLES, SCHEMES, ART_MODES,
@@ -285,6 +313,70 @@ const sheetTab = ref('layouts')
 const version = 'V6'
 
 const CHEV = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
+
+/* ── Auto-execute ─────────────────────────────────────────────────────
+   The opt-in for server-side execution. Until this switch existed nothing
+   anywhere wrote `licenses.auto_execute`, so `auto-execute-signals` — cron,
+   trigger and all — was a no-op for every licence. That is what an iOS user
+   was missing: this app does not claim signals itself, so with the switch
+   off it receives no trades at all.
+
+   `null` is a real third state and not a default: it means the licence has
+   not answered yet, or could not be reached. Rendering "off" for unknown
+   would tell someone their robot is idle when it may be trading. */
+const autoExec = ref(null)
+const autoExecBusy = ref(false)
+const autoExecNote = ref('')
+const autoExecBad = ref(false)
+const brokerLinked = ref(null)
+
+const autoExecCaption = computed(() => {
+  if (autoExec.value === null) return 'Checking your licence…'
+  return autoExec.value
+    ? 'The server places your mentor’s trades even when this app is closed'
+    : 'Trades only arrive while this app is open and awake'
+})
+
+async function refreshAutoExec() {
+  const state = await loadLinkState()
+  brokerLinked.value = state.linked
+  /* `linked: null` is "we could not ask", not "disconnected" — leave the
+     switch unknown rather than drawing a confident off. */
+  autoExec.value = state.linked === null ? null : Boolean(state.autoExecute)
+  if (state.linked === null) {
+    autoExecNote.value = 'Could not reach your licence just now.'
+    autoExecBad.value = true
+  }
+}
+
+async function toggleAutoExec() {
+  if (autoExecBusy.value || autoExec.value === null) return
+
+  const next = !autoExec.value
+  autoExecBusy.value = true
+  autoExecNote.value = ''
+  autoExecBad.value = false
+  haptic()
+
+  const res = await setAutoExecute(next)
+
+  if (res.ok) {
+    /* The server's answer, not `next` — they agree today, and a switch that
+       trades money should not be the one place that assumes they always will. */
+    autoExec.value = res.autoExecute
+    if (res.warning) {
+      autoExecNote.value = res.warning
+      autoExecBad.value = false
+    }
+  } else {
+    autoExecNote.value = res.message || 'Could not change that setting.'
+    autoExecBad.value = true
+  }
+
+  autoExecBusy.value = false
+}
+
+onMounted(refreshAutoExec)
 
 const tools = [
   {
@@ -486,6 +578,27 @@ function go(to) { haptic(20); router.push(to) }
   border-color: var(--cc-accent);
   box-shadow: var(--cc-glow-edge);
 }
+/* In flight, or the licence has not answered yet. Dimmed rather than hidden:
+   the control still says what state it believes it is in, it just refuses a
+   second press while the first is unresolved. */
+.st-switch:disabled,
+.st-switch.is-busy {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Sits under the row it belongs to, inside the same panel. Warnings read as
+   ordinary caption text; only a refusal is coloured, because colouring the
+   common case trains people to ignore it. */
+.st-note {
+  margin: -2px 0 0;
+  padding: 0 16px 12px;
+}
+/* `--cc-warn`, not a literal. It is the one attention colour in this system
+   that has been measured in both schemes (dark #E8A33D at 7.87–8.94, light
+   darkened to #8A5410 to clear 4.5 on all four surfaces). A hand-picked red
+   here would repeat exactly the fault that comment records: a hue chosen on
+   dark and carried to light unmeasured. */
+.st-note.is-bad { color: var(--cc-warn); }
 .st-knob {
   position: absolute;
   top: 2px; left: 2px;

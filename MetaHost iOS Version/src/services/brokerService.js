@@ -177,6 +177,11 @@ export async function loadLinkState() {
       platform: data.platform || null,
       connectedAt: data.connected_at || null,
       allowedSymbols: Array.isArray(data.allowed_symbols) ? data.allowed_symbols.map(String) : [],
+      /* Whether the server trades this licence's signals while the phone is
+         asleep. Read from the licence rather than remembered on the device:
+         the switch lives on the LICENCE, so a user who flips it on their
+         Android handset must see it on here too. */
+      autoExecute: data.auto_execute === true,
       reason: data.reason,
       message: data.message,
     }
@@ -271,5 +276,62 @@ export async function loadHistory({ limit } = {}) {
     return { ok: true, ...data }
   } catch (err) {
     return { ok: false, message: err?.message || 'Could not reach the broker service.', closed: [], curve: [] }
+  }
+}
+
+/* ── Server-side execution ───────────────────────────────────────────*/
+
+/**
+ * Turn the server's signal execution on or off for this licence.
+ *
+ * ## What this switch actually governs
+ *
+ * `auto-execute-signals` runs on a two-minute cron and on an INSERT trigger,
+ * and considers only licences with `auto_execute = true`. That column defaults
+ * to false and, until now, **nothing anywhere wrote it** — not this app, not
+ * Android, not the portal, not any function. So the executor was deployed,
+ * healthy, and a no-op for all 58 licences.
+ *
+ * That is not a cosmetic gap on iOS specifically: this app does not claim
+ * signals itself (see fleetService), so with the switch off it receives no
+ * trades at all. Android still polls `claim-signals` on-device and is
+ * unaffected either way.
+ *
+ * ## Why the answer is not assumed
+ *
+ * The server refuses to enable a licence with no broker account attached —
+ * there would be nowhere to place an order, and every signal would be claimed
+ * and then refused. It also reports a `warning` when no symbol has a lot size
+ * yet, because the executor will not guess one: it records NO_SIZE_CONFIGURED
+ * and moves on. Callers must render both rather than treating a non-error as
+ * "it is on now".
+ *
+ * Turning it OFF always succeeds, on any licence, in any state. A control that
+ * trades real money has to be switchable off without preconditions.
+ *
+ * @param {boolean} enabled
+ * @returns {Promise<{ok: boolean, autoExecute?: boolean, warning?: string|null, code?: string, message?: string}>}
+ */
+export async function setAutoExecute(enabled) {
+  let licenseKey
+  try { licenseKey = requireKey() } catch (e) { return { ok: false, code: e.code, message: e.message } }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('set-auto-execute', {
+      body: { license_key: licenseKey, enabled: Boolean(enabled) },
+    })
+
+    if (error) {
+      const body = await bodyOf(error)
+      if (body) return { ok: false, code: body.code, message: describe(body, 'Could not change that setting.') }
+      throw error
+    }
+    if (!data?.success) {
+      return { ok: false, code: data?.code, message: describe(data, 'Could not change that setting.') }
+    }
+
+    return { ok: true, autoExecute: data.auto_execute === true, warning: data.warning || null }
+  } catch (err) {
+    return { ok: false, message: err?.message || 'Could not reach the licence service.' }
   }
 }

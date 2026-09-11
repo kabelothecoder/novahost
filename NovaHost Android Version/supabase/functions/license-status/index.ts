@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: license, error } = await novaHost
       .from('licenses')
-      .select('id, ea_id, status, expires_at, allowed_symbols, metadata')
+      .select('id, ea_id, status, expires_at, allowed_symbols, metadata, auto_execute')
       .eq('license_key', key)
       .maybeSingle()
 
@@ -110,6 +110,11 @@ Deno.serve(async (req: Request) => {
       platform: (metadata.platform as string) ?? null,
       connected_at: (metadata.connected_at as string) ?? null,
       metacopier_status: metacopierStatus,
+      // Whether the server places this licence's signals while the handset is
+      // asleep. Written by `set-auto-execute`, read here so the Settings switch
+      // renders the state the executor will actually act on rather than one the
+      // device remembers — the licence can be switched from another handset.
+      auto_execute: license.auto_execute === true,
       reason: linked ? 'ready' : 'no_account',
       message: linked
         ? 'Trading account linked.'
