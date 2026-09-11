@@ -31,11 +31,11 @@
           <span class="contact-ico">✈️</span>
           <span>Telegram</span>
         </a>
-        <div class="strip-div" />
-        <a class="contact-btn" href="#" @click.prevent="">
-          <span class="contact-ico">💬</span>
-          <span>Live Chat</span>
-        </a>
+        <!-- "Live Chat" was `href="#" @click.prevent=""` — a button that
+             looked like support and did nothing at all when tapped, which on
+             a support screen is worse than not offering it. There is no chat
+             service behind this product; removed rather than wired to a
+             placeholder. Restore it when one actually exists. -->
       </div>
 
       <!-- FAQ tiles — high-density vertical list -->

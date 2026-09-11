@@ -24,7 +24,15 @@ export function useSpeech() {
   async function speak(text, opts = {}) {
     if (!text) return
 
-    const apiKey  = localStorage.getItem('ELEVENLABS_API_KEY')
+    /* The build's key is the real source now that the Settings field is gone.
+       localStorage still wins where a value exists, so an install that had one
+       typed in keeps working, but a fresh install has nowhere to enter one —
+       reading only localStorage would have left ElevenLabs permanently unused
+       and silently dropped every install to system speech. */
+    const apiKey =
+      localStorage.getItem('ELEVENLABS_API_KEY') ||
+      import.meta.env.VITE_ELEVENLABS_API_KEY ||
+      ''
     const voiceId = localStorage.getItem('ELEVENLABS_VOICE_ID') || VOICE_FALLBACK
 
     if (apiKey) {
