@@ -89,108 +89,187 @@
         </button>
 
         <p v-if="connError" class="conn-error">{{ connError }}</p>
+        <!-- The server's own words. A broker that is still coming up says so
+             here, and that is a wait rather than a failure. -->
+        <p v-else-if="connNote" class="conn-note">{{ connNote }}</p>
       </form>
 
-      <!-- Active sessions -->
-      <div class="sessions-block" v-if="sessions.length">
-        <span class="sessions-title">ACTIVE SESSIONS</span>
-        <div v-for="s in sessions" :key="s.id" class="session-row">
+      <!-- The linked account, as the LICENCE reports it.
+           Not a device-local list: the truth lives on the licence, so a
+           reinstalled phone or an account linked from the other handset
+           both read correctly here. -->
+      <div class="sessions-block" v-if="link.linked">
+        <span class="sessions-title">LINKED ACCOUNT</span>
+        <div class="session-row">
           <div class="session-left">
-            <div class="session-dot dot-green"></div>
+            <div class="session-dot" :class="link.connecting ? 'dot-amber' : 'dot-green'"></div>
             <div class="session-info">
-              <span class="session-name">{{ s.server }}</span>
-              <span class="session-acc">#{{ s.account }}</span>
+              <span class="session-name">{{ link.server || 'Broker account' }}</span>
+              <span class="session-acc">{{ link.platform || 'MT5' }}<span v-if="connectedLabel"> · {{ connectedLabel }}</span></span>
             </div>
           </div>
           <div class="session-right">
-            <span class="live-pill">LIVE</span>
-            <button class="disc-btn" @click="disconnect(s.id)">Disconnect</button>
+            <!-- 'connecting' is a wait, never a green light. metacopier-execute
+                 holds orders during it rather than losing them. -->
+            <span class="live-pill" :class="{ 'pill-wait': link.connecting }">
+              {{ link.connecting ? 'LINKING' : 'LIVE' }}
+            </span>
           </div>
         </div>
+        <p class="sessions-note">
+          Connecting a different account replaces this one. Your broker password
+          is sent once to establish the link and is never stored on this device.
+        </p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { supabase } from '../utils/supabaseClient.ts'
+/**
+ * Broker linking.
+ *
+ * ## What changed, and why none of it was cosmetic
+ *
+ * This screen used to POST to `test-broker-connection`. That endpoint is a
+ * tombstone returning 410 — "Broker linking runs through metacopier-connect"
+ * — so **every connect on iOS failed**, and had since the MetaAPI bridge was
+ * removed. The three faults that travelled with it:
+ *
+ *   1. No `license_key` was sent. The link is recorded on the LICENCE, so
+ *      there was nothing to bind to even had the endpoint lived.
+ *   2. The broker **password** was written to device storage as
+ *      `MH_TERMINAL_CONFIG`, and nothing ever read it back. It is now handed
+ *      to the edge function and goes out of scope with the call. The old key
+ *      is actively erased below, because a fix that leaves the password on
+ *      disk for every existing install is not a fix.
+ *   3. `sessions` was seeded with a hardcoded row — `Exness-MT5Real` /
+ *      `84912347` — so a user who had connected nothing saw a green LIVE pill
+ *      against somebody else's account number.
+ *
+ * Link state is now READ from the licence rather than remembered on the
+ * device, which is why a reinstall, or an account linked from the Android
+ * handset, both render correctly.
+ */
+import { ref, computed, onMounted } from 'vue'
 import { secStorage } from '../utils/secStorage.js'
 import { accent } from '../stores/accent.js'
+import { session, pushEvent } from '../stores/session.js'
+import { linkBroker, loadLinkState, loadAccount } from '../services/brokerService.js'
+import { haptic } from '../composables/useSpeech.js'
 
-
-const conn = ref({ server: false, account: false, feed: true })
+/* `feed` starts false. It was hardcoded true, so the Data Feed dot was green
+   on a screen with no broker attached at all. */
+const conn = ref({ server: false, account: false, feed: false })
 const form = ref({ server: '', account: '', password: '', platform: 'MT5' })
 const showPwd = ref(false)
 const connecting = ref(false)
 const connError = ref('')
-const sessions = ref(secStorage.getItem('MH_SESSIONS', true) || [
-  { id: 1, server: 'Exness-MT5Real', account: '84912347', status: 'Live' }
-])
+const connNote = ref('')
 
+/** `linked: null` means the status read failed — unknown, not disconnected. */
+const link = ref({ linked: false, connecting: false, server: null, platform: null, connectedAt: null })
+
+const connectedLabel = computed(() => {
+  if (!link.value.connectedAt) return ''
+  const d = new Date(link.value.connectedAt)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+})
+
+/**
+ * One-time cleanup of the credential the old code left behind.
+ *
+ * Every install that ever completed the old flow still has a broker password
+ * sitting in localStorage under the app's prefix. Removing the write without
+ * removing the stored value would leave it there indefinitely, so this runs
+ * on mount regardless of whether the user connects anything today.
+ */
+function purgeLegacyCredentials() {
+  if (secStorage.getItem('MH_TERMINAL_CONFIG')) {
+    secStorage.removeItem('MH_TERMINAL_CONFIG')
+    console.info('[terminal] removed legacy stored broker credentials')
+  }
+  // The fake seeded session lived here too.
+  secStorage.removeItem('MH_SESSIONS')
+}
+
+async function refreshLink() {
+  const state = await loadLinkState()
+  link.value = state
+
+  const up = state.linked === true && !state.connecting
+  conn.value.server = state.linked === true
+  conn.value.account = state.linked === true
+  conn.value.feed = up
+
+  accent.brokerConnected = up
+  session.brokerConnected = up
+  session.brokerServer = state.server || null
+
+  /* The balance is only worth asking for once an account is actually
+     attached, and only the linked branch can answer. */
+  if (up) {
+    const acct = await loadAccount()
+    if (acct.ok && acct.balance != null) {
+      accent.brokerBalance = acct.balance
+      /* Currency travels WITH the figure. `session.brokerCurrency` defaults to
+         'USD', and PairsView seeds its risk calculator from both — so an
+         account holding R596 whose currency never arrives gets sized as
+         dollars, about eighteen times too large. Writing it is not optional. */
+      if (acct.currency) session.brokerCurrency = acct.currency
+    }
+  }
+}
 
 async function doConnect() {
   if (!form.value.server || !form.value.account || !form.value.password) {
     connError.value = 'Please fill all fields.'; return
   }
-  connError.value = ''; connecting.value = true
-  
+  connError.value = ''
+  connNote.value = ''
+  connecting.value = true
+  haptic(20)
+
   try {
-    const { data: funcData, error: funcErr } = await supabase.functions.invoke('test-broker-connection', {
-      body: { 
-        server: form.value.server, 
-        account: form.value.account, 
-        password: form.value.password,
-        platform: form.value.platform
-      }
-    })
-
-    if (funcErr || !funcData.success) throw new Error(funcErr?.message || funcData?.error || 'Connection failed')
-
-    // On success
-    conn.value.server = true; conn.value.account = true
-    accent.brokerConnected = true
-    accent.brokerBalance = funcData.data.balance
-
-    const newSession = { 
-      id: Date.now(), 
-      server: form.value.server, 
-      account: form.value.account, 
-      status: 'Live' 
-    }
-    sessions.value.push(newSession)
-    secStorage.setItem('MH_SESSIONS', sessions.value)
-
-    // Save config for bridge (obfuscated)
-    secStorage.setItem('MH_TERMINAL_CONFIG', {
+    const res = await linkBroker({
+      accountNumber: form.value.account,
+      password: form.value.password,
       server: form.value.server,
-      account: form.value.account,
-      password: form.value.password
+      platform: form.value.platform,
     })
 
+    if (!res.ok) {
+      connError.value = res.message
+      pushEvent('Broker link refused', 'error')
+      return
+    }
+
+    /* Cleared immediately on success — the password has served its only
+       purpose and there is no reason for it to survive in a reactive ref. */
     form.value = { server: '', account: '', password: '', platform: 'MT5' }
-    
-    // Request notification permission if not already granted
+
+    // A still-connecting broker is reported as the wait it is, not as success.
+    connNote.value = res.message
+    pushEvent(res.connecting ? 'Broker linking…' : 'Broker link up', res.connecting ? 'info' : 'ok')
+
+    await refreshLink()
+
     if (Notification.permission === 'default') {
       Notification.requestPermission()
     }
-
   } catch (err) {
-    connError.value = err.message
+    connError.value = err?.message || 'Connection failed.'
   } finally {
     connecting.value = false
   }
 }
 
-
-function disconnect(id) {
-  sessions.value = sessions.value.filter(s => s.id !== id)
-  secStorage.setItem('MH_SESSIONS', sessions.value)
-  if (!sessions.value.length) { 
-    conn.value = { server: false, account: false, feed: false }
-    accent.brokerConnected = false
-  }
-}
+onMounted(() => {
+  purgeLegacyCredentials()
+  refreshLink()
+})
 
 </script>
 
@@ -386,6 +465,13 @@ function disconnect(id) {
   font-family: 'Courier New', monospace;
 }
 
+/* Not an error, and deliberately not green either: the common case it
+   carries is "linked, broker still coming up", which is a wait. */
+.conn-note {
+  color: rgba(232,240,255,0.72); font-size: 0.78rem; text-align: center;
+  line-height: 1.45; margin: 0;
+}
+
 /* Sessions */
 .sessions-block { display: flex; flex-direction: column; gap: 10px; }
 .sessions-title {
@@ -419,6 +505,20 @@ function disconnect(id) {
   font-family: 'Courier New', monospace;
   font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em;
   padding: 4px 10px;
+}
+
+/* An account MetaCopier has registered but whose broker session is not up
+   yet. Amber rather than green on purpose — orders placed now are held, not
+   filled, and a green pill would promise otherwise. */
+.pill-wait {
+  background: rgba(255,184,0,0.1);
+  border-color: rgba(255,184,0,0.38);
+  color: #FFB800;
+}
+
+.sessions-note {
+  color: rgba(232,240,255,0.45);
+  font-size: 0.7rem; line-height: 1.5; margin: 2px 2px 0;
 }
 .disc-btn {
   background: rgba(255,61,90,0.08);

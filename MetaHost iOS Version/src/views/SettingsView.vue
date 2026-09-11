@@ -1,55 +1,161 @@
 <template>
+  <!--
+    Settings, rebuilt to the Claude Design doc "NovaHost Settings v2".
+
+    The doc's spec, in its own words: one card per group with hairline
+    dividers instead of a bordered card inside another bordered card;
+    every row carrying its current VALUE so the hub reads at a glance;
+    sentence case and plain language; and the destructive action moved
+    off the scroll onto its own screen.
+
+    What is deliberately NOT ported: the doc turns each choice into a
+    routed sub-screen with a sticky live preview. On iOS those choices
+    already live in the Interface Style sheet, which Home opens too, and
+    two editors for one setting drift. The hub is the readable index; a
+    tap opens the sheet on the tab that owns that row.
+  -->
   <div
     class="cmd settings"
     :data-scheme="resolvedScheme"
     :data-card="theme.cardStyle"
     :data-motion="theme.motion"
+    :data-name-font="theme.nameFont"
+    :data-name-color="theme.nameColor"
   >
     <header class="st-head">
       <h1 class="cc-title">Settings</h1>
-      <span class="cc-caption">{{ robot.name }}</span>
+      <p class="st-sub">Every look and layout for NovaHost, in one place.</p>
     </header>
 
     <div class="st-body">
-      <!-- ── TOOLS ──────────────────────────────────────────────────── -->
-      <span class="cc-label st-section">Tools</span>
-      <div class="st-group">
-        <button v-for="t in tools" :key="t.to" class="st-row cc-card" @click="go(t.to)">
-          <span class="st-icon" v-html="t.icon"></span>
-          <span class="st-copy">
-            <span class="st-name">{{ t.name }}</span>
-            <span class="cc-caption">{{ t.desc }}</span>
-          </span>
-          <span class="st-chev" v-html="CHEV"></span>
-        </button>
-      </div>
-
       <!-- ── APPEARANCE ─────────────────────────────────────────────── -->
       <span class="cc-label st-section">Appearance</span>
-      <div class="st-group">
-        <button class="st-row cc-card" @click="sheetOpen = true">
-          <span class="st-icon" v-html="ICON_LAYERS"></span>
+      <div class="st-panel cc-card">
+        <button class="st-row" @click="openSheet('colours')">
           <span class="st-copy">
-            <span class="st-name">Interface Style</span>
-            <span class="cc-caption">{{ styleSummary }}</span>
+            <span class="st-name">Accent colour</span>
+            <span class="cc-caption">Buttons and active states</span>
           </span>
+          <span class="st-value">{{ theme.accent.name }}</span>
+          <span class="st-dot" :style="{ background: theme.accent.hex }"></span>
           <span class="st-chev" v-html="CHEV"></span>
         </button>
 
-        <button class="st-row cc-card" @click="go('/arrange-widgets')">
-          <span class="st-icon" v-html="ICON_GRID"></span>
+        <button class="st-row" @click="openSheet('colours')">
           <span class="st-copy">
-            <span class="st-name">Arrange Widgets</span>
-            <span class="cc-caption">{{ arrangeSummary }}</span>
+            <span class="st-name">Gradient accent</span>
+            <span class="cc-caption">{{ activeGradient.blurb }}</span>
           </span>
+          <span class="st-value">{{ activeGradient.name }}</span>
+          <span class="st-dot" :style="{ background: activeGradient.css || theme.accent.hex }"></span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="openSheet('colours')">
+          <span class="st-copy">
+            <span class="st-name">Background</span>
+            <!-- Says what it is doing rather than showing a tone that is
+                 not on screen: light restates its own ladder and ignores
+                 the setting entirely. -->
+            <span class="cc-caption">{{ toneApplies ? 'Base tone behind every screen' : 'Dark scheme only — not in use' }}</span>
+          </span>
+          <span class="st-value">{{ activeTone.name }}</span>
+          <!-- Two steps of the tone, not just its canvas. A near-black
+               dot on a near-black card reads as an empty ring; the split
+               is what tells Obsidian from Deep navy at a glance. -->
+          <span class="st-dot" :style="{ background: `linear-gradient(135deg, ${activeTone.canvas} 50%, ${activeTone.card2} 50%)` }"></span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="openSheet('colours')">
+          <span class="st-copy">
+            <span class="st-name">Glow</span>
+            <span class="cc-caption">Halo around lit elements</span>
+          </span>
+          <span class="st-value">{{ activeGlow.name }}</span>
+          <span class="st-dot st-dot-glow" :style="{ background: theme.accent.hex }"></span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="openSheet('colours')">
+          <span class="st-copy">
+            <span class="st-name">Card style</span>
+            <span class="cc-caption">{{ activeCard.blurb }}</span>
+          </span>
+          <span class="st-value">{{ activeCard.name }}</span>
           <span class="st-chev" v-html="CHEV"></span>
         </button>
       </div>
 
-      <!-- ── ADVANCED ───────────────────────────────────────────────── -->
-      <span class="cc-label st-section">Advanced</span>
-      <div class="st-group">
-        <div class="st-row cc-card">
+      <!-- ── HOME SCREEN ────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Home screen</span>
+      <div class="st-panel cc-card">
+        <button class="st-row" @click="openSheet('layouts')">
+          <span class="st-copy">
+            <span class="st-name">Layout</span>
+            <span class="cc-caption">Six arrangements for Home</span>
+          </span>
+          <span class="st-value">{{ activeLayout.name }}</span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="openSheet('layouts')">
+          <span class="st-copy">
+            <span class="st-name">Robot art</span>
+            <span class="cc-caption">Saved per {{ activeLayout.name }}</span>
+          </span>
+          <span class="st-value">{{ activeArt.name }}</span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="go('/arrange-widgets')">
+          <span class="st-copy">
+            <span class="st-name">Widgets</span>
+            <span class="cc-caption">Reorder or hide cards</span>
+          </span>
+          <span class="st-value">{{ arrangeSummary }}</span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <button class="st-row" @click="openSheet('type')">
+          <span class="st-copy">
+            <span class="st-name">Bot name &amp; type</span>
+            <span class="cc-caption">Typeface, size and colour</span>
+          </span>
+          <span class="st-value">{{ activeNameFont.name }}</span>
+          <span class="st-dot st-dot-name"></span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+      </div>
+
+      <!-- ── DISPLAY ────────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Display</span>
+      <div class="st-panel cc-card">
+        <button class="st-row" @click="openSheet('modes')">
+          <span class="st-copy">
+            <span class="st-name">Colour scheme</span>
+            <span class="cc-caption">Dark, light, or follow the device</span>
+          </span>
+          <span class="st-value">{{ schemeSummary }}</span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+
+        <div class="st-row is-static">
+          <span class="st-copy">
+            <span class="st-name">Reduce motion</span>
+            <span class="cc-caption">Calms backdrop and entrances</span>
+          </span>
+          <button
+            class="st-switch"
+            :class="{ 'is-on': theme.motion === 'reduced' }"
+            role="switch"
+            :aria-checked="theme.motion === 'reduced'"
+            aria-label="Reduce motion"
+            @click="theme.motion = theme.motion === 'reduced' ? 'full' : 'reduced'"
+          ><span class="st-knob"></span></button>
+        </div>
+
+        <div class="st-row is-static">
           <span class="st-copy">
             <span class="st-name">Haptic feedback</span>
             <span class="cc-caption">Vibrate on actions</span>
@@ -68,7 +174,7 @@
              switch that pretends to own it: once notifications are
              denied, only the OS can grant them back and a toggle here
              would be a lie. -->
-        <div class="st-row cc-card">
+        <div class="st-row is-static">
           <span class="st-copy">
             <span class="st-name">Notifications</span>
             <span class="cc-caption">{{ notifCaption }}</span>
@@ -82,43 +188,45 @@
             {{ notifPermission === 'granted' ? 'On' : 'Blocked' }}
           </span>
         </div>
+      </div>
 
-        <!-- Credentials. Kept here rather than dropped: the doc's
-             Settings has no place for them, but they are the only way
-             to connect MetaAPI and there is no other screen that
-             collects them. -->
-        <div class="st-row st-row-col cc-card">
-          <span class="st-name">MetaAPI</span>
-          <label class="st-field">
-            <span class="cc-label">Token</span>
-            <input
-              type="password"
-              class="cc-recess st-input"
-              v-model="apiKeys.metaapi"
-              placeholder="sk-…"
-              autocomplete="off"
-              spellcheck="false"
-              @blur="saveKey('METAAPI_TOKEN', apiKeys.metaapi)"
-            />
-          </label>
-          <label class="st-field">
-            <span class="cc-label">Account ID</span>
-            <input
-              type="text"
-              class="cc-recess st-input"
-              v-model="apiKeys.accountId"
-              placeholder="Account ID"
-              autocomplete="off"
-              spellcheck="false"
-              @blur="saveKey('METAAPI_ACCOUNT_ID', apiKeys.accountId)"
-            />
-          </label>
-        </div>
+      <!-- ── TOOLS ──────────────────────────────────────────────────── -->
+      <span class="cc-label st-section">Tools</span>
+      <div class="st-panel cc-card">
+        <button v-for="t in tools" :key="t.to" class="st-row" @click="go(t.to)">
+          <span class="st-icon" v-html="t.icon"></span>
+          <span class="st-copy">
+            <span class="st-name">{{ t.name }}</span>
+            <span class="cc-caption">{{ t.desc }}</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+      </div>
 
-        <div class="st-row st-row-col cc-card">
-          <span class="st-name">ElevenLabs</span>
+      <!-- ── CONNECTIONS ────────────────────────────────────────────────
+           Credentials are a form, and the doc's whole point about the old
+           screen was that a form does not belong mid-scroll. They stay on
+           the hub as a single row that discloses in place, so the index
+           still reads as rows — and they stay at all because there is no
+           other screen in the app that collects them. -->
+      <span class="cc-label st-section">Connections</span>
+      <div class="st-panel cc-card">
+        <button class="st-row" :aria-expanded="keysOpen" @click="keysOpen = !keysOpen">
+          <span class="st-copy">
+            <span class="st-name">API credentials</span>
+            <span class="cc-caption">{{ keySummary }}</span>
+          </span>
+          <span class="st-chev" :class="{ 'is-open': keysOpen }" v-html="CHEV"></span>
+        </button>
+
+        <!-- The MetaAPI token and account-id fields are gone. MetaAPI is not
+             this product's broker bridge — MetaCopier is, and it is reached
+             server-side with a key the device never sees. Asking a user for
+             a MetaAPI token invited them to paste a live credential into a
+             field nothing would ever read. Broker linking is on /terminal. -->
+        <div v-if="keysOpen" class="st-disclose">
           <label class="st-field">
-            <span class="cc-label">API key</span>
+            <span class="cc-label">ElevenLabs API key</span>
             <input
               type="password"
               class="cc-recess st-input"
@@ -129,33 +237,37 @@
               @blur="saveKey('ELEVENLABS_API_KEY', apiKeys.elevenlabs)"
             />
           </label>
+          <p class="cc-caption st-note">Stored on this device only. Never sent to NovaHost.</p>
         </div>
       </div>
 
       <!-- ── ABOUT ──────────────────────────────────────────────────── -->
       <span class="cc-label st-section">About</span>
-      <div class="st-group">
-        <button class="st-row cc-card" @click="go('/support')">
-          <span class="st-icon" v-html="ICON_HELP"></span>
+      <div class="st-panel cc-card">
+        <button class="st-row" @click="go('/support')">
           <span class="st-copy">
-            <span class="st-name">Support</span>
+            <span class="st-name">Help &amp; support</span>
             <span class="cc-caption">Device moves, licence help</span>
           </span>
           <span class="st-chev" v-html="CHEV"></span>
         </button>
 
-        <button class="st-row cc-card st-danger" @click="signOut">
+        <!-- The doc's danger screen. It gets a route rather than a red
+             button mid-scroll, so the list of what is erased can be read
+             before anything is armed. -->
+        <button class="st-row st-danger" @click="go('/sign-out')">
           <span class="st-copy">
-            <span class="st-name">Sign out</span>
-            <span class="cc-caption">Clears this device's licence and session</span>
+            <span class="st-name">Sign out of this device</span>
+            <span class="cc-caption">Clears this device's licence</span>
           </span>
+          <span class="st-chev" v-html="CHEV"></span>
         </button>
       </div>
 
-      <p class="cc-caption st-version">NovaHost · {{ version }}</p>
+      <p class="st-version cc-mono">NOVAHOST {{ version }} · CHANGES SAVE INSTANTLY</p>
     </div>
 
-    <InterfaceStyleSheet v-if="sheetOpen" @close="sheetOpen = false" />
+    <InterfaceStyleSheet v-if="sheetOpen" :tab="sheetTab" @close="sheetOpen = false" />
   </div>
 </template>
 
@@ -163,32 +275,30 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  theme, resolvedScheme, activeLayout, REORDERABLE, GLOW_MODES,
+  theme, resolvedScheme, activeLayout, activeArtMode, activeGradient, activeTone,
+  activeNameFont, toneApplies, REORDERABLE, GLOW_MODES, CARD_STYLES, SCHEMES, ART_MODES,
 } from '../stores/theme.js'
-import { robot } from '../stores/robot.js'
-import { logout } from '../services/authService.js'
 import { haptic } from '../composables/useSpeech.js'
 import InterfaceStyleSheet from '../components/settings/InterfaceStyleSheet.vue'
 
 const router = useRouter()
 const sheetOpen = ref(false)
+const sheetTab = ref('layouts')
+const keysOpen = ref(false)
 /* A literal, not a build define: this project has no version metadata
    wired into the build (package.json is still 0.0.0), and a define
-   pointing at that would print "NovaHost · 0.0.0". */
-const version = 'v6'
+   pointing at that would print "NOVAHOST 0.0.0". */
+const version = 'V6'
 
 const CHEV = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`
-const ICON_LAYERS = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`
-const ICON_GRID = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`
-const ICON_HELP = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4"/><line x1="12" y1="17" x2="12" y2="17"/></svg>`
 
 const tools = [
   {
-    to: '/scanner', name: 'Chart Scanner', desc: 'AI chart analysis & auto trade',
+    to: '/scanner', name: 'Chart scanner', desc: 'AI chart analysis',
     icon: `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><polyline points="7 14 10 11 13 14 17 9"/></svg>`,
   },
   {
-    to: '/pairs', name: 'Trading Quotes', desc: 'Live pairs and symbol config',
+    to: '/pairs', name: 'Trading quotes', desc: 'Live pairs and symbol config',
     icon: `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
   },
   {
@@ -197,16 +307,26 @@ const tools = [
   },
 ]
 
-const styleSummary = computed(() => {
-  const glow = GLOW_MODES.find(g => g.id === theme.glowMode)?.name || 'Medium'
-  return `${activeLayout.value.name} · ${theme.accent.name} · ${glow} glow`
+const activeGlow = computed(() => GLOW_MODES.find(g => g.id === theme.glowMode) || GLOW_MODES[2])
+const activeCard = computed(() => CARD_STYLES.find(c => c.id === theme.cardStyle) || CARD_STYLES[0])
+const activeArt  = computed(() => ART_MODES.find(a => a.id === activeArtMode.value) || ART_MODES[0])
+
+const schemeSummary = computed(() => {
+  if (theme.scheme === 'system') return `System · ${resolvedScheme.value === 'dark' ? 'Dark' : 'Light'}`
+  return SCHEMES.find(s => s.id === theme.scheme)?.name || 'Dark'
 })
 
 const arrangeSummary = computed(() => {
   const cfg = theme.widgets[theme.layout]
   if (!cfg) return ''
-  return `${REORDERABLE.length - cfg.hidden.length} shown · ${cfg.hidden.length} hidden`
+  return `${REORDERABLE.length - cfg.hidden.length} of ${REORDERABLE.length}`
 })
+
+/* Counts what is set rather than showing any part of a key — a masked
+   token is still a token on a shoulder-surfable screen. */
+const keySummary = computed(() =>
+  apiKeys.value.elevenlabs ? 'Voice key set' : 'Voice key not set'
+)
 
 /* ── Notifications ────────────────────────────────────────────────── */
 const notifSupported = typeof Notification !== 'undefined'
@@ -217,7 +337,7 @@ const notifCaption = computed(() => {
     case 'granted':     return 'Signal and trade alerts are on'
     case 'denied':      return 'Blocked — turn on in your device settings'
     case 'unsupported': return 'Not supported on this device'
-    default:            return 'Get alerted when a signal arrives'
+    default:            return 'Alerts when a signal arrives'
   }
 })
 
@@ -232,10 +352,14 @@ async function askNotifications() {
 
 /* ── Credentials ──────────────────────────────────────────────────── */
 const apiKeys = ref({
-  metaapi:    localStorage.getItem('METAAPI_TOKEN') || '',
-  accountId:  localStorage.getItem('METAAPI_ACCOUNT_ID') || '',
   elevenlabs: localStorage.getItem('ELEVENLABS_API_KEY') || '',
 })
+
+/* Any MetaAPI token a user typed into the old fields is still sitting in
+   localStorage. Dropping the inputs without dropping the values would leave
+   a live third-party credential on the device with no UI left to clear it. */
+localStorage.removeItem('METAAPI_TOKEN')
+localStorage.removeItem('METAAPI_ACCOUNT_ID')
 
 /* Writes an empty value too, so clearing a field actually clears the
    credential. The previous version skipped falsy values, which made a
@@ -246,12 +370,13 @@ function saveKey(key, val) {
   else localStorage.removeItem(key)
 }
 
-function go(to) { haptic(20); router.push(to) }
-
-function signOut() {
-  logout()
-  router.replace({ name: 'unlock' })
+function openSheet(tab) {
+  sheetTab.value = tab
+  sheetOpen.value = true
+  haptic(20)
 }
+
+function go(to) { haptic(20); router.push(to) }
 </script>
 
 <style scoped>
@@ -264,37 +389,60 @@ function signOut() {
 }
 
 .st-head {
-  padding: calc(var(--cc-safe-top) + 18px) 20px 6px;
+  padding: calc(var(--cc-safe-top) + 18px) 20px 4px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+.st-sub {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 19px;
+  color: var(--cc-ink-4);
 }
 
 .st-body {
-  padding: 12px 16px calc(var(--cc-safe-bottom) + 120px);
+  padding: 14px 16px calc(var(--cc-safe-bottom) + 120px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-.st-section { margin: 14px 4px 4px }
-.st-group { display: flex; flex-direction: column; gap: 8px }
+.st-section { margin: 20px 6px 9px }
+.st-section:first-of-type { margin-top: 8px }
+
+/* The doc's headline change: ONE panel per group, with hairline
+   dividers between rows — not a bordered card inside another bordered
+   card. `overflow: hidden` is what lets a row's press state reach the
+   panel's rounded corners without escaping them. */
+.st-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--cc-r-card-lg);
+}
 
 .st-row {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: 12px;
   width: 100%;
-  padding: 13px 15px;
+  padding: 14px 16px;
+  border: none;
+  background: none;
+  font-family: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background 160ms var(--cc-ease);
 }
-.st-row-col {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 11px;
-  cursor: default;
+/* A divider between rows, never after the last one — a trailing rule
+   sitting on the panel's bottom edge reads as a seam in the card. */
+.st-row + .st-row,
+.st-row + .st-disclose {
+  border-top: 1px solid var(--cc-border-soft);
 }
+.st-row:active { background: var(--cc-accent-dim) }
+.st-row.is-static { cursor: default }
+.st-row.is-static:active { background: none }
 
 .st-icon {
   flex: none;
@@ -308,10 +456,42 @@ function signOut() {
 
 .st-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
 .st-name {
-  font-size: 14px; font-weight: 600; color: var(--cc-ink);
+  font-size: 15px; font-weight: 500; color: var(--cc-ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.st-chev { flex: none; color: var(--cc-ink-5); display: grid; place-items: center }
+
+/* The current value, on the right of the row. This is what makes the
+   hub readable in one glance instead of a list of destinations. */
+.st-value {
+  flex: none;
+  max-width: 42%;
+  font-size: 13px;
+  color: var(--cc-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Chevrons and dividers are the only things allowed on ink-5: it is
+   3.7:1 and fails AA for anything text-shaped. */
+.st-chev {
+  flex: none;
+  color: var(--cc-ink-5);
+  display: grid; place-items: center;
+  transition: transform 220ms var(--cc-ease);
+}
+.st-chev.is-open { transform: rotate(90deg) }
+
+.st-dot {
+  flex: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--cc-glass-rim);
+}
+/* The glow row's dot wears the setting it describes, so the four steps
+   are distinguishable without opening anything. */
+.st-dot-glow { box-shadow: inset 0 0 0 1px var(--cc-glass-rim), var(--cc-glow-edge) }
+/* The name row's dot is painted by the same token the name itself uses,
+   so it cannot disagree with what Home renders. */
+.st-dot-name { background: var(--cc-name-color) }
 
 /* ── Switch ──────────────────────────────────────────────────────── */
 .st-switch {
@@ -357,7 +537,17 @@ function signOut() {
   cursor: pointer;
 }
 
-/* ── Fields ──────────────────────────────────────────────────────── */
+/* ── Credentials disclosure ──────────────────────────────────────── */
+.st-disclose {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  animation: stOpen 240ms var(--cc-ease) both;
+}
+@keyframes stOpen { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
+.cmd[data-motion="reduced"] .st-disclose { animation: none }
+
 .st-field { display: flex; flex-direction: column; gap: 6px }
 .st-input {
   width: 100%;
@@ -366,12 +556,18 @@ function signOut() {
      makes iOS Safari zoom the viewport on focus and never zoom back. */
   font-family: var(--cc-mono);
 }
+.st-note { margin: 0 }
 
-.st-danger .st-name { color: var(--cc-sell) }
+/* sell-text, not sell: the row tints to sell-dim while pressed, and
+   the raw hue measures 4.11:1 on that tint at the darkest tone. */
+.st-danger .st-name { color: var(--cc-sell-text) }
+.st-danger:active { background: var(--cc-sell-dim) }
 
 .st-version {
-  margin: 18px 0 0;
+  margin: 22px 0 0;
   text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.14em;
   color: var(--cc-ink-4);
 }
 </style>

@@ -2,10 +2,15 @@
   <!--
     Home is now a HOST, not a screen.
 
-    It owns the design-system root (`.cmd` plus the two data attributes
+    It owns the design-system root (`.cmd` plus the data attributes
     command.css keys its token sets off), the backdrop, and the session
-    lifecycle. What the user actually sees is one of five layout
+    lifecycle. What the user actually sees is one of six layout
     components, swapped by `theme.layout`.
+
+    `data-name-font` and `data-name-color` are here rather than among the
+    :root runtime tokens theme.js writes, because their values reference
+    --cc-font, --cc-ink and --cc-ink-3, which are declared on `.cmd` and
+    do not exist at :root.
 
     Nothing that must survive a layout change lives here: run state is in
     stores/session.js, robot selection in stores/robot.js. That is the
@@ -17,6 +22,8 @@
     :data-scheme="resolvedScheme"
     :data-card="theme.cardStyle"
     :data-motion="theme.motion"
+    :data-name-font="theme.nameFont"
+    :data-name-color="theme.nameColor"
   >
     <HomeBackdrop />
 
@@ -60,7 +67,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import MetaApi from 'metaapi.cloud-sdk'
 
 import { supabase } from '../utils/supabaseClient.ts'
 import { theme, resolvedScheme } from '../stores/theme.js'
@@ -77,6 +83,7 @@ import FocusEngine from '../components/home/layouts/FocusEngine.vue'
 import FullBleedArt from '../components/home/layouts/FullBleedArt.vue'
 import NeonFrame from '../components/home/layouts/NeonFrame.vue'
 import SignalFeed from '../components/home/layouts/SignalFeed.vue'
+import CommandDeck from '../components/home/layouts/CommandDeck.vue'
 
 const router = useRouter()
 const { speak } = useSpeech()
@@ -95,6 +102,7 @@ const LAYOUTS = {
   bleed:   FullBleedArt,
   neon:    NeonFrame,
   feed:    SignalFeed,
+  deck:    CommandDeck,
 }
 const LayoutComponent = computed(() => LAYOUTS[theme.layout] || FullBleedArt)
 
@@ -125,23 +133,24 @@ useVoiceCommands({
   onPairs: () => router.push('/pairs'),
 })
 
-/* ── MetaAPI ─────────────────────────────────────────────────────── */
-async function setupMetaApi() {
-  const token     = localStorage.getItem('METAAPI_TOKEN')
-  const accountId = localStorage.getItem('METAAPI_ACCOUNT_ID')
-  if (!token || !accountId) return
-  try {
-    const api     = new MetaApi(token)
-    const account = await api.metatraderAccountApi.getAccount(accountId)
-    await account.waitConnected()
-    const conn = account.getStreamingConnection()
-    await conn.connect()
-    pushEvent('MetaAPI stream connected', 'ok')
-  } catch (err) {
-    console.error('MetaAPI:', err)
-    pushEvent('MetaAPI connection failed', 'error')
-  }
-}
+/* ── MetaAPI: removed ─────────────────────────────────────────────────
+   `setupMetaApi()` opened a streaming connection to MetaAPI on every Home
+   mount, reading `METAAPI_TOKEN` / `METAAPI_ACCOUNT_ID` out of localStorage.
+
+   MetaAPI is not this product's broker bridge and has not been since the
+   MetaCopier migration — `test-broker-connection`, the endpoint that
+   accompanied it, is a deployed tombstone whose own note reads "it depended
+   on METAAPI_TOKEN, an integration this product no longer uses". Nothing
+   wrote those two keys either, so the function returned at its own guard on
+   every run.
+
+   It was not free for being dead. The `import MetaApi from 'metaapi.cloud-sdk'`
+   at the top of this file pulled the entire SDK into the Home chunk: **1,336 kB
+   minified, 373 kB gzipped**, downloaded by every user on a phone, to reach a
+   guard clause. Removing the import takes the chunk to a fraction of that.
+
+   Broker state now comes from `license-status` via `startFleetPolling`, and
+   the balance from the `broker-account` edge function. */
 
 /* ── Session ─────────────────────────────────────────────────────────
    `displayName` is only used by the welcome toast — the doc's Home
@@ -211,7 +220,6 @@ function onTrade() {
 /* ── Lifecycle ───────────────────────────────────────────────────── */
 onMounted(() => {
   ensureSeeded()
-  setupMetaApi()
   checkUserSession()
   setupRealtime()
   startFleetPolling()

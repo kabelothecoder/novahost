@@ -33,6 +33,34 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  */
 
 /**
+ * Is this history row an actual trade?
+ *
+ * `/history/positions` is the account's LEDGER. Alongside closed positions it
+ * returns deposits, withdrawals, credits, bonuses, commissions, dividends,
+ * tax and cancelled orders -- and every one of them carries a `closeTime`, so
+ * filtering on that alone admits all of them.
+ *
+ * For THIS function that is not a cosmetic error, it is the guardrail failing
+ * open. A deposit arrives with a positive `netProfit` (a live account here
+ * shows a R500 top-up as exactly that), the loop below sees a non-negative
+ * figure and stops, and the streak resets to zero. **Funding your account
+ * would clear the consecutive-loss lock** -- at the precise moment a user on
+ * a losing run is most likely to do it.
+ *
+ * Three independent tests, because no one of them holds on every broker:
+ * `dealType` names it outright where the broker populates it; a real trade
+ * has a symbol; a real trade has a positive volume. The last two are what
+ * carry a broker that leaves `dealType` empty.
+ */
+function isClosedTrade(p: Record<string, unknown>): boolean {
+  if (!p?.closeTime) return false
+  const dealType = String(p?.dealType ?? '')
+  if (dealType && !/^Deal(Buy|Sell)$/.test(dealType)) return false
+  if (!String(p?.symbol ?? '').trim()) return false
+  return Number(p?.volume) > 0
+}
+
+/**
  * Losses in a row, counting back from the most recently closed trade.
  *
  * `netProfit` is profit after swap and commission, which is the figure that
@@ -45,7 +73,7 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  */
 function consecutiveLosses(positions: Array<Record<string, unknown>>): number {
   const closed = positions
-    .filter((p) => p?.closeTime)
+    .filter(isClosedTrade)
     .sort((a, b) => String(b.closeTime).localeCompare(String(a.closeTime)))
 
   let streak = 0
@@ -118,8 +146,29 @@ Deno.serve(async (req: Request) => {
       }, 409)
     }
 
+    /**
+     * The window is REQUIRED, and omitting it was silently disarming this rule.
+     *
+     * MetaCopier documents `start` and `stop` on
+     * `GET /accounts/{id}/history/positions` as required ISO-8601 query
+     * parameters. This call sent neither, so the request was refused and every
+     * invocation returned HISTORY_UNAVAILABLE -- which the scanner reads as
+     * "could not measure" and renders as a rule it could not check.
+     *
+     * That is precisely the failure this function's own docstring was written
+     * to end: "A risk control that reports a number nobody measured is worse
+     * than no risk control." It has been reporting one since it shipped.
+     *
+     * Thirty days: a losing streak is a statement about recent trading, and a
+     * run that ended six weeks ago is not the thing the guardrail is asking
+     * about. Long enough that a low-frequency account still has history in it.
+     */
+    const stop = new Date()
+    const start = new Date(stop.getTime() - 30 * 86_400_000)
+    const qs = new URLSearchParams({ start: start.toISOString(), stop: stop.toISOString() })
+
     const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/history/positions`,
+      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/history/positions?${qs}`,
       { headers: { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' } }
     )
 
@@ -142,7 +191,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const streak = consecutiveLosses(positions)
-    const closedCount = positions.filter((p) => p?.closeTime).length
+    const closedCount = positions.filter(isClosedTrade).length
 
     console.log(`[broker-history] licence ${license.id}: ${streak} consecutive losses of ${closedCount} closed`)
 
