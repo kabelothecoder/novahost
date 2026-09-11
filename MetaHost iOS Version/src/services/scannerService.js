@@ -29,13 +29,34 @@
 
 import { supabase } from '../utils/supabaseClient.ts'
 import { secStorage } from '../utils/secStorage.js'
+import { getDeviceId } from '../utils/deviceId.js'
+import { authState } from './authService.js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 /* ── Scan ────────────────────────────────────────────────────────────
    `analyze-chart` has `verify_jwt: true`, so the anon key has to travel on
-   the call. The old code sent no auth header at all. */
+   the call. The old code sent no auth header at all.
+
+   ## The identity has to be in the BODY, not the header
+
+   The anon key satisfies `verify_jwt` and nothing else. The scanner is a
+   separate R349 purchase, and `analyze-chart` checks that entitlement itself
+   — deliberately, since "the only credential the client holds is the anon
+   key, which ships inside the APK, so a gate enforced only in the UI is a
+   gate anyone can walk around."
+
+   It reads the identity from `body.email` and `body.android_id ?? deviceId`.
+   This call sent neither, so **every scan from iOS returned 401 NO_IDENTITY**
+   — "Sign in with the email you bought the scanner with." — no matter who
+   was signed in or what they had paid for. Confirmed against the live
+   endpoint with a real MT5 screenshot.
+
+   `android_id` is the field name Android happens to use and the server
+   accepts either; `deviceId` is sent because this is not an Android handset
+   and naming it otherwise would be a lie that the next reader has to
+   untangle. */
 export async function scanChart(imageBase64, mode) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/analyze-chart`, {
     method: 'POST',
@@ -44,10 +65,25 @@ export async function scanChart(imageBase64, mode) {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
     },
-    body: JSON.stringify({ imageBase64, trading_mode: mode || 'day' }),
+    body: JSON.stringify({
+      imageBase64,
+      trading_mode: mode || 'day',
+      email: authState.email || '',
+      deviceId: getDeviceId(),
+    }),
   })
 
   if (!res.ok) {
+    /* The server's own words. It distinguishes "not signed in" from "you have
+       not bought the scanner" from "your quota is spent", and those have three
+       different fixes — collapsing them into one generic is how a user who
+       needs to sign in is told to buy something they already own. */
+    const body = await res.json().catch(() => null)
+    if (body?.error) {
+      const err = new Error(String(body.error))
+      err.code = body.code
+      throw err
+    }
     const text = await res.text().catch(() => '')
     throw new Error(text ? `Analysis refused: ${text.slice(0, 160)}` : 'Could not reach the analysis service.')
   }
