@@ -73,7 +73,6 @@ import { theme, resolvedScheme } from '../stores/theme.js'
 import { robot, ensureSeeded } from '../stores/robot.js'
 import { session, startSession, stopSession, pushEvent } from '../stores/session.js'
 import { useSpeech } from '../composables/useSpeech.js'
-import { useVoiceCommands } from '../composables/useVoiceCommands.js'
 import { startFleetPolling, stopFleetPolling } from '../services/fleetService.js'
 
 import HomeBackdrop from '../components/home/HomeBackdrop.vue'
@@ -122,16 +121,23 @@ const sheetOpen = ref(false)
 function openInterface() { sheetOpen.value = true }
 function openRobots()    { showToast('Robot switching arrives with the Robot List widget') }
 // The real Asset Hub is a per-symbol sheet over `license_symbol_config`
-// and lands with the data wiring. Quotes is the honest destination for
-// now — TradingSymbols.vue is mock data, not a hub.
+// and lands with the data wiring. /pairs is the honest destination for now.
+// (It used to say "TradingSymbols.vue is mock data, not a hub" — that
+// component has since been deleted for exactly that reason.)
 function openAssets()    { router.push('/pairs') }
 
-/* ── Voice commands — Home-level, independent of the widget ──────── */
-useVoiceCommands({
-  onStart: () => { if (!session.isRunning) { startSession(); showToast('Order received · START'); speak('Order received. Starting.') } },
-  onStop:  () => { if (session.isRunning)  { stopSession();  showToast('Order received · STOP');  speak('Order received. Stopping.') } },
-  onPairs: () => router.push('/pairs'),
-})
+/* ── Voice: removed ───────────────────────────────────────────────────
+   `useVoiceCommands` opened a continuous SpeechRecognition session on
+   every Home mount — it is what put the SAY "START", "STOP" OR "PAIRS"
+   pill on the screen and what kept the orange mic indicator lit in the
+   status bar for the whole session.
+
+   The whole voice stack is out of the build until the rewritten version
+   lands: this composable, the Voice Console widget, and /voice. The
+   session actions it drove are unaffected — `startSession` / `stopSession`
+   are still what the ignition control calls, and they were never voice's
+   to own. Text-to-speech (`speak`) stays: it is the robot's confirmation
+   of an action the user took by hand, not a microphone. */
 
 /* ── MetaAPI: removed ─────────────────────────────────────────────────
    `setupMetaApi()` opened a streaming connection to MetaAPI on every Home

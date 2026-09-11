@@ -28,13 +28,15 @@
       </Transition>
     </RouterView>
 
-    <!-- Floating Pulse HUD — hidden on splash, onboarding and the gate, and on
-         the command-system routes: it pins its own robot avatar at
-         z-index 9999, directly over a Home whose entire subject is
-         already that robot. Two robot portraits on one screen, the
-         floating one landing in the middle of the licence rows. Same
-         reasoning this file already applies to payment-return. -->
-    <FloatingPulseHUD v-if="showDock && !isCommandRoute" />
+    <!-- FloatingPulseHUD: removed.
+
+         It was the last prop left on the screen. Its bot was hardcoded
+         "GhostRider X", its ONLINE/OFFLINE pill was a local ref a tap
+         flipped, and it carried a "SIM TRADE" button that faked an
+         execution with a shake animation — on a product whose entire
+         claim is that it places real orders. It rendered on Terminal and
+         Support, so a user two taps from Home could press SIM TRADE and
+         watch the app pretend. -->
 
     <!-- Floating Dock — hidden on splash, onboarding and the gate.
          Wrapped in a `.cmd` context because the dock now uses command
@@ -46,7 +48,7 @@
          Scheme follows the user only on command routes. The other five
          views the dock appears on are obsidian and dark-only, so a light
          dock would be the single pale object on a black screen. -->
-    <div v-if="showDock" class="cmd dock-host" :data-scheme="dockScheme">
+    <div v-if="showDock" class="cmd dock-host" :data-scheme="dockScheme" :data-motion="theme.motion">
       <FloatingDock />
     </div>
 
@@ -80,10 +82,9 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import FloatingDock from './components/FloatingDock.vue'
-import FloatingPulseHUD from './components/FloatingPulseHUD.vue'
 import iOSInstallCard from './components/iOSInstallCard.vue'
 import { accent } from './stores/accent.js'
-import { resolvedScheme } from './stores/theme.js'
+import { resolvedScheme, theme } from './stores/theme.js'
 
 const route   = useRoute()
 
@@ -93,7 +94,24 @@ const route   = useRoute()
 // into an unverified session, and its robot avatar reads as a second, competing
 // subject on a screen that has one thing to say.
 const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return']
-const showDock = computed(() => !HIDE_DOCK.includes(route.name))
+
+// Home layouts that render chrome-free.
+//
+// Full-Bleed Art and Focus Engine are the two art-forward compositions —
+// Full-Bleed IS the marketing screen, and Focus Engine strips the screen to
+// one control on purpose. A floating pill across the bottom of either is the
+// one element that stops them being the thing they were designed to be.
+//
+// Neither becomes a dead end: HomeTopBar's left button goes to the Settings
+// hub, which reaches every destination the dock offers. This only applies on
+// Home — the layout preference says nothing about Scanner or Terminal.
+const DOCKLESS_LAYOUTS = ['bleed', 'focus']
+
+const showDock = computed(() => {
+  if (HIDE_DOCK.includes(route.name)) return false
+  if (route.name === 'home' && DOCKLESS_LAYOUTS.includes(theme.layout)) return false
+  return true
+})
 
 // Routes on the light Nova system rather than obsidian glass. The shell's
 // black gradient and the bg video would otherwise sit behind — and blur
@@ -107,14 +125,12 @@ const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 // behind them — and worse, it would be blurred through by every glass
 // card on the screen, which is not the material HomeBackdrop composes.
 // `pairs` and `scanner` joined with their rewrites: both are command-system
-// screens now, and FloatingPulseHUD's z-index 9999 robot portrait was landing
-// in the middle of the allowance grid on one and over the verdict card on the
-// other — the same bleed-through this list already exists to stop on Home.
-// `sign-out` is a command-system screen too, and the HUD portrait landed
-// squarely on the list of what gets erased.
-// `trades` is the same story with the highest stakes yet: the portrait sat
-// directly over the equity figure, so the one number the screen exists to
-// report was the one thing covered up.
+// screens now, and `sign-out` and `trades` followed.
+//
+// (This list used to carry a second job: keeping the old FloatingPulseHUD's
+// z-index 9999 robot portrait off screens it was landing on top of. That
+// component is gone — see the note in the template — so what is left here is
+// only the bg_loop / glass-blur reasoning above.)
 const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades']
 const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
 

@@ -23,7 +23,6 @@
       <WidgetSlot v-for="id in widgets" :key="id" :id="id" @toast="$emit('toast', $event)" />
     </div>
 
-    <span class="bleed-mark cc-label">Powered by Nova Edge</span>
   </div>
 </template>
 
@@ -47,7 +46,9 @@ const widgets = computed(() => activeWidgets.value)
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding: calc(var(--cc-safe-top) + 8px) 20px calc(var(--cc-safe-bottom) + 108px);
+  /* See FocusEngine — this layout is dockless too, and it is the one the
+      composition matters most on. */
+  padding: calc(var(--cc-safe-top) + 8px) 20px calc(var(--cc-safe-bottom) + 28px);
 }
 
 /* The composition: everything is pushed to the lower third so the art
@@ -58,7 +59,7 @@ const widgets = computed(() => activeWidgets.value)
    off the bottom as soon as a widget was shown. */
 .bleed-body {
   flex: 0 0 auto;
-  min-height: calc(100dvh - var(--cc-safe-top) - var(--cc-safe-bottom) - 170px);
+  min-height: calc(100dvh - var(--cc-safe-top) - var(--cc-safe-bottom) - 90px);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -75,27 +76,5 @@ const widgets = computed(() => activeWidgets.value)
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-/* Sits directly on the art with no card behind it, so it takes ink-3
-   and a scrim-coloured shadow. ink-4 measured 2.84:1 in light mode and
-   ink-5 vanished entirely on darker mentor images; ink-3 clears 4.5.
-   The shadow has to flip with the scheme — a black glow under dark
-   text on a pale backdrop just makes it muddy. */
-.bleed-mark {
-  align-self: center;
-  margin-top: 18px;
-  font-size: 9px;
-  letter-spacing: 0.22em;
-  color: var(--cc-ink-3);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.60);
-  /* The ground above runs off the bottom of the layout to cover the
-     fixed backdrop, and as a positioned element it would paint over
-     this static one. Lifting it into the same layer keeps it visible. */
-  position: relative;
-  z-index: 1;
-}
-.cmd[data-scheme="light"] .bleed-mark {
-  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.85);
 }
 </style>

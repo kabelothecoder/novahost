@@ -131,7 +131,9 @@ function continueIn () {
 .ret {
   position: relative;
   width: 100%;
-  min-height: 100dvh;
+  /* The drifting pools are absolute against this element, so it stays the
+     fixed-height frame and .ret-scroll inside it does the scrolling. */
+  height: 100dvh;
   overflow: hidden;
   background: linear-gradient(180deg, var(--nv-art-top), var(--nv-art-bottom));
 }
@@ -158,9 +160,17 @@ function continueIn () {
 .ret-scroll {
   position: relative;
   z-index: 1;
-  min-height: 100dvh;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
-  align-items: center;
+  /* flex-start plus `margin: auto 0` on the card, NOT align-items: center.
+     A centred flex item that outgrows its container overflows in BOTH
+     directions, and the top overflow of a scroll container is
+     unreachable — so a long refusal message from PayFast would put the
+     heading above the scroll origin with no way to reach it. Auto margins
+     centre when there is room and collapse to zero when there is not. */
+  align-items: flex-start;
   justify-content: center;
   padding: calc(28px + var(--nv-safe-top)) 20px calc(28px + var(--nv-safe-bottom));
 }
@@ -168,6 +178,7 @@ function continueIn () {
 .ret-card {
   width: 100%;
   max-width: 380px;
+  margin: auto 0;
   padding: 30px 24px 26px;
   border-radius: 26px;
   text-align: center;

@@ -388,7 +388,18 @@ onUnmounted(stopPositionsPolling)
 
 <style scoped>
 .trd {
-  min-height: 100dvh;
+  /* height, NOT min-height. `.app-shell` is `height: 100dvh; overflow:
+     hidden`, so it clips this view; with min-height this element grows
+     past the shell rather than scrolling inside it and everything below
+     the fold becomes unreachable. Installed to the Home screen there is
+     no collapsing URL bar to jostle it into view, so the page just
+     freezes — which is the bug this fixes.
+
+     overflow-y: auto is what makes this element the scroll container. */
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background: var(--cc-canvas);
   color: var(--cc-ink);
   font-family: var(--cc-font);

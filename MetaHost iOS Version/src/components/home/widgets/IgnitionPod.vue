@@ -44,10 +44,7 @@
       <span>Info</span>
     </button>
 
-    <span class="orbit-status cc-mono">
-      <span class="cc-dot" :class="{ 'cc-dot-live': session.isRunning }"></span>
-      {{ statusLine }}
-    </span>
+    <PoweredMark class="orbit-status" />
   </div>
 
   <div v-else class="pod" :class="`pod-${variant}`">
@@ -70,10 +67,7 @@
       <span>{{ session.isRunning ? 'STOP' : 'START' }}</span>
     </button>
 
-    <span class="pod-status cc-mono">
-      <span class="cc-dot" :class="{ 'cc-dot-live': session.isRunning }"></span>
-      {{ statusLine }}
-    </span>
+    <PoweredMark class="pod-status" />
 
     <!-- Command Deck draws its own four-up action centre, so the pod's
          built-in pair would be a second, shorter copy of it directly
@@ -107,6 +101,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { animate } from 'motion'
+import PoweredMark from '../PoweredMark.vue'
 import { session, startSession, stopSession, pushEvent } from '../../../stores/session.js'
 import { robot } from '../../../stores/robot.js'
 import { useSpeech, haptic } from '../../../composables/useSpeech.js'
@@ -120,15 +115,17 @@ const router = useRouter()
 const { speak } = useSpeech()
 const btn = ref(null)
 
-/**
- * Reports what is actually true rather than a fixed "STANDBY · BROKER
- * LINKED" — the doc's own caption assumes a linked broker, and saying
- * that with none connected would be the screen lying about readiness.
- */
-const statusLine = computed(() => {
-  if (session.isRunning) return session.brokerConnected ? 'EXECUTING · LIVE' : 'RUNNING · NO BROKER'
-  return session.brokerConnected ? 'STANDBY · BROKER LINKED' : 'STANDBY · NO BROKER'
-})
+/* The line under the ignition control used to report run and broker
+   state — "STANDBY · NO BROKER" and its three siblings. It is the brand
+   mark now, by request: this is the screen mentors photograph, and the
+   caption a prospect reads should say whose product it is.
+
+   Run state did not go with it. The control itself is the readout —
+   START and STOP are different words on a differently coloured disc, and
+   the running one leaves the accent entirely for the sell red. Broker
+   state is the one thing this row genuinely no longer says, and it is
+   still stated in full on Neon Frame's own broker strip, on the Open
+   Trades widget ("No broker linked yet") and on the System Health card. */
 
 function toggle() {
   const next = !session.isRunning
@@ -259,16 +256,9 @@ function goQuotes() {
 }
 
 /* Spans all three columns, under the row. */
-.orbit-status {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--cc-ink-3);
-}
+/* Placement only — type, colour and the art-proof shadow all live in
+   PoweredMark, so the two variants cannot drift apart. */
+.orbit-status { grid-column: 1 / -1 }
 
 /* The disc keeps white ink on both schemes: its own well is dark in
    light mode too, so the light scheme's ink tokens would vanish. */
@@ -298,23 +288,8 @@ function goQuotes() {
 /* ink-3, not ink-4. This line sits on the backdrop rather than inside a
    card, and at 10px uppercase ink-4 measured 2.84:1 in light mode —
    under the 4.5 floor. ink-3 clears it at 5.58. */
-.pod-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--cc-ink-3);
-  /* The pod sits directly on mentor art in three of the five layouts,
-     and on Focus Engine this line lands near the midpoint where the
-     backdrop's bottom scrim has barely started. The shadow costs
-     nothing on the layouts where it sits on a ground. */
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.65);
-}
-.cmd[data-scheme="light"] .pod-status {
-  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.85);
-}
+/* See .orbit-status — the mark styles itself. */
+.pod-status { margin-top: 2px }
 
 .pod-actions {
   display: flex;

@@ -260,7 +260,10 @@
               @click="pick('nameFont', f.id)"
             >
               <span class="isheet-pick-copy">
-                <span class="isheet-sample cc-name">{{ robot.name || 'Nova Edge' }}</span>
+                <!-- robot.name is a getter that already falls back to 'MetaBot', so the
+                     `|| 'Nova Edge'` that used to be here was both unreachable AND a
+                     brand string the rename missed. One fallback, in the store. -->
+                <span class="isheet-sample cc-name">{{ robot.name }}</span>
                 <span class="cc-caption">{{ f.name }} · {{ f.face }}</span>
               </span>
               <span v-if="theme.nameFont === f.id" class="isheet-tick" v-html="TICK"></span>

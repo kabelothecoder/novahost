@@ -49,7 +49,6 @@
       <WidgetSlot v-for="id in widgets" :key="id" :id="id" @toast="$emit('toast', $event)" />
     </div>
 
-    <span class="neon-mark cc-label">Powered by Nova Edge</span>
   </div>
 </template>
 
@@ -184,15 +183,5 @@ const brokerLine = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.neon-mark {
-  align-self: center;
-  margin-top: 22px;
-  font-size: 9px;
-  letter-spacing: 0.22em;
-  color: var(--cc-ink-4);
-  position: relative;
-  z-index: 1;
 }
 </style>

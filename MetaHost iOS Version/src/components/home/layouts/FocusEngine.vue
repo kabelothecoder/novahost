@@ -61,7 +61,11 @@ const nameLines = computed(() => {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding: calc(var(--cc-safe-top) + 8px) 20px calc(var(--cc-safe-bottom) + 108px);
+  /* 108px here reserved room for the floating dock. Focus Engine renders
+     chrome-free (see DOCKLESS_LAYOUTS in App.vue), so that reservation is
+     now just a dead band under the composition. 28px is the breathing
+     room the last element wants against the screen edge. */
+  padding: calc(var(--cc-safe-top) + 8px) 20px calc(var(--cc-safe-bottom) + 28px);
 }
 
 /* Centred, unlike Full-Bleed's bottom anchor.
@@ -74,7 +78,7 @@ const nameLines = computed(() => {
    the widget count. */
 .focus-body {
   flex: 0 0 auto;
-  min-height: calc(100dvh - var(--cc-safe-top) - var(--cc-safe-bottom) - 170px);
+  min-height: calc(100dvh - var(--cc-safe-top) - var(--cc-safe-bottom) - 90px);
   display: flex;
   flex-direction: column;
   align-items: center;

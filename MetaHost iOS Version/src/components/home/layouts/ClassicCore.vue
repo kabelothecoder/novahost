@@ -24,7 +24,6 @@
       <WidgetSlot v-for="id in widgets" :key="id" :id="id" @toast="$emit('toast', $event)" />
     </div>
 
-    <span class="classic-mark cc-label">Powered by Nova Edge</span>
   </div>
 </template>
 
@@ -66,15 +65,5 @@ const widgets = computed(() => activeWidgets.value)
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.classic-mark {
-  align-self: center;
-  margin-top: 22px;
-  font-size: 9px;
-  letter-spacing: 0.22em;
-  color: var(--cc-ink-4);
-  position: relative;
-  z-index: 1;
 }
 </style>

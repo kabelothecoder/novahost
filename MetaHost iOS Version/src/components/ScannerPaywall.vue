@@ -1,50 +1,60 @@
 <template>
   <div class="sp">
 
-    <div class="sp-zone">
-      <span class="sp-grid" aria-hidden="true"></span>
+    <!-- ═══ 1 · THE PITCH ═══════════════════════════════════════════
+         A badge, not a barrier.
 
-      <div class="sp-lock">
-        <div class="sp-lock-ring">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="4" y="10.5" width="16" height="10.5" rx="2.6" />
-            <path d="M8 10.5 V7.2 A4 4 0 0 1 16 7.2 V10.5" />
-          </svg>
-        </div>
-        <span class="sp-lock-main">SCANNER LOCKED</span>
-        <span class="sp-lock-sub">ONCE-OFF UNLOCK</span>
+         This screen used to open with a 68px padlock inside a dashed
+         empty box captioned SCANNER LOCKED. That is an accurate
+         description of the state and a terrible thing to sell with: it
+         tells the reader what they cannot do before it has told them
+         what the thing is. None of the reference paywalls worth copying
+         show a lock at all — they lead with the capability and let the
+         price be the only friction.
+
+         So the state is demoted to a PRO chip in the corner and the
+         screen leads with what the scanner DOES. -->
+    <header class="sp-hero">
+      <span class="sp-glow" aria-hidden="true"></span>
+
+      <div class="sp-hero-top">
+        <span class="sp-eyebrow cc-label">AI Chart Scanner</span>
+        <span class="sp-pro">PRO</span>
       </div>
-    </div>
 
-    <div class="sp-card">
-      <div class="sp-head">
-        <span class="sp-name">AI CHART SCANNER</span>
-        <span class="sp-price">R349</span>
-      </div>
+      <h2 class="sp-hl">Read any chart<br />in seconds.</h2>
 
-      <p class="sp-blurb">
-        Send a screenshot of any chart and get the setup read back — direction,
-        confidence, entry, stop loss and take profit.
+      <p class="sp-sub">
+        Send a screenshot of any chart and get the setup read back —
+        direction, confidence, entry, stop loss and take profit.
       </p>
+    </header>
 
-      <ul class="sp-list">
-        <li v-for="line in FEATURES" :key="line">
-          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="M4.6 10.2 L8.4 13.6 L15.4 6.2" stroke="currentColor" stroke-width="2.4"
-                  stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          <span>{{ line }}</span>
-        </li>
-      </ul>
+    <!-- ═══ 2 · WHAT YOU GET ════════════════════════════════════════
+         One card per capability, each with its own coloured icon tile.
+         Three cards rather than three list rows because a row of 13px
+         text with a tick beside it is a terms-and-conditions block; a
+         card with a coloured glyph is a feature. -->
+    <ul class="sp-feats">
+      <li v-for="f in FEATURES" :key="f.title" class="sp-feat cc-card">
+        <span class="sp-feat-icon" :class="`is-${f.tone}`" v-html="f.icon"></span>
+        <span class="sp-feat-copy">
+          <span class="sp-feat-t">{{ f.title }}</span>
+          <span class="sp-feat-d cc-caption">{{ f.desc }}</span>
+        </span>
+      </li>
+    </ul>
 
-      <div class="sp-foot">
-        <span class="sp-tag">ONCE-OFF · ADD-ON</span>
-        <!-- The collected amount is a rand over the marketing price to absorb
-             the card fee. Showing only the round number would put a different
-             figure here than on the PayFast page. -->
-        <span class="sp-charged">R350.00 at checkout</span>
-      </div>
+    <!-- ═══ 3 · THE PRICE ═══════════════════════════════════════════ -->
+    <div class="sp-price cc-card">
+      <span class="sp-price-copy">
+        <span class="sp-price-k cc-label">Once-off · add-on</span>
+        <!-- The collected amount is a rand over the marketing price to
+             absorb the card fee. Showing only the round number would put
+             a different figure here than on the PayFast page. -->
+        <span class="sp-price-s cc-caption">R350.00 at checkout</span>
+      </span>
+      <span class="sp-price-v cc-figure">R349</span>
     </div>
 
     <Transition name="sp-note">
@@ -53,19 +63,22 @@
       </p>
     </Transition>
 
+    <!-- ═══ 4 · CTA ═════════════════════════════════════════════════ -->
     <button type="button" class="sp-cta" :disabled="busy || !email" @click="startCheckout">
       <template v-if="!busy">
-        <span>UNLOCK SCANNER</span>
+        <span>Unlock Scanner</span>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2.5" stroke-linecap="round"><path d="m13 2 9 9-9 9" /><path d="M22 11H3" /></svg>
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m13 3 9 9-9 9" /><path d="M22 12H3" />
+        </svg>
       </template>
       <template v-else>
         <span class="sp-spinner" aria-hidden="true"></span>
-        <span>OPENING CHECKOUT</span>
+        <span>Opening checkout</span>
       </template>
     </button>
 
-    <p class="sp-secure">
+    <p class="sp-secure cc-caption">
       Payment is handled by PayFast. NovaHost never sees your card details.
     </p>
 
@@ -82,6 +95,14 @@
  * seen, next to the app purchase they were actually there for. This screen has
  * the pitch the other one could not make: it is standing where the scanner
  * would be.
+ *
+ * ── Restyled onto the command system ──────────────────────────────────
+ * Everything visual here was written against the OLD glass vocabulary —
+ * `rgba(var(--accent-rgb), …)`, `'Courier New'`, hand-rolled rgba whites.
+ * ScannerView moved onto command.css and this did not, so the one screen a
+ * user is asked to spend money on was the one screen that looked like a
+ * different app: different type, different card material, an accent that did
+ * not follow the mentor's swatch, and no light scheme at all.
  *
  * The checkout is the same one PaymentView runs — `generate-payfast-checkout`
  * with `product: 'SCANNER'` — and the same rules apply to reading its answer:
@@ -102,10 +123,29 @@ import { secStorage } from '../utils/secStorage'
 
 const emit = defineEmits(['unlocked'])
 
+/* Was three bare strings. Each is now a titled card, because the middle
+   one ("Entry, stop loss and take profit levels") is the whole product
+   and it was reading as the second of three equal ticks. Tones are
+   semantic tokens, not literals, so they follow the scheme. */
 const FEATURES = [
-  'Direction and confidence read off the chart',
-  'Entry, stop loss and take profit levels',
-  'Send the result straight to your terminal',
+  {
+    tone: 'buy',
+    title: 'Direction and confidence',
+    desc: 'Read straight off your chart — including the levels you drew yourself.',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>`,
+  },
+  {
+    tone: 'accent',
+    title: 'Entry, stop loss, take profit',
+    desc: 'A full plan with real price levels, not a direction and a shrug.',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6.5" x2="21" y2="6.5"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17.5" x2="21" y2="17.5"/><circle cx="8" cy="6.5" r="2" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="11" cy="17.5" r="2" fill="currentColor" stroke="none"/></svg>`,
+  },
+  {
+    tone: 'warn',
+    title: 'Straight to your terminal',
+    desc: 'Send the reading to your broker as a staged order, or just keep it.',
+    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.5 2.5-10 10"/><path d="M21.5 2.5 15 21l-3.5-8.5L3 9z"/></svg>`,
+  },
 ]
 
 const email = computed(() => authState.email || '')
@@ -210,160 +250,226 @@ onUnmounted(() => document.removeEventListener('visibilitychange', onVisible))
 </script>
 
 <style scoped>
-/* The HUD's vocabulary, not Nova's glass: this sits inside the Vision HUD
-   screen, where the ground is dark and the accent is cyan. */
-.sp { display: flex; flex-direction: column; gap: 14px; }
+.sp {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 
-/* ── The locked scan zone, standing in for the real one ───────────────── */
-.sp-zone {
+/* ── 1 · Hero ─────────────────────────────────────────────────────── */
+.sp-hero {
   position: relative;
-  width: 100%;
-  aspect-ratio: 1.35;
-  border-radius: 18px;
-  overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px dashed rgba(var(--accent-rgb), 0.28);
-  background: rgba(var(--accent-rgb), 0.03);
+  padding: 4px 2px 2px;
+  overflow: visible;
 }
 
-.sp-grid {
-  position: absolute; inset: 0; display: block; pointer-events: none;
-  background-image:
-    repeating-linear-gradient(0deg,  rgba(var(--accent-rgb), 0.07) 0 1px, transparent 1px 26px),
-    repeating-linear-gradient(90deg, rgba(var(--accent-rgb), 0.07) 0 1px, transparent 1px 26px);
-  -webkit-mask: radial-gradient(120% 80% at 50% 45%, #000 25%, transparent 78%);
-          mask: radial-gradient(120% 80% at 50% 45%, #000 25%, transparent 78%);
-}
-
-.sp-lock {
-  position: relative;
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-}
-
-.sp-lock-ring {
-  width: 68px; height: 68px;
+/* Replaces the dashed empty box. A single soft accent bloom behind the
+   headline gives the screen a subject without pretending to show a scan
+   that has not happened. */
+.sp-glow {
+  position: absolute;
+  left: -14%;
+  top: -46px;
+  width: 78%;
+  height: 190px;
   border-radius: 50%;
-  border: 1.5px solid rgba(var(--accent-rgb), 0.3);
-  background: rgba(var(--accent-rgb), 0.06);
-  display: flex; align-items: center; justify-content: center;
-  color: rgba(var(--accent-rgb), 0.6);
+  pointer-events: none;
+  background: radial-gradient(closest-side,
+    rgba(var(--cc-accent-rgb), calc(0.30 * var(--cc-glow))),
+    rgba(var(--cc-accent-rgb), 0) 72%);
 }
 
-.sp-lock-main {
-  font-family: 'Courier New', monospace;
-  font-weight: 800; letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.45);
-}
-.sp-lock-sub {
-  font-family: 'Courier New', monospace;
-  font-size: 0.65rem; letter-spacing: 0.12em;
-  color: rgba(var(--accent-rgb), 0.5);
+.sp-hero-top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
 }
 
-/* ── The offer ───────────────────────────────────────────────────────── */
-.sp-card {
-  padding: 18px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.sp-eyebrow { color: var(--cc-ink-3) }
+
+/* The demoted lock. It still says the scanner is a paid tier — it just
+   says it as a badge on the product rather than as a barrier across it. */
+.sp-pro {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--cc-accent-fill, var(--cc-accent));
+  color: var(--cc-accent-fill-ink, var(--cc-accent-ink));
+  font-family: var(--cc-font);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
 }
 
-.sp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-
-.sp-name {
-  font-family: 'Courier New', monospace;
-  font-size: 0.82rem; font-weight: 900; letter-spacing: 0.11em;
-  color: #E8F0FF;
+.sp-hl {
+  position: relative;
+  margin: 0;
+  font-family: var(--cc-font);
+  font-size: 27px;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--cc-ink);
 }
-.sp-price { font-size: 1.35rem; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; }
 
-.sp-blurb {
-  margin: 11px 0 0;
-  font-size: 0.85rem; line-height: 1.5;
-  color: rgba(255, 255, 255, 0.62);
+.sp-sub {
+  position: relative;
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--cc-ink-3);
   text-wrap: pretty;
 }
 
-.sp-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.sp-list li {
-  display: flex; align-items: flex-start; gap: 9px;
-  font-size: 0.8rem; line-height: 1.45;
-  color: rgba(255, 255, 255, 0.55);
+/* ── 2 · Features ─────────────────────────────────────────────────── */
+.sp-feats {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
 }
-.sp-list svg { flex: none; margin-top: 3px; color: var(--accent); }
 
-.sp-foot {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 15px;
-  padding-top: 13px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+.sp-feat {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
 }
-.sp-tag {
-  font-family: 'Courier New', monospace;
-  font-size: 0.62rem; letter-spacing: 0.12em;
-  color: rgba(var(--accent-rgb), 0.6);
-}
-.sp-charged { font-size: 0.72rem; color: rgba(255, 255, 255, 0.38); }
 
-/* ── Notice ──────────────────────────────────────────────────────────── */
+.sp-feat-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--cc-r-tile);
+}
+/* Tinted tiles rather than bare glyphs: at 20px a stroke icon on a card
+   has no presence, and the three then read as one grey block. */
+.sp-feat-icon.is-buy    { background: var(--cc-buy-dim);  color: var(--cc-buy) }
+.sp-feat-icon.is-warn   { background: rgba(232, 163, 61, 0.14); color: var(--cc-warn) }
+.sp-feat-icon.is-accent {
+  background: rgba(var(--cc-accent-rgb), 0.14);
+  color: var(--cc-accent-text);
+}
+
+.sp-feat-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sp-feat-t {
+  font-family: var(--cc-font);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--cc-ink);
+}
+.sp-feat-d { line-height: 1.45; text-wrap: pretty }
+
+/* ── 3 · Price ────────────────────────────────────────────────────── */
+.sp-price {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+}
+.sp-price-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.sp-price-k { color: var(--cc-ink-3) }
+.sp-price-v {
+  flex: none;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--cc-accent-text);
+}
+
+/* ── Notice ───────────────────────────────────────────────────────── */
 .sp-notice {
   margin: 0;
   padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.18);
-  font-size: 0.8rem; line-height: 1.45;
-  color: rgba(255, 255, 255, 0.72);
+  border-radius: var(--cc-r-tile);
+  background: rgba(var(--cc-accent-rgb), 0.09);
+  border: 1px solid rgba(var(--cc-accent-rgb), 0.20);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--cc-ink-2);
   text-wrap: pretty;
 }
 .sp-notice-bad {
-  background: rgba(255, 0, 60, 0.08);
-  border-color: rgba(255, 0, 60, 0.22);
-  color: #FF7A96;
+  background: var(--cc-sell-dim);
+  border-color: rgba(224, 84, 78, 0.30);
+  color: var(--cc-sell-text);
 }
 
 .sp-note-enter-active,
-.sp-note-leave-active { transition: opacity 220ms linear, transform 220ms ease-out; }
+.sp-note-leave-active { transition: opacity 220ms linear, transform 220ms var(--cc-ease-out) }
 .sp-note-enter-from,
-.sp-note-leave-to { opacity: 0; transform: translateY(-5px); }
+.sp-note-leave-to { opacity: 0; transform: translateY(-5px) }
 
-/* ── CTA, matching .execute-btn so the screen has one button language ─── */
+/* ── 4 · CTA ──────────────────────────────────────────────────────── */
 .sp-cta {
-  width: 100%; padding: 16px;
-  border-radius: 14px;
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1.5px solid var(--accent);
-  color: var(--accent);
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem; font-weight: 900; letter-spacing: 0.12em;
-  display: flex; align-items: center; justify-content: center; gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  margin-top: 2px;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--cc-r-chip);
+  /* The accent FILL, so a user on a gradient gets the gradient here —
+     and its measured ink, which is why the ramp carries its own. The old
+     button was a 12% accent wash with accent-coloured text on it, which
+     on the low-luminance swatches (Rust, Forest) was accent-on-accent. */
+  background: var(--cc-accent-fill, var(--cc-accent));
+  color: var(--cc-accent-fill-ink, var(--cc-accent-ink));
+  font-family: var(--cc-font);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   cursor: pointer;
-  box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.2);
-  transition: all 0.3s ease;
+  box-shadow: 0 0 calc(30px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.42 * var(--cc-glow)));
+  transition: transform 200ms var(--cc-spring), box-shadow 240ms var(--cc-ease);
 }
-.sp-cta:active { transform: scale(0.97); box-shadow: 0 0 40px rgba(var(--accent-rgb), 0.4); }
+.sp-cta:active {
+  transform: scale(0.975);
+  box-shadow: 0 0 calc(42px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.6 * var(--cc-glow)));
+}
 .sp-cta:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
   box-shadow: none;
   transform: none;
 }
 
 .sp-spinner {
-  width: 15px; height: 15px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
-  border: 2px solid rgba(var(--accent-rgb), 0.3);
-  border-top-color: var(--accent);
+  border: 2px solid rgba(0, 0, 0, 0.22);
+  border-top-color: currentColor;
   animation: spSpin 800ms linear infinite;
 }
-@keyframes spSpin { to { transform: rotate(360deg); } }
+@keyframes spSpin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) {
+  .sp-spinner { animation-duration: 2.4s }
+}
 
 .sp-secure {
   margin: 0;
   text-align: center;
-  font-size: 0.68rem; line-height: 1.4;
-  color: rgba(255, 255, 255, 0.3);
+  line-height: 1.45;
   text-wrap: pretty;
 }
 </style>

@@ -28,7 +28,6 @@ const REGISTRY = {
   systemHealth: () => import('./widgets/SystemHealthWidget.vue'),
   robotList:    () => import('./widgets/RobotListWidget.vue'),
   fleetStatus:  () => import('./widgets/FleetStatusWidget.vue'),
-  voiceConsole: () => import('./widgets/VoiceConsoleWidget.vue'),
   chartScanner: () => import('./widgets/ChartScannerWidget.vue'),
   terminalLog:  () => import('./widgets/TerminalLogWidget.vue'),
 }

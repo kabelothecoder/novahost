@@ -79,11 +79,6 @@ const routes = [
     component: () => import('../views/ScannerView.vue'),
   },
   {
-    path: '/voice',
-    name: 'voice',
-    component: () => import('../views/VoiceView.vue'),
-  },
-  {
     /* Open positions, the chart, and what the account has actually done.
        Everything on it comes from the broker — it is the only place that
        knows a position exists. */

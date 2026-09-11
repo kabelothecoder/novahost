@@ -33,8 +33,6 @@ const initialAllowedSymbols = secStorage.getItem('ALLOWED_SYMBOLS', true) || []
 export const accent = reactive({
   current:     initialAccent,
   videoBg:     VIDEO_BG_OPTIONS[0],
-  isListening: false,
-  isSpeaking:  false,
   micVolume:   0,
   // ── Robot identity (synced from license) ──────────────────
   robotName:   savedRobotName,

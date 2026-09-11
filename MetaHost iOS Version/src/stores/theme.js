@@ -62,7 +62,6 @@ export const WIDGETS = [
   { id: 'systemHealth', name: 'System Health',        desc: 'Readiness score across checks',   pinned: false },
   { id: 'robotList',    name: 'Robot List',           desc: 'Licence-bound robots + connect',  pinned: false },
   { id: 'fleetStatus',  name: 'Fleet Status',         desc: 'Uptime · ping · heartbeat',       pinned: false },
-  { id: 'voiceConsole', name: 'Voice Console',        desc: 'Waveform, push to talk',          pinned: false },
   { id: 'chartScanner', name: 'AI Chart Scanner',     desc: 'Screenshot dropzone',             pinned: false },
   { id: 'terminalLog',  name: 'Terminal Activity Log', desc: 'Pulse service events',           pinned: false },
 ]
@@ -229,8 +228,8 @@ const DEFAULT_HIDDEN = {
      the smaller cost. */
   classic: ['systemHealth', 'terminalLog'],
   focus:   ['systemHealth', 'robotList', 'fleetStatus', 'terminalLog'],
-  bleed:   ['systemHealth', 'robotList', 'fleetStatus', 'voiceConsole', 'chartScanner', 'terminalLog'],
-  neon:    ['systemHealth', 'voiceConsole', 'terminalLog'],
+  bleed:   ['systemHealth', 'robotList', 'fleetStatus', 'chartScanner', 'terminalLog'],
+  neon:    ['systemHealth', 'terminalLog'],
   /* Signal Feed draws its own fleet strip and terminal section as part
      of the layout, so the widget versions of both would render the
      same numbers twice on one screen. They remain available in Arrange
@@ -238,8 +237,8 @@ const DEFAULT_HIDDEN = {
   feed:    ['systemHealth', 'fleetStatus', 'terminalLog'],
   /* Command Deck draws the health ring, the four fleet tiles and the
      activity stream as structure, so all three widget versions would
-     be duplicates. Robot List, Voice Console and Chart Scanner stack
-     below the deck as normal. */
+     be duplicates. Robot List and Chart Scanner stack below the deck
+     as normal. */
   deck:    ['systemHealth', 'fleetStatus', 'terminalLog'],
 }
 
