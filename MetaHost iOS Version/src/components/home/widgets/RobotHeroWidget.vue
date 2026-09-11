@@ -50,14 +50,27 @@ import { ref, computed } from 'vue'
 import { activeArtMode } from '../../../stores/theme.js'
 import { robot, activeEa, FALLBACK_AVATAR } from '../../../stores/robot.js'
 
-defineProps({
+const props = defineProps({
   /** Layouts set their own weight — Full-Bleed wants this enormous,
    *  Classic Core wants it modest. */
   size: { type: String, default: 'md' }, // 'sm' | 'md' | 'lg'
+
+  /**
+   * Force an art mode, ignoring the per-layout preference.
+   *
+   * For layouts whose entire identity IS a particular crop. Neon Frame is
+   * the case that needed it: the art mode is a per-layout setting, and with
+   * it on `bleed` the widget omits the art entirely — HomeBackdrop draws the
+   * portrait full-screen and the frame is left as an empty bordered box with
+   * a name in it. The layout stops being the thing it is named after.
+   *
+   * Left unset everywhere else, so the picker keeps working as designed.
+   */
+  forceMode: { type: String, default: null },
 })
 
 const failed = ref(false)
-const mode = computed(() => activeArtMode.value)
+const mode = computed(() => props.forceMode || activeArtMode.value)
 
 const artSrc = computed(() => {
   if (failed.value) return FALLBACK_AVATAR
@@ -101,6 +114,29 @@ const symbolLine = computed(() => {
 .hero-art img {
   width: 100%;
   height: 100%;
+  /**
+   * `aspect-ratio` is doing the real work here, and without it the art
+   * escapes its own frame.
+   *
+   * `.hero-art` is `display: grid` with an AUTO row, so the row's height
+   * depends on its content — and an item asking for `height: 100%` of a row
+   * that is sized by that item is a cyclic dependency, which browsers
+   * resolve by treating the percentage as `auto`. The image then lays out at
+   * its natural aspect: the robot art is a 576x1024 portrait, so in a 132px
+   * frame it rendered **132 x 234** and spilled 102px out the bottom, over
+   * the card and straight through the robot's name. Measured exactly that on
+   * Neon Frame.
+   *
+   * Avatar mode had the same broken geometry and merely hid it behind
+   * `overflow: hidden` — the image was still 120x213, so `object-position`
+   * was being applied to a box that had already been cropped by the parent,
+   * and the crop everyone tuned was not the crop being shown.
+   *
+   * A square ratio makes the height fall out of the width with no cycle, so
+   * `object-fit: cover` gets a real box to crop into and the framed art can
+   * keep `overflow: visible` for its ring glow.
+   */
+  aspect-ratio: 1;
   object-fit: cover;
   object-position: 50% 38%;
   display: block;

@@ -76,3 +76,33 @@ export function devGateBypassActive (to) {
 
   return localStorage.getItem(FLAG) === 'true'
 }
+
+/**
+ * Whether the Chart Scanner's paywall should be waved through.
+ *
+ * Same three locks as the gate above — `import.meta.env.DEV` at the CALL
+ * SITE, a stored flag, and the flag only set from `?devgate=1` — so this
+ * dies with the rest of the module in a production build.
+ *
+ * ## This only unlocks the SCREEN
+ *
+ * `analyze-chart` enforces entitlement server-side and is entirely
+ * unaffected by anything here, deliberately: its own note is that "the only
+ * credential the client holds is the anon key, which ships inside the APK,
+ * so a gate enforced only in the UI is a gate anyone can walk around."
+ *
+ * So a scan run behind this bypass still needs a real entitled identity, and
+ * will answer:
+ *
+ *   NO_IDENTITY     — no email stored on the device; sign in on /payment.
+ *   NOT_ENTITLED    — that email has not bought the R349 scanner.
+ *   DEVICE_MISMATCH — the email HAS it, bound to a different handset. Clear
+ *                     the binding with the `support-reset-device` function.
+ *
+ * That is the correct behaviour and is not something a dev flag should be
+ * able to defeat. The bypass exists so the scan flow, the reading, the
+ * ladder and the guardrails can be exercised without a paywall in the way.
+ */
+export function devScannerUnlocked () {
+  return localStorage.getItem(FLAG) === 'true'
+}

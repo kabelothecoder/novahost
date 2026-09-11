@@ -34,20 +34,20 @@
         The chart could not load. It needs a connection, and some networks
         block it.
       </p>
+      <!--
+        Only inside the failure state, and only in dev. TradingView can refuse
+        to serve a page on localhost, so the component looks broken on a dev
+        machine while being perfectly correct — without this the next person
+        spends an hour debugging something that works. It was briefly a
+        permanent banner, which was worse than nothing: it sat over a chart
+        that HAD loaded and claimed it had not.
+      -->
+      <p v-if="isDevLocalhost" class="tvc-dev cc-caption">
+        dev: TradingView sometimes refuses a localhost parent. Check on the
+        deployed domain before treating this as a bug.
+      </p>
       <button class="tvc-retry" @click="remount">Try again</button>
     </div>
-
-    <!--
-      Development only, and it earns its place: TradingView serves no chart to
-      a page on localhost, so the whole component looks broken on every dev
-      machine. Without this line the next person to touch it spends an hour
-      debugging a component that is working. Stripped from production builds
-      by the `import.meta.env.DEV` guard.
-    -->
-    <p v-if="isDevLocalhost" class="tvc-dev">
-      dev: TradingView does not serve charts to localhost — expect this blank
-      here, and check it on the deployed domain.
-    </p>
   </div>
 </template>
 
@@ -321,12 +321,10 @@ onBeforeUnmount(() => clearTimeout(failTimer))
 }
 
 .tvc-dev {
-  position: absolute; left: 0; right: 0; bottom: 0;
-  margin: 0; padding: 7px 10px;
-  font-size: 10.5px; line-height: 1.4;
+  margin: 2px 0 0;
+  max-width: 32ch;
+  line-height: 1.45;
   color: var(--cc-warn);
-  background: rgba(0, 0, 0, 0.55);
-  text-align: center;
 }
 
 /* A spinner that never stops is worse than no spinner on a screen someone is

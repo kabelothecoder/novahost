@@ -337,10 +337,21 @@ import ScannerPaywall from '../components/ScannerPaywall.vue'
 import { scanChart, sendPlan, preflight } from '../services/scannerService.js'
 import { buildLadder, scoreConfluence, checkGuardrails, ALLOCATIONS } from '../services/confluence.js'
 import { loadPlan, normaliseSymbol } from '../services/symbolPlanService.js'
+// TEMPORARY dev-only scanner unlock. The `import.meta.env.DEV &&` guard at
+// its call site below makes Rollup drop this import from any production
+// build. Delete this line and the marked usage together.
+import { devScannerUnlocked } from '../utils/devGate.js'
 
 /* The add-on gate. `analyze-chart` is the real authority — this only decides
-   what to draw, and a client that lied here would still be refused. */
-const hasScanner = computed(() => authState.hasScanner)
+   what to draw, and a client that lied here would still be refused.
+
+   The `import.meta.env.DEV &&` is what makes the bypass safe: Vite replaces
+   it with the literal `false` in a production build, the branch dies, and
+   Rollup then drops devGate.js from the bundle entirely. Same pattern the
+   router's gate bypass uses — see the note in utils/devGate.js. */
+const hasScanner = computed(
+  () => authState.hasScanner || (import.meta.env.DEV && devScannerUnlocked())
+)
 
 const MODES = [
   { id: 'scalp', name: 'Scalp', tf: 'M5–M15' },

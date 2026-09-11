@@ -171,14 +171,38 @@
 
   /* ── Glow ──────────────────────────────────────────────────────────
      Everything glowing derives from the single `--cc-glow` multiplier
-     on :root, so one setting moves the whole screen at once.          */
+     on :root, so one setting moves the whole screen at once.
+
+     ## Why these carry SPREAD
+
+     The first version was `0 0 20px` with no spread, at 0.42 alpha. A
+     shadow with zero spread starts fading the instant it leaves the
+     border box, so 20px of blur is really ~6px of anything visible —
+     and over mentor art, which is bright and busy, that is nothing at
+     all. Measured: moving --cc-glow from 1 to 1.6 produced a
+     PIXEL-IDENTICAL screen. The tokens were live, correct, and
+     invisible, which is why this read as "no glow is working".
+
+     Spread is what makes a glow look emitted rather than smudged: it
+     pushes the shadow out at full strength before the blur begins, so
+     there is a solid core of colour to bloom from. Three layers do the
+     work of one — a hairline rim that keeps the control's edge crisp
+     against busy art, a tight bloom that reads as emission, and a wide
+     soft halo that lights the surrounding surface.
+
+     Every length AND every alpha is multiplied, so Off (0) collapses
+     all three to nothing rather than leaving a stub ring behind.      */
   --cc-glow-halo:
-    0 0 calc(20px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.42 * var(--cc-glow))),
-    0 0 calc(48px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.18 * var(--cc-glow)));
+    0 0 0 calc(1px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.50 * var(--cc-glow))),
+    0 0 calc(18px * var(--cc-glow)) calc(3px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.45 * var(--cc-glow))),
+    0 0 calc(52px * var(--cc-glow)) calc(12px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.22 * var(--cc-glow)));
   --cc-glow-edge:
-    0 0 calc(12px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.30 * var(--cc-glow)));
+    0 0 calc(14px * var(--cc-glow)) calc(2px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.34 * var(--cc-glow)));
+  /* text-shadow has no spread parameter, so this compensates with a
+     second, tighter pass instead. */
   --cc-glow-text:
-    0 0 calc(14px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.45 * var(--cc-glow)));
+    0 0 calc(9px * var(--cc-glow))  rgba(var(--cc-accent-rgb), calc(0.62 * var(--cc-glow))),
+    0 0 calc(26px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(0.34 * var(--cc-glow)));
 
   /* ── Status ────────────────────────────────────────────────────────
      Buy/sell are deliberately NOT the accent — a user on the crimson

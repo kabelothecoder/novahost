@@ -204,41 +204,36 @@
       </div>
 
       <!-- ── CONNECTIONS ────────────────────────────────────────────────
-           Credentials are a form, and the doc's whole point about the old
-           screen was that a form does not belong mid-scroll. They stay on
-           the hub as a single row that discloses in place, so the index
-           still reads as rows — and they stay at all because there is no
-           other screen in the app that collects them. -->
-      <span class="cc-label st-section">Connections</span>
-      <div class="st-panel cc-card">
-        <button class="st-row" :aria-expanded="keysOpen" @click="keysOpen = !keysOpen">
-          <span class="st-copy">
-            <span class="st-name">API credentials</span>
-            <span class="cc-caption">{{ keySummary }}</span>
-          </span>
-          <span class="st-chev" :class="{ 'is-open': keysOpen }" v-html="CHEV"></span>
-        </button>
+           The "API credentials" disclosure is gone entirely.
 
-        <!-- The MetaAPI token and account-id fields are gone. MetaAPI is not
-             this product's broker bridge — MetaCopier is, and it is reached
-             server-side with a key the device never sees. Asking a user for
-             a MetaAPI token invited them to paste a live credential into a
-             field nothing would ever read. Broker linking is on /terminal. -->
-        <div v-if="keysOpen" class="st-disclose">
-          <label class="st-field">
-            <span class="cc-label">ElevenLabs API key</span>
-            <input
-              type="password"
-              class="cc-recess st-input"
-              v-model="apiKeys.elevenlabs"
-              placeholder="Optional — the robot falls back to system speech"
-              autocomplete="off"
-              spellcheck="false"
-              @blur="saveKey('ELEVENLABS_API_KEY', apiKeys.elevenlabs)"
-            />
-          </label>
-          <p class="cc-caption st-note">Stored on this device only. Never sent to NovaHost.</p>
-        </div>
+           It held three fields. Two were MetaAPI — a bridge this product
+           stopped using when it moved to MetaCopier, which is reached
+           server-side with a key the device never sees — so the screen was
+           inviting users to paste a live third-party credential into a
+           field nothing would ever read. The third was an ElevenLabs key,
+           which ships as `VITE_ELEVENLABS_API_KEY` and does not need a
+           per-user entry; voice falls back to system speech without it.
+
+           That left a "Connections" section whose only content was a
+           credential form for credentials the app does not use. The real
+           connection a user has to make is their broker, and that has its
+           own screen. -->
+      <span class="cc-label st-section">Trading</span>
+      <div class="st-panel cc-card">
+        <button class="st-row" @click="go('/trades')">
+          <span class="st-copy">
+            <span class="st-name">Trades</span>
+            <span class="cc-caption">Open positions, chart and performance</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
+        <button class="st-row" @click="go('/terminal')">
+          <span class="st-copy">
+            <span class="st-name">MetaTrader terminal</span>
+            <span class="cc-caption">Broker link and service events</span>
+          </span>
+          <span class="st-chev" v-html="CHEV"></span>
+        </button>
       </div>
 
       <!-- ── ABOUT ──────────────────────────────────────────────────── -->
@@ -284,7 +279,6 @@ import InterfaceStyleSheet from '../components/settings/InterfaceStyleSheet.vue'
 const router = useRouter()
 const sheetOpen = ref(false)
 const sheetTab = ref('layouts')
-const keysOpen = ref(false)
 /* A literal, not a build define: this project has no version metadata
    wired into the build (package.json is still 0.0.0), and a define
    pointing at that would print "NOVAHOST 0.0.0". */
@@ -322,12 +316,6 @@ const arrangeSummary = computed(() => {
   return `${REORDERABLE.length - cfg.hidden.length} of ${REORDERABLE.length}`
 })
 
-/* Counts what is set rather than showing any part of a key — a masked
-   token is still a token on a shoulder-surfable screen. */
-const keySummary = computed(() =>
-  apiKeys.value.elevenlabs ? 'Voice key set' : 'Voice key not set'
-)
-
 /* ── Notifications ────────────────────────────────────────────────── */
 const notifSupported = typeof Notification !== 'undefined'
 const notifPermission = ref(notifSupported ? Notification.permission : 'unsupported')
@@ -350,25 +338,14 @@ async function askNotifications() {
   }
 }
 
-/* ── Credentials ──────────────────────────────────────────────────── */
-const apiKeys = ref({
-  elevenlabs: localStorage.getItem('ELEVENLABS_API_KEY') || '',
-})
-
-/* Any MetaAPI token a user typed into the old fields is still sitting in
-   localStorage. Dropping the inputs without dropping the values would leave
-   a live third-party credential on the device with no UI left to clear it. */
-localStorage.removeItem('METAAPI_TOKEN')
-localStorage.removeItem('METAAPI_ACCOUNT_ID')
-
-/* Writes an empty value too, so clearing a field actually clears the
-   credential. The previous version skipped falsy values, which made a
-   wrong key impossible to remove from the UI. */
-function saveKey(key, val) {
-  const v = (val || '').trim()
-  if (v) localStorage.setItem(key, v)
-  else localStorage.removeItem(key)
-}
+/* ── Legacy credential purge ──────────────────────────────────────────
+   The API credentials disclosure is gone, but any key a user typed into it
+   is still sitting in localStorage. Dropping the inputs without dropping
+   the values would leave live third-party credentials on the device with no
+   UI left to clear them. Runs on every Settings open, which is cheap and
+   means an install that never revisits the screen still gets cleaned the
+   first time it does. */
+for (const k of ['METAAPI_TOKEN', 'METAAPI_ACCOUNT_ID']) localStorage.removeItem(k)
 
 function openSheet(tab) {
   sheetTab.value = tab
