@@ -47,15 +47,33 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
  * lives on another device. The page states the outcome and points home; the
  * installed app re-checks for itself when it comes back to the front.
  *
- * -- With PWA_URL unset ----------------------------------------------------
+ * -- With no usable origin -------------------------------------------------
  *
  * Plain text, which is the one thing this domain will render faithfully. Not
  * pretty, but it is legible and true, and it beats both an "invalid address"
  * error and a screenful of raw markup.
+ *
+ * This is now genuinely a fallback rather than the normal case: PWA_URL
+ * defaults to the app's real origin below, so it is reached only if that
+ * default is deliberately overridden with something malformed.
  */
 
-/** The PWA's public origin, e.g. https://app.novahost.co.za. Optional. */
-const PWA_URL = Deno.env.get("PWA_URL") || "";
+/**
+ * The PWA's public origin.
+ *
+ * The default is the real one rather than "". PWA_URL was never set in
+ * production -- confirmed by curling this endpoint, which answered
+ * `text/plain` on the ios branch -- so every web payer since this function
+ * shipped has landed on the fallback page instead of back in the app. It
+ * stayed unset partly because Supabase function env vars cannot be set through
+ * the MCP connector, which makes "just set the variable" a step that quietly
+ * never happens.
+ *
+ * A constant that is right beats a variable that is empty. The env var still
+ * wins where it is set, so a staging deployment can still point elsewhere; it
+ * is now an override rather than a requirement.
+ */
+const PWA_URL = Deno.env.get("PWA_URL") || "https://app.novahost-ea.app";
 
 /**
  * The origin to send a web payer home to, or "" if none is usable.
