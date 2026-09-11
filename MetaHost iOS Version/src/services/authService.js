@@ -16,6 +16,67 @@ const VERIFY_TIMEOUT_MS = 10000
 
 const TIMEOUT_MESSAGE = 'That took too long. Check your connection and try again.'
 
+/**
+ * How long a confirmed purchase keeps working with no server in reach.
+ *
+ * `check-subscription-status` has owned this number since it was written — it
+ * sends `max_offline_days: 5` in the envelope of every answer, and its own
+ * header says "the app locks itself after MAX_OFFLINE_DAYS without one of
+ * these". Nothing ever read it. `CHECKED_AT` was stored and never looked at
+ * either, so the grace existed on paper and nowhere else, and a paying
+ * customer on a plane was treated exactly like a refusal.
+ *
+ * This is the fallback for the first launch after upgrading, before any answer
+ * has carried the real figure. The server's value wins whenever we have one.
+ */
+const FALLBACK_OFFLINE_DAYS = 5
+
+/**
+ * And a ceiling on whatever the server said.
+ *
+ * `secStorage` is obfuscated, not secure — it is a salt and an XOR, and the
+ * salt sits in the same bucket. A stored `max_offline_days` is therefore user
+ * input, and an unbounded one is a free licence. Clamped rather than trusted.
+ */
+const MAX_OFFLINE_DAYS_CEILING = 14
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Whether a previously confirmed purchase is still inside its offline window.
+ *
+ * Deliberately only consulted when the server could not be REACHED. A refusal
+ * is an answer and ends the grace immediately — this is for silence, not for
+ * "no".
+ *
+ * The clock is the device's, so setting it back extends the window. That is
+ * inherent to any offline grace and is not worth defending against here: the
+ * window is five days, it ends at the next successful check, and the server
+ * stays the only authority on entitlement. A user willing to reset their phone
+ * clock every five days has done more work than the R599 is worth.
+ *
+ * @returns {{within: boolean, daysLeft: number|null, since: Date|null}}
+ */
+function offlineGrace() {
+  const stamp = secStorage.getItem('CHECKED_AT')
+  if (!stamp) return { within: false, daysLeft: null, since: null }
+
+  const since = new Date(stamp)
+  if (Number.isNaN(since.getTime())) return { within: false, daysLeft: null, since: null }
+
+  const allowed = Math.min(
+    Number(secStorage.getItem('MAX_OFFLINE_DAYS')) || FALLBACK_OFFLINE_DAYS,
+    MAX_OFFLINE_DAYS_CEILING
+  )
+
+  /* A stamp in the future means the clock moved, not that the check is fresh.
+     Treated as "now" so it neither grants nor destroys anything. */
+  const elapsed = Math.max(0, Date.now() - since.getTime())
+  const daysLeft = allowed - elapsed / DAY_MS
+
+  return { within: daysLeft > 0, daysLeft: Math.max(0, daysLeft), since }
+}
+
 export const authState = reactive({
   /**
    * Entitlement: a paid, device-matched purchase confirmed by
@@ -56,6 +117,21 @@ export const authState = reactive({
 
   /** Scanner entitlement rides along on the same answer. */
   hasScanner: secStorage.getItem('HAS_SCANNER') === 'true',
+
+  /**
+   * True when `isVerified` is being carried by the offline grace rather than by
+   * a live answer — the purchase was confirmed before, and the server could not
+   * be reached this launch.
+   *
+   * Worth exposing rather than hiding: the app is working normally but on
+   * borrowed time, and a user who is about to lose access after five days
+   * offline should be able to find that out before it happens rather than
+   * after.
+   */
+  offline: false,
+
+  /** Days of grace left, or null when not running on it. */
+  graceDaysLeft: null,
 })
 
 /**
@@ -115,16 +191,53 @@ export async function initializeAuth() {
       return
     }
 
+    /* An email on file means the server confirmed this purchase at some point
+       — VERIFIED_EMAIL is written nowhere else. A build that predates the
+       grace never stamped CHECKED_AT, so stamp it now rather than denying the
+       window to everyone who upgrades: the confirmation it represents really
+       did happen, we just never wrote down when. */
+    if (!secStorage.getItem('CHECKED_AT')) {
+      secStorage.setItem('CHECKED_AT', new Date().toISOString())
+    }
+
     const subResult = await verifySubscription(authState.email)
     if (subResult.success) {
       authState.isVerified = true
       return
     }
 
-    // Refused. The email is kept — the payment screen prefills it and acts on
-    // `reason` (unpaid vs a licence that lives on another device).
+    if (subResult.rejected) {
+      /* The server answered no. That ends it — grace covers silence, never a
+         refusal. The email is still kept: PaymentView prefills it and acts on
+         `reason` to offer a purchase or a device move, and making them retype
+         it helps nobody. */
+      authState.isVerified = false
+      authState.offline = false
+      authState.graceDaysLeft = null
+      secStorage.removeItem('VERIFIED_EMAIL')
+      return
+    }
+
+    /* Could not ask — flat network, captive portal, timeout. This is where a
+       paying customer used to be dropped on the payment screen with an empty
+       email field, because the old code treated silence as a refusal AND
+       deleted VERIFIED_EMAIL on the way out. Both were wrong: the purchase is
+       lifetime, and nothing about it changed because a plane took off. */
+    const grace = offlineGrace()
+
+    if (grace.within) {
+      authState.isVerified = true
+      authState.offline = true
+      authState.graceDaysLeft = grace.daysLeft
+      return
+    }
+
+    /* Out of grace. Locked, which is the point of the window having an end —
+       but the email survives so the next launch with a signal re-checks it
+       automatically instead of asking for it again. */
     authState.isVerified = false
-    secStorage.removeItem('VERIFIED_EMAIL')
+    authState.offline = true
+    authState.graceDaysLeft = 0
   } finally {
     authState.isVerifying = false
   }
@@ -186,8 +299,9 @@ export async function verifySubscription(email) {
     }
 
     // A 4xx from the function still arrives as data, carrying its own reason.
+    // It is an ANSWER, so it ends any offline grace — see `rejected` below.
     if (data.success === false) {
-      return { success: false, message: data.error || 'Verification failed.' }
+      return { success: false, rejected: true, message: data.error || 'Verification failed.' }
     }
 
     authState.hasScanner = data.has_scanner === true
@@ -202,8 +316,16 @@ export async function verifySubscription(email) {
       secStorage.removeItem('PENDING_EMAIL')
       if (data.token) secStorage.setItem('DEVICE_TOKEN', data.token)
       // Stamps the last server answer so a later offline-grace check has
-      // something to age. max_offline_days rides along for the same reason.
+      // something to age, and records the window the server is willing to
+      // grant. Both are read by offlineGrace(); storing only the first is what
+      // left the grace inert for as long as it existed.
       secStorage.setItem('CHECKED_AT', data.checked_at || new Date().toISOString())
+      if (Number(data.max_offline_days) > 0) {
+        secStorage.setItem('MAX_OFFLINE_DAYS', String(Number(data.max_offline_days)))
+      }
+      // A live answer supersedes any grace that was carrying the session.
+      authState.offline = false
+      authState.graceDaysLeft = null
       return { success: true }
     }
 
@@ -218,6 +340,11 @@ export async function verifySubscription(email) {
 
     return {
       success: false,
+      /* The server answered and the answer was no. This is what ends an
+         offline grace rather than extending it — the distinction the whole
+         `rejected` flag exists for, and the same one activateLicenseKey
+         already draws for the licence key. */
+      rejected: true,
       reason: data.reason,
       move: data.move,
       message: data.message || 'No active purchase found for this email address.',
@@ -358,9 +485,16 @@ export function logout() {
   authState.email = null
   authState.reason = null
   authState.move = null
+  authState.offline = false
+  authState.graceDaysLeft = null
   secStorage.removeItem('VERIFIED_EMAIL')
   secStorage.removeItem('PENDING_EMAIL')
   secStorage.removeItem('DEVICE_TOKEN')
+  /* The grace material too. Leaving CHECKED_AT behind would hand the NEXT
+     email to sign in on this handset up to five days of unverified access on
+     the strength of the previous owner's purchase. */
+  secStorage.removeItem('CHECKED_AT')
+  secStorage.removeItem('MAX_OFFLINE_DAYS')
   // The key door too. Leaving these behind means initializeAuth restores the
   // session on the next launch and the sign-out silently did nothing.
   secStorage.removeItem('LICENSE_KEY')

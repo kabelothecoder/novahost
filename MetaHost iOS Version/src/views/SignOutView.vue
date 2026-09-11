@@ -132,6 +132,10 @@ const alsoWipe = ref(false)
 const erased = [
   'Your licence key and its activation on this device',
   'The verified email and session token stored here',
+  /* Named separately because it is a capability, not bookkeeping: until the
+     app next reaches the server it will not open at all, where before signing
+     out it would have run offline for up to five more days. */
+  'Your offline access — the app will need a connection to unlock again',
 ]
 
 const kept = [
