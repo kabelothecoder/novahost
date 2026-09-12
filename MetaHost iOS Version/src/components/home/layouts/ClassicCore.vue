@@ -18,7 +18,7 @@
     </div>
 
     <!-- v2 replaces the pill here with the orbit disc. -->
-    <IgnitionPod variant="orbit" class="classic-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
+    <IgnitionPod variant="orbit" class="classic-pod" />
 
     <div v-if="widgets.length" class="classic-widgets cc-ground cc-stagger">
       <WidgetSlot v-for="id in widgets" :key="id" :id="id" @toast="$emit('toast', $event)" />

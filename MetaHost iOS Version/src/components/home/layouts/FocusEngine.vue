@@ -7,6 +7,16 @@
     mentor; Focus Engine centres on the robot's NAME, set as stacked
     display type, and strips the screen to one control. It is the
     "get on with it" layout.
+
+    That distinction had stopped being visible. Both layouts drew
+    HomeTopBar, both drew the ignition PILL with a Symbols/Trades row
+    beneath it, and the only thing left separating them was whether the
+    hero was the robot's art or its name — side by side in the picker
+    they read as one design twice. This one now takes the pod's `solo`
+    variant: a single round control and the brand mark, no satellites and
+    no secondary row. Full-Bleed keeps the pill and the two destinations,
+    which is what makes it the marketing screen rather than the working
+    one.
   -->
   <div class="focus">
     <HomeTopBar @interface="$emit('interface')" @robots="$emit('robots')" />
@@ -16,7 +26,7 @@
         <span v-for="(line, i) in nameLines" :key="i" class="focus-line">{{ line }}</span>
       </h1>
 
-      <IgnitionPod class="focus-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
+      <IgnitionPod variant="solo" class="focus-pod" />
     </div>
 
     <div v-if="widgets.length" class="focus-widgets cc-ground cc-stagger">
@@ -115,7 +125,9 @@ const nameLines = computed(() => {
    accent, which is the same result by a different route. */
 [data-name-color="default"] .focus-line:first-child { color: var(--cc-accent-text) }
 
-.focus-pod { max-width: 300px }
+/* The solo variant sizes itself — no max-width, or the disc's breathing
+   ring gets clipped by a box narrower than the ring. */
+.focus-pod { width: auto }
 
 .focus-widgets {
   display: flex;

@@ -12,7 +12,7 @@
 
     <div class="bleed-body">
       <RobotHeroWidget size="lg" />
-      <IgnitionPod class="bleed-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
+      <IgnitionPod class="bleed-pod" />
     </div>
 
     <!-- Any widget the user un-hides lands here, below the fold, so it

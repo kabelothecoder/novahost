@@ -67,6 +67,13 @@ const artSrc = computed(() => {
   border-radius: 50%;
   filter: blur(64px);
   will-change: transform;
+  /* Glow Mode reaches the backdrop too. These pools ARE the accent light
+     in the room, so leaving them fixed meant Off still lit the whole
+     screen and Intense could not light it any further — the setting only
+     ever moved the ignition halo. Clamped at the bottom rather than
+     multiplied to zero: Off means "no bloom", not "no colour behind the
+     glass", and glass with nothing behind it is grey plastic. */
+  opacity: clamp(0.45, calc(0.45 + 0.55 * var(--cc-glow, 1)), 1);
 }
 .cc-pool-a {
   top: -18%;
@@ -93,8 +100,8 @@ const artSrc = computed(() => {
 
 /* Light mode needs a much weaker wash — the same alpha that reads as a
    glow on #0E0E11 reads as a stain on #F4F7F9. */
-.cmd[data-scheme="light"] .cc-pool-a { opacity: 0.55 }
-.cmd[data-scheme="light"] .cc-pool-b { opacity: 0.42 }
+.cmd[data-scheme="light"] .cc-pool-a { opacity: clamp(0.25, calc(0.30 + 0.30 * var(--cc-glow, 1)), 0.62) }
+.cmd[data-scheme="light"] .cc-pool-b { opacity: clamp(0.18, calc(0.22 + 0.24 * var(--cc-glow, 1)), 0.48) }
 
 /* ── Art ─────────────────────────────────────────────────────────── */
 .cc-art {
@@ -118,11 +125,19 @@ const artSrc = computed(() => {
 }
 
 /* Avatar / Framed: the hero widget owns the real art, so the backdrop
-   keeps only a heavy wash of it for colour continuity. */
+   keeps a blurred wash of it rather than the image.
+
+   0.28 at blur(46px) was not a wash, it was a rumour — on the layouts
+   that also lay an opaque ground over the top (Signal Feed, Command
+   Deck) the art contributed about five percent of the final pixel and
+   the robot was effectively absent from its own Home. 0.38 at 34px is
+   still unmistakably blurred — nothing here competes with text — but the
+   silhouette and the colour of the mentor's art are visible, which is
+   the whole reason the layer exists. */
 .cc-art-avatar,
 .cc-art-framed {
-  opacity: 0.28;
-  filter: blur(46px) saturate(130%);
+  opacity: 0.38;
+  filter: blur(34px) saturate(130%);
   transform: scale(1.18); /* hides the blur's transparent edges */
 }
 .cmd[data-scheme="light"] .cc-art-avatar,

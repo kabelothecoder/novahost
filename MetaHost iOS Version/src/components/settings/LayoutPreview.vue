@@ -47,7 +47,7 @@
 
     <!-- ═══ CLASSIC CORE ═══════════════════════════════════════════ -->
     <template v-if="id === 'classic'">
-      <span class="pv-bar"><i class="pv-b-i" /><i class="pv-b-chip" /><i class="pv-b-i" /></span>
+      <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
       <img :src="art" class="pv-portrait" alt="" />
       <span class="pv-pod">
         <i class="pv-sat" /><i class="pv-disc" /><i class="pv-sat" />
@@ -58,19 +58,22 @@
 
     <!-- ═══ FOCUS ENGINE ═══════════════════════════════════════════ -->
     <template v-else-if="id === 'focus'">
-      <span class="pv-bar"><i class="pv-b-i" /><i class="pv-b-chip" /><i class="pv-b-i" /></span>
+      <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
       <span class="pv-centre">
         <b class="pv-name pv-name-stack">
           <s v-for="(w, i) in nameLines" :key="i">{{ w }}</s>
         </b>
-        <i class="pv-pill" />
+        <!-- A disc, not the pill. This is what now separates Focus Engine
+             from Full-Bleed Art in the picker, so the preview has to carry
+             it or the two tiles go on looking like one design twice. -->
+        <i class="pv-disc pv-disc-solo" />
         <b class="pv-mark">POWERED BY <u>NOVAHOST</u></b>
       </span>
     </template>
 
     <!-- ═══ FULL-BLEED ART ═════════════════════════════════════════ -->
     <template v-else-if="id === 'bleed'">
-      <span class="pv-bar"><i class="pv-b-i" /><i class="pv-b-chip" /><i class="pv-b-i" /></span>
+      <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
       <span class="pv-foot">
         <b class="pv-name">{{ name }}</b>
         <i class="pv-rule" />
@@ -81,7 +84,7 @@
 
     <!-- ═══ NEON FRAME ═════════════════════════════════════════════ -->
     <template v-else-if="id === 'neon'">
-      <span class="pv-bar"><i class="pv-b-i" /><i class="pv-b-chip" /><i class="pv-b-i" /></span>
+      <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
       <span class="pv-frame">
         <img :src="art" class="pv-ring" alt="" />
       </span>
@@ -217,7 +220,11 @@ const hasDock = computed(() => !['focus', 'bleed'].includes(props.id))
   width: 100%; flex: none;
 }
 .pv-b-i    { width: 11%; aspect-ratio: 1; border-radius: 2px; background: var(--cc-ink-5); opacity: .7 }
-.pv-b-chip { width: 40%; height: 8px; border-radius: 4px; background: var(--cc-ink-5); opacity: .5 }
+/* Two elements, not three: HomeTopBar dropped its left button and the chip
+   moved to the leading edge. A preview that still drew three would be
+   describing a screen that no longer exists — which is the exact failure
+   the hand-drawn SVG wireframes were replaced for. */
+.pv-b-chip { width: 52%; height: 8px; border-radius: 4px; background: var(--cc-ink-5); opacity: .5 }
 
 .pv-head {
   display: flex; align-items: center; gap: 5%;
@@ -318,6 +325,10 @@ const hasDock = computed(() => !['focus', 'bleed'].includes(props.id))
   flex: none;
 }
 .pv-pill-wide { width: 70%; align-self: center }
+
+/* Larger than the orbit disc for the same reason the real one is: nothing
+   flanks it, so at the satellite size it reads as an unfinished button. */
+.pv-disc-solo { width: 34px; height: 34px }
 
 .pv-centre {
   flex: 1;

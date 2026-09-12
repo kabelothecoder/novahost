@@ -34,7 +34,7 @@
     <!-- CONTROLS BELOW, on their own ground.
          v2 draws Pairs · disc · Assets here too. -->
     <div class="neon-controls">
-      <IgnitionPod variant="orbit" class="neon-pod" @assets="$emit('assets')" @toast="$emit('toast', $event)" />
+      <IgnitionPod variant="orbit" class="neon-pod" />
 
       <!-- The doc prints "CONNECTED · Exness · MT5 · 41273". The server is
            known once a broker is linked; the login is not on the client, so

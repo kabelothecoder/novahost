@@ -89,7 +89,7 @@
     <!-- Everything below here gets an opaque base. -->
     <div class="deck-ground cc-ground">
       <!-- ═══ 3 · PRIMARY ACTION CENTRE ════════════════════════════ -->
-      <IgnitionPod variant="bare" class="deck-pod" @toast="$emit('toast', $event)" />
+      <IgnitionPod variant="bare" class="deck-pod" />
 
       <div class="deck-actions">
         <button v-for="a in actions" :key="a.id" class="deck-action cc-card" @click="run(a)">
@@ -98,47 +98,65 @@
         </button>
       </div>
 
-      <!-- ═══ 4 · MENTOR SIGNALS ═══════════════════════════════════ -->
+      <!-- ═══ 4 · ROBOT TRADES ═════════════════════════════════════
+           Was Mentor Signals, and this is not a rename: that list came
+           from `signals` — instructions the mentor BROADCAST, entry/SL/TP
+           and nothing about what happened next. These rows are what the
+           robot actually did on the account, from `broker-positions` and
+           `broker-performance`. A signal is a plan; a trade is money.
+           Signal Feed made the same swap; the two layouts now agree. -->
       <section class="deck-block">
         <div class="deck-sec-head">
-          <span class="cc-label">Mentor Signals</span>
-          <button class="deck-more" @click="goSignals">Open</button>
+          <span class="cc-label">Robot Trades</span>
+          <button class="deck-more" @click="$router.push('/trades')">Open</button>
         </div>
 
-        <p v-if="signals.loading" class="deck-empty cc-caption">Checking for signals…</p>
-        <p v-else-if="signals.error" class="deck-empty cc-caption is-error">{{ signals.error }}</p>
-        <p v-else-if="!hasSignals" class="deck-empty cc-caption">
-          No signals from your mentor yet. They appear here the moment one is broadcast.
+        <p v-if="noBroker" class="deck-empty cc-caption">
+          No broker linked yet — connect one to see what {{ robot.name }} trades.
+        </p>
+        <p v-else-if="trades.positionsError" class="deck-empty cc-caption is-error">
+          {{ trades.positionsError }}
+        </p>
+        <p v-else-if="loadingTrades" class="deck-empty cc-caption">Reading your account…</p>
+        <p v-else-if="!tradeRows.length" class="deck-empty cc-caption">
+          {{ robot.name }} has not placed a trade on this account yet.
         </p>
 
         <ul v-else class="deck-signals">
           <!--
             Read-only rows, and deliberately so. The obvious bento
-            affordance here is a swipe with actions on it, but there is
-            no honest action to put there: a mentor's call cannot be
-            restarted or paused from a subscriber's handset, and the one
-            operation that does exist — claiming — is CONSUMPTION. A
-            claim from this device would take the trade away from the
-            handset that was going to execute it, silently and for good.
-            See services/fleetService.js.
+            affordance here is a swipe with actions on it, but closing a
+            position from a glance card is the one gesture on this screen
+            that could cost real money by accident. /trades owns that.
           -->
-          <li v-for="row in topSignals" :key="row.id" class="deck-signal cc-card">
+          <li v-for="row in tradeRows" :key="row.key" class="deck-signal cc-card">
             <div class="deck-signal-top">
-              <span class="deck-dir" :class="dirClass(row)">{{ direction(row) }}</span>
-              <span class="deck-pair">{{ row.pair || '—' }}</span>
-              <span class="deck-tag" :class="isClosed(row) ? 'is-closed' : 'is-live'">
-                {{ isClosed(row) ? (row.status || 'closed').toUpperCase() : 'LIVE' }}
+              <span class="deck-dir" :class="sideClass(row.side)">{{ row.side || '—' }}</span>
+              <span class="deck-pair">{{ row.symbol }}</span>
+              <span class="deck-tag" :class="row.open ? 'is-live' : 'is-closed'">
+                {{ row.open ? 'OPEN' : 'CLOSED' }}
               </span>
-              <span class="deck-age cc-mono">{{ age(row.created_at) }}</span>
+              <span class="deck-age cc-mono">{{ row.when }}</span>
             </div>
             <div class="deck-levels">
-              <span v-for="l in levels(row)" :key="l.k" class="deck-level">
-                <span class="deck-level-k cc-label">{{ l.k }}</span>
-                <span class="deck-level-v cc-figure">{{ l.v }}</span>
+              <span class="deck-level">
+                <span class="deck-level-k cc-label">Size</span>
+                <span class="deck-level-v cc-figure">{{ row.size }}</span>
+              </span>
+              <span class="deck-level">
+                <span class="deck-level-k cc-label">{{ row.open ? 'Floating' : 'Result' }}</span>
+                <span class="deck-level-v cc-figure" :data-tone="tone(row.net)">
+                  {{ row.pending ? 'waiting' : money(row.net) }}
+                </span>
               </span>
             </div>
           </li>
         </ul>
+
+        <p v-if="manualCount" class="deck-empty cc-caption">
+          {{ manualCount }} manual {{ manualCount === 1 ? 'trade' : 'trades' }} on this account
+          are not shown here.
+        </p>
       </section>
 
       <!-- ═══ 5 · LIVE ACTIVITY ════════════════════════════════════ -->
@@ -177,8 +195,9 @@ import {
   session, uptimeMs, formatUptime, beatState,
   unseenEvents, markEventsSeen,
 } from '../../../stores/session.js'
-import { signals, hasSignals, age, direction, isClosed, entryLabel } from '../../../stores/signals.js'
-import { loadRecentSignals } from '../../../services/signalService.js'
+import {
+  trades, money, tone, refreshHistory, startPositionsPolling, stopPositionsPolling,
+} from '../../../stores/trades.js'
 import { pollFleet } from '../../../services/fleetService.js'
 import { haptic } from '../../../composables/useSpeech.js'
 
@@ -244,7 +263,7 @@ async function refresh() {
   refreshing.value = true
   haptic(20)
   try {
-    await Promise.all([pollFleet(), loadRecentSignals()])
+    await Promise.all([pollFleet(), refreshHistory({ limit: 20 })])
   } finally {
     refreshing.value = false
   }
@@ -256,7 +275,10 @@ async function refresh() {
 const actions = [
   { id: 'scan', label: 'Scan', to: '/scanner',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>' },
-  { id: 'assets', label: 'Assets', emit: 'assets',
+  /* 'Symbols', not 'Assets'. It goes to /pairs, which is where the pod's
+     own button goes, and two names for one destination is what made the
+     pod's pair of buttons read as broken in the first place. */
+  { id: 'assets', label: 'Symbols', emit: 'assets',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>' },
   { id: 'terminal', label: 'Terminal', to: '/terminal',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>' },
@@ -275,28 +297,75 @@ function run(a) {
   else router.push(a.to)
 }
 
-/* ── Signals ─────────────────────────────────────────────────────── */
-const topSignals = computed(() => signals.rows.slice(0, 3))
+/* ── Robot trades ─────────────────────────────────────────────────
+   `ours` is the broker row's magic-number match against this robot's own
+   magic, so it is the only reliable way to tell a trade the robot placed
+   from one the user opened by hand in MetaTrader. Tested as
+   `ours !== false` rather than `=== true`: a broker branch that reports
+   no magic number at all leaves the field undefined, and dropping every
+   row there would show an empty list on a busy account.
 
-function levels(row) {
+   Same rule and the same three rows as Signal Feed — the two layouts
+   answer one question and must not answer it differently. */
+const isOurs = (t) => t.ours !== false
+
+const manualCount = computed(() =>
+  trades.positions.filter(t => t.ours === false).length +
+  trades.closed.filter(t => t.ours === false).length
+)
+
+const tradeRows = computed(() => {
   void now.value
-  return [
-    { k: 'Entry', v: entryLabel(row) },
-    { k: 'SL', v: row.sl ?? '—' },
-    { k: 'TP', v: row.tp ?? '—' },
-  ]
-}
+  const open = trades.positions.filter(isOurs).map((p, i) => ({
+    key: p.id || 'o' + i + p.symbol,
+    open: true,
+    pending: Boolean(p.pending),
+    side: p.side,
+    symbol: p.symbol || p.base || '—',
+    size: p.volume != null ? p.volume + ' lots' : '—',
+    net: p.net_profit,
+    when: age(p.open_time),
+  }))
 
-function dirClass(row) {
-  const d = direction(row)
+  const closed = trades.closed.filter(isOurs).slice(0, Math.max(0, 3 - open.length)).map((t, i) => ({
+    key: t.id || 'c' + i + t.symbol + t.close_time,
+    open: false,
+    pending: false,
+    side: t.side,
+    symbol: t.symbol || t.base || '—',
+    size: t.volume != null ? t.volume + ' lots' : '—',
+    net: t.net_profit,
+    when: age(t.close_time),
+  }))
+
+  return [...open, ...closed].slice(0, 3)
+})
+
+/* Distinguished from "nothing traded yet": an unlinked broker is a
+   different fact with a different next step. */
+const noBroker = computed(() => !session.brokerConnected && !trades.positions.length)
+
+const loadingTrades = computed(() =>
+  (trades.positionsLoading || trades.historyLoading) && !tradeRows.value.length
+)
+
+function sideClass(side) {
+  const d = String(side || '').toUpperCase()
   return d === 'BUY' ? 'is-buy' : d === 'SELL' ? 'is-sell' : ''
 }
 
-function goSignals() {
-  haptic(20)
-  /* Signal Feed is the layout built to show the whole feed; there is no
-     dedicated route. Switching to it is the honest "see all". */
-  theme.layout = 'feed'
+/** Compact relative age — "4m", "3h", "2d". Longer than that and the
+ *  exact figure stops mattering at a glance. */
+function age(ts) {
+  if (!ts) return '—'
+  const then = new Date(ts).getTime()
+  if (Number.isNaN(then)) return '—'
+  const mins = Math.max(0, Math.round((now.value - then) / 60000))
+  if (mins < 1) return 'now'
+  if (mins < 60) return mins + 'm'
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return hrs + 'h'
+  return Math.round(hrs / 24) + 'd'
 }
 
 /* ── Activity ────────────────────────────────────────────────────── */
@@ -328,7 +397,15 @@ function revealActivity() {
   markEventsSeen()
 }
 
-onMounted(loadRecentSignals)
+/* Positions are polled (reference-counted in the store, so this and the
+   Open Trades widget cost one request between them). History is NOT:
+   MetaCopier documents it as lagging live trading by up to three minutes,
+   so a fast poll cannot make it fresher. */
+onMounted(() => {
+  startPositionsPolling()
+  refreshHistory({ limit: 20 })
+})
+onUnmounted(stopPositionsPolling)
 </script>
 
 <style scoped>
@@ -670,6 +747,12 @@ onMounted(loadRecentSignals)
   color: var(--cc-ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* A result is a number with a SIGN, and the sign is the point of it —
+   the same buy/sell colours the direction pill uses, never the accent,
+   so a user on the crimson accent can still read a loss as a loss. */
+.deck-level-v[data-tone="up"]   { color: var(--cc-buy) }
+.deck-level-v[data-tone="down"] { color: var(--cc-sell) }
+.deck-level-v[data-tone="flat"] { color: var(--cc-ink-3) }
 
 /* ═══ 5 · ACTIVITY ═════════════════════════════════════════════════ */
 .deck-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px }
