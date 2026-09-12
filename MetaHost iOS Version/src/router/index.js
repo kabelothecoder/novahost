@@ -129,16 +129,32 @@ router.beforeEach(async (to, from, next) => {
   // setup wizard. The screen verifies nothing, so there is nothing to guard.
   if (to.name === 'payment-return') return next()
 
-  // Check if onboarding is completed
+  // ── Lock 0: the wizard ────────────────────────────────────────────────────
+  //
+  // This used to end in `if (to.name === 'onboarding') return next()` — an
+  // UNCONDITIONAL pass, taken before any of the locks below could run. Every
+  // cold start lands here, because SplashView pushes to /onboarding and lets
+  // the guard sort it out, so a user who had finished the wizard, cleared the
+  // licence gate AND paid was dropped back into step one of the setup wizard
+  // on every launch. That is the "it takes you back to onboarding after
+  // closing it" report, and it was never storage being lost: ONBOARDING_COMPLETED
+  // was written, read, found to be true, and then ignored.
+  //
+  // The flag now decides in both directions. Not completed ⇒ the wizard is the
+  // only destination. Completed ⇒ the wizard is not a destination at all, and
+  // the request falls through to the licence and payment locks, which forward
+  // it to whichever step is genuinely outstanding.
   const onboardingCompleted = localStorage.getItem('ONBOARDING_COMPLETED') === 'true'
-  if (!onboardingCompleted && to.name !== 'onboarding') {
-    return next({ name: 'onboarding' })
+  if (!onboardingCompleted) {
+    return to.name === 'onboarding' ? next() : next({ name: 'onboarding' })
   }
-  if (to.name === 'onboarding') return next()
 
   // Any other public route (none today beyond the ones handled above) is let
-  // through; `unlock` is handled explicitly once auth is known.
-  if (to.meta.public && to.name !== 'unlock') {
+  // through. `unlock` is handled explicitly once auth is known, and
+  // `onboarding` is public ONLY in the sense that it needs no licence — with
+  // the wizard behind them it is a step to be forwarded past, not a screen to
+  // render, so it must not short-circuit here either.
+  if (to.meta.public && to.name !== 'unlock' && to.name !== 'onboarding') {
     return next()
   }
 
@@ -167,7 +183,10 @@ router.beforeEach(async (to, from, next) => {
   }
   // Fully in. Don't strand a verified user on the purchase screen — the
   // scanner add-on is sold in place by ScannerPaywall.vue, nothing routes here.
-  if (to.name === 'payment') {
+  // `onboarding` rides along for the same reason: a finished wizard is not a
+  // screen anyone should land on again, and falling through to next() would
+  // render it over the top of a fully activated app.
+  if (to.name === 'payment' || to.name === 'onboarding') {
     return next({ name: 'home' })
   }
 
