@@ -219,6 +219,56 @@ export async function loadAccount() {
 }
 
 /**
+ * The live price and contract spec for one instrument, from the USER'S OWN
+ * broker.
+ *
+ * ## Why this matters more than a price
+ *
+ * The scanner has been estimating two things it should never have had to
+ * guess. `pipSize()` in confluence.js derives a pip from the SPELLING of the
+ * symbol — JPY means 0.01, an index means 1 — and says so in its own header:
+ * "an estimate, and labelled as one wherever a pip figure is shown". And
+ * nothing anywhere knew the contract size, which is why the trade plan could
+ * show a pip distance but never a money figure. A ladder that cannot say
+ * "+$48" is a ladder the user has to do arithmetic on.
+ *
+ * This function answers both from the broker: `pip_size` and
+ * `contract_size` are the instrument's real properties, so
+ * `lots x contract_size x pip_size x pips` is the actual money in the
+ * account's own quote currency rather than an inference from the name.
+ *
+ * ## It is enrichment, never a dependency
+ *
+ * It needs a linked broker and answers NO_ACCOUNT_LINKED without one. The
+ * scanner has to keep working for someone who has not connected an account —
+ * reading a chart is the part they paid R349 for, and it has nothing to do
+ * with their broker. Every caller treats a failure as "no live figures", not
+ * as an error.
+ */
+export async function loadQuote(symbol) {
+  let licenseKey
+  try { licenseKey = requireKey() } catch (e) { return { ok: false, message: e.message } }
+  if (!symbol) return { ok: false, message: 'No symbol to price.' }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('broker-quote', {
+      body: { license_key: licenseKey, symbol },
+    })
+    if (error) {
+      const body = await bodyOf(error)
+      if (body) return { ok: false, code: body.code, message: describe(body, 'Could not price this instrument.') }
+      throw error
+    }
+    if (!data?.success) {
+      return { ok: false, code: data?.code, message: describe(data, 'Could not price this instrument.') }
+    }
+    return { ok: true, ...data }
+  } catch (err) {
+    return { ok: false, message: err?.message || 'Could not reach the broker service.' }
+  }
+}
+
+/**
  * Open positions on the linked account, with live profit.
  *
  * This is the answer to "did my trade actually happen". Nothing else in the

@@ -59,9 +59,38 @@ export const ALLOCATIONS = [
  *  would round away. */
 export const MIN_LOT = 0.01
 
+/**
+ * Money per pip for one lot, from the broker's own contract spec.
+ *
+ * `contract_size` x `pip_size` is the value of a one-pip move on a single
+ * lot, in the instrument's QUOTE currency: 100000 x 0.0001 = $10 a pip on a
+ * standard FX lot, 100 x 0.01 = $1 a pip on gold. It is deliberately not
+ * derived from the symbol's spelling — that is what `pipSize()` above does
+ * as a fallback, and its own header calls it an estimate.
+ *
+ * Returns null without a spec, and every caller renders an em dash for that
+ * rather than a zero. A money figure on a trading screen is either right or
+ * it is a lie; there is no useful third state.
+ */
+function pipValuePerLot(spec) {
+  if (!spec) return null
+  const contract = Number(spec.contract_size)
+  const pip = Number(spec.pip_size)
+  if (!(contract > 0) || !(pip > 0)) return null
+  return contract * pip
+}
+
+/**
+ * @param {object} reading  the `analyze-chart` reading
+ * @param {object} opts     { allocation, totalLot, spec }
+ *                          `spec` is a `broker-quote` answer — optional, and
+ *                          the only thing that turns pip distances into money.
+ */
 export function buildLadder(reading, opts) {
   const allocation = (opts && opts.allocation) || 'balanced'
   const totalLot = (opts && Number(opts.totalLot)) || 0
+  const spec = (opts && opts.spec) || null
+  const perPip = pipValuePerLot(spec)
 
   const entry = Number(reading && reading.entry)
   const sl = Number(reading && reading.sl)
@@ -84,6 +113,14 @@ export function buildLadder(reading, opts) {
     { level: 'TP3', price: project(3), projected: true },
   ]
 
+  /* The broker's own pip size beats the family estimate wherever we have
+     it: `pipSize()` reads the SPELLING of the symbol, and a broker that
+     lists gold as "GOLD" or the Nasdaq as ".USTECH." is exactly the case it
+     gets wrong. See [[novahost-broker-symbol-names]]. */
+  const pipOf = d => (spec && Number(spec.pip_size) > 0
+    ? Math.abs(d) / Number(spec.pip_size)
+    : toPips(d, symbol))
+
   const legs = targets.map((t, i) => {
     const rr = rrOf(t.price)
     /* Floored, never rounded up: the split carves a risk budget the user has
@@ -92,6 +129,7 @@ export function buildLadder(reading, opts) {
        undersized rather than silently promoted to 0.01. */
     const raw = totalLot * (split[i] / 100)
     const lot = raw >= MIN_LOT ? Math.floor(raw / MIN_LOT) * MIN_LOT : 0
+    const pips = pipOf(t.price - entry)
     return {
       level: t.level,
       price: t.price,
@@ -100,7 +138,11 @@ export function buildLadder(reading, opts) {
       alloc: split[i],
       lot: Number(lot.toFixed(2)),
       undersized: raw > 0 && raw < MIN_LOT,
-      pips: toPips(t.price - entry, symbol),
+      pips,
+      /* What this rung is worth if it fills, in the quote currency. Null
+         without a broker spec — never 0, which would read as "this target
+         earns nothing". */
+      money: perPip != null ? lot * perPip * pips : null,
     }
   })
 
@@ -109,9 +151,25 @@ export function buildLadder(reading, opts) {
      runner it barely funds, and treating it as if it did is exactly how a
      plan passes an R:R guardrail it should have failed. */
   const blendedRR = legs.reduce((sum, l) => sum + (l.alloc / 100) * l.rr, 0)
-  const slPips = toPips(entry - sl, symbol)
+  const slPips = pipOf(entry - sl)
 
-  return { valid: true, isBuy, entry, sl, slPips, risk, legs, blendedRR, allocation, symbol }
+  /* Risk is the WHOLE position against the stop — every rung shares one
+     stop, so a partial exit does not reduce what is at risk before the first
+     fill. Reward is the sum of the rungs, which is the other side of exactly
+     the same arithmetic the blended R:R expresses as a ratio. */
+  const riskMoney = perPip != null ? totalLot * perPip * slPips : null
+  const rewardMoney = perPip != null
+    ? legs.reduce((sum, l) => sum + (l.money || 0), 0)
+    : null
+
+  return {
+    valid: true, isBuy, entry, sl, slPips, risk, legs, blendedRR, allocation, symbol,
+    riskMoney, rewardMoney,
+    /** The quote currency the two figures above are denominated in. */
+    currency: (spec && spec.quote_currency) || null,
+    /** True when the broker priced this plan rather than the name did. */
+    priced: perPip != null,
+  }
 }
 
 /* ── Confluence ──────────────────────────────────────────────────────
@@ -201,7 +259,19 @@ export function scoreConfluence(reading, ladder) {
   let grade = 'UNKNOWN'
   if (score != null) grade = score >= 80 ? 'STRONG' : score >= 50 ? 'MODERATE' : 'WEAK'
 
-  return { checks, passed, known, failed, unknown, score, grade, direction: dir }
+  /* What each check was WORTH, so the breakdown can show its arithmetic.
+     Not a constant 20: the score is passed-over-KNOWN scaled to 100, so on a
+     reading that could only answer four questions each one is worth 25, and
+     printing "+20" there would not add up to the number above it. An unknown
+     is worth nothing because it is not in the denominator either — it is
+     marked "n/a" rather than "+0", which is a different claim. */
+  const each = known > 0 ? Math.round(100 / known) : 0
+  for (const c of checks) {
+    c.weight = c.ok === true || c.ok === false ? each : null
+    c.points = c.ok === true ? each : c.ok === false ? 0 : null
+  }
+
+  return { checks, passed, known, failed, unknown, score, grade, direction: dir, each }
 }
 
 /* ── Guardrails ──────────────────────────────────────────────────────
