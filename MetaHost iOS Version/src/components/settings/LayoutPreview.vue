@@ -48,7 +48,14 @@
     <!-- ═══ CLASSIC CORE ═══════════════════════════════════════════ -->
     <template v-if="id === 'classic'">
       <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
-      <img :src="art" class="pv-portrait" alt="" />
+      <!-- Art mode decides the shape here, the way it does on the real
+           layout. Hardcoding the square meant a tile could advertise a
+           treatment the layout no longer used. -->
+      <span v-if="artMode === 'portrait'" class="pv-poster">
+        <img :src="art" alt="" />
+        <b class="pv-poster-name">{{ name }}</b>
+      </span>
+      <img v-else :src="art" class="pv-portrait" :class="{ 'is-round': artMode === 'framed' }" alt="" />
       <span class="pv-pod">
         <i class="pv-sat" /><i class="pv-disc" /><i class="pv-sat" />
         <b class="pv-mark">POWERED BY <u>NOVAHOST</u></b>
@@ -85,8 +92,12 @@
     <!-- ═══ NEON FRAME ═════════════════════════════════════════════ -->
     <template v-else-if="id === 'neon'">
       <span class="pv-bar"><i class="pv-b-chip" /><i class="pv-b-i" /></span>
-      <span class="pv-frame">
-        <img :src="art" class="pv-ring" alt="" />
+      <span class="pv-frame" :class="{ 'is-poster': artMode === 'portrait' }">
+        <span v-if="artMode === 'portrait'" class="pv-poster">
+          <img :src="art" alt="" />
+          <b class="pv-poster-name">{{ name }}</b>
+        </span>
+        <img v-else :src="art" class="pv-ring" alt="" />
       </span>
       <span class="pv-pod">
         <i class="pv-sat" /><i class="pv-disc" /><i class="pv-sat" />
@@ -241,6 +252,38 @@ const hasDock = computed(() => !['focus', 'bleed'].includes(props.id))
   margin: 4% 0 2%;
   flex: none;
 }
+.pv-portrait.is-round { border-radius: 50%; border: 1px solid var(--cc-accent) }
+
+/* The Portrait treatment, in miniature: the 4:5 poster with the robot's
+   name ranged left along the bottom of it. Small enough that the name is a
+   texture rather than something to read, which is the point of a tile —
+   what has to be legible at this size is the SHAPE. */
+.pv-poster {
+  position: relative;
+  display: block;
+  width: 72%; aspect-ratio: 4 / 5;
+  margin: 4% 0 2%;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid var(--cc-accent);
+  flex: none;
+}
+.pv-poster img {
+  width: 100%; height: 100%;
+  object-fit: cover; object-position: 50% 30%;
+  display: block;
+}
+.pv-poster-name {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 22% 7% 6%;
+  font-family: var(--cc-name-font);
+  font-size: 7px; font-weight: 800; line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--cc-name-color);
+  text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: linear-gradient(to top, rgba(0,0,0,0.86), rgba(0,0,0,0.4) 55%, transparent);
+}
 
 .pv-frame {
   display: grid; place-items: center;
@@ -250,6 +293,11 @@ const hasDock = computed(() => !['focus', 'bleed'].includes(props.id))
   box-shadow: 0 0 calc(7px * var(--cc-glow)) rgba(var(--cc-accent-rgb), calc(.5 * var(--cc-glow)));
   flex: none;
 }
+/* With a poster inside, the outer frame is a second border around a bordered
+   card. The real layout has one accent edge, so the miniature has one too —
+   the frame keeps only its glow. */
+.pv-frame.is-poster { padding: 4% 0; border-color: transparent }
+.pv-frame.is-poster .pv-poster { width: 78%; margin: 0 }
 .pv-ring {
   width: 46%; aspect-ratio: 1; border-radius: 50%;
   object-fit: cover; object-position: 50% 26%;

@@ -99,7 +99,11 @@
             <p class="cc-caption isheet-card-blurb">
               How your mentor's art fills this layout. Saved per layout.
             </p>
-            <div class="isheet-seg isheet-seg-3">
+            <!-- 2x2, not one row of four. Portrait made this a four-option
+                 group, and four across a 343pt sheet gives each button ~77pt
+                 — "Full bleed" does not fit on one line in that, and the row
+                 was wrapping into three-plus-one. -->
+            <div class="isheet-seg isheet-seg-2">
               <button
                 v-for="a in ART_MODES"
                 :key="a.id"

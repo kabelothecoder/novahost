@@ -59,9 +59,18 @@ watch(
     // Persist choice
     secStorage.setItem('ACCENT_COLOR', swatch.name)
 
-    // Sync Meta Theme Color for iOS Status Bar & PWA
-    const metaTheme = document.querySelector('meta[name="theme-color"]')
-    if (metaTheme) metaTheme.setAttribute('content', swatch.hex)
+    /* `theme-color` is NOT set here any more — App.vue owns it.
+     *
+     * It used to be pointed at the accent hex, and on an installed handset
+     * that colour is what iOS paints the chrome around the web view with.
+     * A Crimson or Magenta robot therefore asked the OS for a bright band
+     * across the bottom of every screen, under an app whose canvas is
+     * near-black. It also raced theme.js, which was setting the same tag to
+     * the canvas tone, so which colour won depended on whether the accent or
+     * the scheme changed last.
+     *
+     * One writer, and it follows the ground the page actually paints:
+     * see the `--app-ground` watchEffect in App.vue. */
   },
   { immediate: true }
 )

@@ -161,19 +161,29 @@
             <div class="sym-field cc-recess">
               <div class="sym-field-head">
                 <span class="cc-label">How many trades</span>
-                <span class="cc-caption">open at once</span>
+                <span class="cc-caption">open at once · 1–{{ MAX_TRADES }}</span>
               </div>
               <div class="sym-stepper">
-                <button class="sym-step" aria-label="Fewer trades" @click="bumpTrades(-1)">
+                <button class="sym-step" aria-label="Fewer trades"
+                        :disabled="cfg.max_trades <= 1" @click="bumpTrades(-1)">
                   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 </button>
                 <div class="sym-step-val sym-pips">
-                  <span v-for="i in 5" :key="i" class="sym-pip" :class="{ 'is-on': i <= cfg.max_trades }"
-                        :style="{ height: `${9 + i * 2}px` }"></span>
+                  <!-- Ten rising bars over a range of twenty: one bar is two
+                       trades, and the numeral beside them carries the exact
+                       value. Twenty individual bars do not fit beside two
+                       44pt buttons on a 375pt phone, and the meter was only
+                       ever the shape of the answer — the number is the
+                       answer. `Math.ceil` so any count above zero lights at
+                       least one bar. -->
+                  <span v-for="i in 10" :key="i" class="sym-pip"
+                        :class="{ 'is-on': i <= Math.ceil(cfg.max_trades / 2) }"
+                        :style="{ height: `${8 + i}px` }"></span>
                   <span class="sym-step-num cc-figure sym-pip-num">{{ cfg.max_trades }}</span>
                 </div>
-                <button class="sym-step is-accent" aria-label="More trades" @click="bumpTrades(1)">
+                <button class="sym-step is-accent" aria-label="More trades"
+                        :disabled="cfg.max_trades >= MAX_TRADES" @click="bumpTrades(1)">
                   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                        stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
                     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -268,11 +278,23 @@
               </div>
               <p class="sym-field-help cc-caption">across all trades</p>
             </div>
+            <!--
+              This number used to be typed and unrelated to anything. It is
+              now the plan's own total — see `planTrades` — because the budget
+              is divided across every position the robot may hold at once, and
+              a figure that disagrees with the plan mis-sizes every trade it
+              feeds. Still overridable; the Auto chip puts it back.
+            -->
             <div class="sym-field cc-recess">
-              <div class="sym-field-head"><span class="cc-label">How many</span></div>
+              <div class="sym-field-head">
+                <span class="cc-label">How many</span>
+                <button v-if="!risk.linkTrades" class="sym-relink" @click="relinkTrades">Auto</button>
+                <span v-else class="cc-caption">from plan</span>
+              </div>
               <input class="sym-input sym-input-md" type="text" inputmode="numeric"
-                     :value="risk.riskTrades" @input="onNum('riskTrades', $event.target.value)" />
-              <p class="sym-field-help cc-caption">splits the budget</p>
+                     :value="risk.linkTrades ? planTrades : risk.riskTrades"
+                     @input="onNum('riskTrades', $event.target.value)" />
+              <p class="sym-field-help cc-caption sym-plannote">{{ planTradesNote }}</p>
             </div>
           </div>
 
@@ -342,29 +364,107 @@
         </div>
       </section>
 
-      <!-- ═══ 5 · NEWS · 6 · EVENTS ══════════════════════════════════
-           Both are drawn by the doc with live copy. Neither has a source:
-           there is no calendar or news table, and no edge function that
-           returns either. They render as explicitly NOT CONNECTED rather
-           than with sample headlines, because a plausible-looking headline
-           on a trading screen is the one kind of placeholder that can move
-           real money. The layouts are ready the day a provider lands. -->
-      <section v-for="f in feeds" :key="f.id" class="sym-sec">
+      <!-- ═══ 5 · NEWS ═══════════════════════════════════════════════
+           Live, from `market-wire`. Rows the user's own instruments are
+           named in float to the top and carry a chip; the rest stay as
+           market context rather than being hidden, because a section that
+           shows two of twenty-five headlines reads as broken rather than
+           focused. -->
+      <section class="sym-sec">
         <div class="sym-sec-head">
           <div>
-            <h2 class="sym-sec-t">{{ f.title }}</h2>
-            <p class="sym-sec-s">{{ f.sub }}</p>
+            <h2 class="sym-sec-t">News</h2>
+            <p class="sym-sec-s">Wire on your selected symbols</p>
           </div>
-          <span class="cc-chip sym-off">Not connected</span>
+          <button class="cc-chip sym-feedmeta" :class="{ 'sym-off': !wire.news.ok }"
+                  :disabled="wire.loading" @click="refreshFeeds">{{ feedMeta(wire.news) }}</button>
         </div>
-        <div class="sym-feed cc-card">
+
+        <div v-if="wire.loading" class="sym-feed cc-card">
+          <p class="cc-caption">Reading the wire…</p>
+        </div>
+
+        <div v-else-if="!wire.news.ok || !wire.news.items.length" class="sym-feed cc-card">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" />
             <circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none" />
           </svg>
-          <p class="cc-caption">{{ f.blurb }}</p>
+          <p class="cc-caption">
+            {{ wire.news.ok ? 'Nothing on the wire for these symbols right now.'
+                            : (wire.news.error || 'The news wire could not be reached. Tap to retry.') }}
+          </p>
         </div>
+
+        <ul v-else class="sym-wire cc-card">
+          <li v-for="n in wire.news.items" :key="n.id" class="sym-wire-row">
+            <div class="sym-wire-top">
+              <span v-if="n.matched" class="cc-chip cc-chip-accent sym-wire-tag">Yours</span>
+              <span class="sym-wire-when cc-mono">{{ whenLabel(n.at, now.getTime()) }}</span>
+            </div>
+            <p class="sym-wire-title">{{ n.title }}</p>
+            <p v-if="n.summary" class="sym-wire-sum cc-caption">{{ n.summary }}</p>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ═══ 6 · EVENTS ═════════════════════════════════════════════
+           The whole trading week, not only what is still ahead: the source
+           publishes one this-week file, so from Friday's close the upcoming
+           list is empty and a card showing nothing on a Saturday reads as a
+           broken feature rather than a shut market. What has already printed
+           is dimmed and keeps its forecast. -->
+      <section class="sym-sec">
+        <div class="sym-sec-head">
+          <div>
+            <h2 class="sym-sec-t">Events</h2>
+            <p class="sym-sec-s">High-impact economic calendar</p>
+          </div>
+          <button class="cc-chip sym-feedmeta" :class="{ 'sym-off': !wire.events.ok }"
+                  :disabled="wire.loading" @click="refreshFeeds">{{ feedMeta(wire.events) }}</button>
+        </div>
+
+        <div v-if="wire.loading" class="sym-feed cc-card">
+          <p class="cc-caption">Reading the calendar…</p>
+        </div>
+
+        <div v-else-if="!wire.events.ok || !wire.events.items.length" class="sym-feed cc-card">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" />
+            <circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
+          <p class="cc-caption">
+            {{ wire.events.ok ? 'No releases this week for the currencies behind your symbols.'
+                              : (wire.events.error || 'The calendar could not be reached. Tap to retry.') }}
+          </p>
+        </div>
+
+        <ul v-else class="sym-wire cc-card">
+          <li v-for="e in wire.events.items" :key="e.id"
+              class="sym-ev" :class="[`is-${e.impact}`, { 'is-past': e.past }]">
+            <div class="sym-ev-when">
+              <span class="sym-ev-time cc-mono">{{ whenLabel(e.at, now.getTime()) }}</span>
+              <span class="sym-ev-ccy cc-mono">{{ e.currency }}</span>
+            </div>
+            <div class="sym-ev-body">
+              <p class="sym-ev-title">{{ e.title }}</p>
+              <p v-if="e.forecast || e.previous" class="sym-ev-nums cc-caption">
+                <template v-if="e.forecast">fc {{ e.forecast }}</template>
+                <template v-if="e.forecast && e.previous"> · </template>
+                <template v-if="e.previous">prev {{ e.previous }}</template>
+              </p>
+            </div>
+            <span class="sym-ev-impact cc-mono">{{ IMPACT_LABEL[e.impact] }}</span>
+          </li>
+        </ul>
+
+        <!-- The robot does not read this calendar. Said plainly on the screen
+             that shows it, because a user who sees NFP listed here will
+             reasonably assume something is watching it. -->
+        <p class="sym-ev-note cc-caption">
+          The robot does not pause for news — these are for your judgement, not an automatic stand-down.
+        </p>
       </section>
 
       <p v-if="syncMsg" class="sym-syncmsg cc-caption" :class="{ 'is-error': !syncOk }">{{ syncMsg }}</p>
@@ -381,6 +481,7 @@ import { haptic } from '../composables/useSpeech.js'
 import {
   loadPlan, savePlan, syncPlan, normaliseSymbol, cleanBrokerSymbol, DEFAULT_ROW,
 } from '../services/symbolPlanService.js'
+import { loadWire, whenLabel, ageLabel } from '../services/marketWireService.js'
 
 /* ── Allowance ───────────────────────────────────────────────────────
    The robot's permitted symbols, straight from the licence. Category is
@@ -441,9 +542,27 @@ function bumpLot(d) {
   dirty.value = true
 }
 
+/**
+ * The ceiling on concurrent trades for one symbol.
+ *
+ * 20, not 5. The database has always allowed it —
+ * `license_symbol_config_trades_range check (max_trades between 1 and 20)` —
+ * and `metacopier-execute` enforces whatever is stored. The 5 here was a
+ * client-only limit, narrower than the schema and than the executor, so a
+ * user who wanted eight positions on gold simply could not ask for it and
+ * nothing on screen explained why.
+ *
+ * It also silently capped the SMART LOT, which is what made it a correctness
+ * problem rather than a missing feature: the calculator splits one risk budget
+ * across the trades the plan allows, so a ceiling of 5 meant the budget could
+ * never be divided more than five ways whatever the user actually intended to
+ * run.
+ */
+const MAX_TRADES = 20
+
 function bumpTrades(d) {
   if (!cfg.value) return
-  cfg.value.max_trades = Math.min(5, Math.max(1, cfg.value.max_trades + d))
+  cfg.value.max_trades = Math.min(MAX_TRADES, Math.max(1, cfg.value.max_trades + d))
   haptic(15)
   dirty.value = true
 }
@@ -497,7 +616,57 @@ const risk = reactive({
   balance: '',
   currency: session.brokerCurrency || 'USD',
   riskPercent: '1',
+  /* Only consulted while `linkTrades` is false — see planTrades below. */
   riskTrades: '3',
+  linkTrades: true,
+})
+
+/**
+ * How many trades the robot can actually have open, from the plan itself.
+ *
+ * ## The bug this closes
+ *
+ * "How many" was a free-typed number with nothing behind it, sitting on the
+ * same screen as a per-symbol "How many trades" stepper — two controls with
+ * almost the same label and no relationship. The shipped screenshot had the
+ * stepper on 2 and this field on 3, so the calculator divided the risk budget
+ * three ways, `applySuggested` wrote that third to the symbol's lot, and the
+ * robot was then free to open two of them. The account carried two-thirds of
+ * the intended risk.
+ *
+ * It fails the other way round just as easily, and that way costs money: a
+ * symbol capped at 5 with this field on 2 sizes each position at half the
+ * budget and lets five of them run — two and a half times the risk the user
+ * typed.
+ *
+ * ## Why the sum, and why it stays editable
+ *
+ * The budget is split across every position that can be open at once, which
+ * is the sum of `max_trades` over the ENABLED symbols — not one symbol's cap.
+ * Three symbols at 2 apiece is six concurrent trades sharing one budget.
+ *
+ * Linked is the default because it is the answer that is right by
+ * construction. It is still overridable, because a user planning around a
+ * budget they have not built a plan for yet is a real case and the calculator
+ * has always worked standalone; typing unlinks, and the chip puts it back.
+ */
+const planTrades = computed(() =>
+  selected.value.reduce((n, sym) => n + (Number(plan[sym]?.max_trades) || 0), 0),
+)
+
+/** What the calculator divides by: the plan while linked, the typed value otherwise. */
+const riskTradesValue = computed(() =>
+  risk.linkTrades ? Math.max(1, planTrades.value) : Math.max(1, parseInt(risk.riskTrades, 10) || 1),
+)
+
+/** The breakdown under the field, so the number is never unexplained. */
+const planTradesNote = computed(() => {
+  if (!risk.linkTrades) return 'typed — tap Auto to follow your plan'
+  if (!selected.value.length) return 'no symbols on yet'
+  if (selected.value.length === 1) return `${selected.value[0]} x ${plan[selected.value[0]]?.max_trades ?? 0}`
+  return selected.value
+    .map(s => `${s} x ${plan[s]?.max_trades ?? 0}`)
+    .join(' + ')
 })
 
 const balanceNote = computed(() =>
@@ -511,6 +680,15 @@ function onNum(field, v) {
     ? v.replace(/[^0-9]/g, '').slice(0, 2)
     : v.replace(/[^0-9.]/g, '')
   risk[field] = clean
+  // Typing in the trade count is the act that detaches it from the plan.
+  if (field === 'riskTrades') risk.linkTrades = false
+  dirty.value = true
+}
+
+/** Put the trade count back on the plan. */
+function relinkTrades() {
+  risk.linkTrades = true
+  haptic(20)
   dirty.value = true
 }
 
@@ -526,7 +704,7 @@ function onNum(field, v) {
 const calc = computed(() => {
   const bal = parseFloat(risk.balance) || 0
   const pct = Math.min(100, Math.max(0, parseFloat(risk.riskPercent) || 0))
-  const n = Math.min(20, Math.max(1, parseInt(risk.riskTrades, 10) || 1))
+  const n = Math.min(60, riskTradesValue.value)
   const totalAmt = (bal * pct) / 100
   const perAmt = totalAmt / n
   const perPct = pct / n
@@ -602,13 +780,46 @@ const nowPct = computed(() => {
   return (h / 24) * 100
 })
 
-/* ── Feeds with no source ────────────────────────────────────────── */
-const feeds = [
-  { id: 'news', title: 'News', sub: 'Wire on your selected symbols',
-    blurb: 'No news provider is connected to this build. Headlines appear here once one is.' },
-  { id: 'events', title: 'Events', sub: 'High-impact economic calendar',
-    blurb: 'No calendar provider is connected. Until one is, the robot does not pause for news — size accordingly.' },
-]
+/* ── The wire ────────────────────────────────────────────────────────
+   News and the economic calendar, from `market-wire`. Both sections used to
+   be layouts over a hardcoded "Not connected" chip because no source existed
+   anywhere in the project; there is one now.
+
+   Loaded once on mount and on demand, never on a timer: the server caches
+   both feeds for the whole fleet, so a poll here would only spend the user's
+   battery re-rendering the same rows. */
+const wire = reactive({
+  loading: true,
+  news:   { ok: false, stale: false, source: null, fetchedAt: null, error: null, items: [] },
+  events: { ok: false, stale: false, source: null, fetchedAt: null, error: null, items: [] },
+})
+
+async function loadFeeds() {
+  wire.loading = true
+  const res = await loadWire(selected.value.length ? selected.value : allowed.value.map(a => a.symbol))
+  Object.assign(wire.news, res.news)
+  Object.assign(wire.events, res.events)
+  wire.loading = false
+}
+
+function refreshFeeds() {
+  haptic(20)
+  loadFeeds()
+}
+
+/** "FXStreet · 4m ago", or the reason there is nothing. */
+function feedMeta(feed) {
+  if (wire.loading) return 'loading'
+  if (!feed.ok) return 'unavailable'
+  const parts = [feed.source, ageLabel(feed.fetchedAt, now.value.getTime())].filter(Boolean)
+  return (feed.stale ? ['cached', ...parts] : parts).join(' · ')
+}
+
+/* Impact drives the dot colour AND the row order the server already applied;
+   this is only the label. `none` covers bank holidays, which the feed tags as
+   events with no impact and which still matter — a closed market is a reason
+   not to be in a trade. */
+const IMPACT_LABEL = { high: 'High', medium: 'Med', low: 'Low', none: 'Hol' }
 
 /* ── Sync ────────────────────────────────────────────────────────── */
 const syncing = ref(false)
@@ -624,7 +835,15 @@ async function push() {
      it is what the executor sizes a `smart_lot` row from. Passing `risk`
      alone left it undefined and the server stored 0, which would have made
      every smart row size to nothing. */
-  const res = await syncPlan(plan, { ...risk, smartLot: calc.value.lotNum })
+  /* `riskTrades` is sent as the EFFECTIVE count, not the stored string. While
+     the field is linked to the plan the stored value is stale by design — it
+     is only the manual override — so posting it raw would tell the server the
+     budget is split a different number of ways than the screen just showed. */
+  const res = await syncPlan(plan, {
+    ...risk,
+    riskTrades: riskTradesValue.value,
+    smartLot: calc.value.lotNum,
+  })
   syncing.value = false
   syncOk.value = res.ok
   if (res.ok) {
@@ -649,6 +868,7 @@ onMounted(() => {
     risk.currency = session.brokerCurrency || 'USD'
   }
   clock = setInterval(() => { now.value = new Date() }, 30_000)
+  loadFeeds()
 })
 onUnmounted(() => clearInterval(clock))
 
@@ -1053,6 +1273,138 @@ const allowanceLine = computed(() =>
 }
 .sym-feed p { margin: 0; flex: 1 }
 .sym-feed svg { flex: none; color: var(--cc-ink-4) }
+
+/* The freshness chip doubles as the refresh control — the source and the age
+   are exactly what you look at before deciding to reload, so the button is
+   put where that thought happens rather than as a separate icon. */
+.sym-feedmeta {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
+  flex: none;
+  border: 1px solid var(--cc-border);
+  background: var(--cc-card-2);
+  color: var(--cc-ink-3);
+  cursor: pointer;
+}
+.sym-feedmeta:disabled { opacity: 0.5; cursor: default }
+.sym-feedmeta:active:not(:disabled) { transform: scale(0.95) }
+
+/* ── The wire list ───────────────────────────────────────────────── */
+.sym-wire {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;   /* so the row hairlines stop at the card's radius */
+}
+.sym-wire-row,
+.sym-ev { border-top: 1px solid var(--cc-border-soft) }
+.sym-wire > :first-child { border-top: 0 }
+
+.sym-wire-row { padding: 12px 14px }
+.sym-wire-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.sym-wire-tag { height: 18px; padding: 0 7px; font-size: 9px }
+.sym-wire-when { font-size: 10px; color: var(--cc-ink-4); margin-left: auto }
+.sym-wire-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--cc-ink);
+}
+.sym-wire-sum {
+  margin: 4px 0 0;
+  line-height: 1.4;
+  /* Two lines. The summary is context for the headline, and an RSS
+     description runs to a full paragraph often enough that leaving it
+     unbounded turns the list into a reading app. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Calendar rows ───────────────────────────────────────────────── */
+.sym-ev {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 14px;
+}
+.sym-ev-when { flex: none; width: 68px; display: flex; flex-direction: column; gap: 2px }
+.sym-ev-time { font-size: 11px; color: var(--cc-ink-2); white-space: nowrap }
+.sym-ev-ccy  { font-size: 10px; color: var(--cc-ink-4) }
+.sym-ev-body { flex: 1; min-width: 0 }
+.sym-ev-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--cc-ink);
+}
+.sym-ev-nums { margin: 3px 0 0; font-size: 10.5px }
+
+/* Impact is carried by the pill's colour, and ALSO by its text — the three
+   levels are a red/amber/grey ramp, which is the one encoding a
+   red-green-blind user cannot read, and this sits on a screen about risk. */
+.sym-ev-impact {
+  flex: none;
+  align-self: center;
+  min-width: 34px;
+  padding: 3px 6px;
+  border-radius: var(--cc-r-chip);
+  font-size: 9px;
+  text-align: center;
+  border: 1px solid var(--cc-border);
+  color: var(--cc-ink-4);
+}
+.sym-ev.is-high .sym-ev-impact {
+  border-color: color-mix(in srgb, var(--cc-sell) 45%, transparent);
+  background: color-mix(in srgb, var(--cc-sell) 16%, transparent);
+  color: var(--cc-sell);
+}
+.sym-ev.is-medium .sym-ev-impact {
+  border-color: color-mix(in srgb, var(--cc-warn) 45%, transparent);
+  background: color-mix(in srgb, var(--cc-warn) 16%, transparent);
+  color: var(--cc-warn);
+}
+
+/* Already printed. Dimmed rather than dropped: the actual against the
+   forecast is the most useful thing on the card, and on a weekend it is the
+   only thing there is. */
+.sym-ev.is-past { opacity: 0.5 }
+
+.sym-ev-note { margin: 9px 2px 0; line-height: 1.4 }
+
+/* ── Trade-count link ────────────────────────────────────────────── */
+.sym-relink {
+  height: 18px;
+  padding: 0 8px;
+  border-radius: var(--cc-r-chip);
+  border: 1px solid var(--cc-accent-line);
+  background: var(--cc-accent-dim);
+  color: var(--cc-accent-text);
+  font-family: var(--cc-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.sym-relink:active { transform: scale(0.94) }
+
+/* The plan breakdown can run long with several symbols on. One line, ellipsed
+   — it is a reassurance that the number came from somewhere, not a table. */
+.sym-plannote {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .sym-syncmsg { margin: 0; text-align: center }
 .sym-syncmsg.is-error { color: var(--cc-warn) }

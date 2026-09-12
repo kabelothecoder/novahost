@@ -64,8 +64,22 @@ export default defineConfig(({ mode }) => ({
         description: 'Premium AI-Powered Trading Platform',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#0A0A0A',
-        theme_color: '#0A0A0A',
+        /**
+         * The app's DEFAULT command canvas, not a generic near-black.
+         *
+         * These two paint the launch splash and whatever chrome the OS draws
+         * around the web view, and `#0A0A0A` was neither of the app's two
+         * grounds — so an installed handset showed a dark grey band meeting
+         * the app's own canvas at a visible seam, on top of the in-page one
+         * fixed by `--app-ground` in glass.css.
+         *
+         * A manifest carries one colour and the background tone is a user
+         * setting, so this is the Obsidian default every install starts on.
+         * Changing it only takes effect on a FRESH install: iOS reads the
+         * manifest when the icon is added to the home screen and never again.
+         */
+        background_color: '#0E0E11',
+        theme_color: '#0E0E11',
         start_url: '/',
         scope: '/',
         icons: [

@@ -136,10 +136,67 @@ const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 // z-index 9999 robot portrait off screens it was landing on top of. That
 // component is gone — see the note in the template — so what is left here is
 // only the bg_loop / glass-blur reasoning above.)
-const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades']
+// `terminal` was missing from this list while TerminalView's root element has
+// been `class="cmd mtv"` — so the MT5 screen painted the command canvas
+// (--cc-canvas) while the shell treated it as an obsidian route: the bg_loop
+// video ran behind it for nothing, and the page ground stayed --obsidian.
+// Those two darks meeting is the black band along the bottom of the MT5 screen.
+// `support` is NOT here and should not be: it is still on the glass system.
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal']
 const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
 
 const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))
+
+/* ── The ground behind the app ─────────────────────────────────────────
+   See the `--app-ground` block in glass.css for what this fixes. The route
+   family decides which of the three canvases the page is painted with, and
+   `data-ground` hands that to CSS; the colour itself stays in the
+   stylesheet so a tone change needs no JS.
+
+   A command route on the light scheme resolves to `light` rather than
+   `cmd`: --cc-tone is a DARK-scheme ladder and theme.js keeps writing it
+   whatever the scheme, so trusting it here would paint an obsidian strip
+   under a light Home. */
+watchEffect(() => {
+  const el = document.documentElement
+
+  let ground
+  if (isLightRoute.value) ground = 'light'
+  else if (isCommandRoute.value) ground = resolvedScheme.value === 'light' ? 'light' : 'cmd'
+  else ground = 'obsidian'
+
+  if (ground === 'obsidian') delete el.dataset.ground
+  else el.dataset.ground = ground
+
+  /* The same decision, handed to iOS.
+   *
+   * On an installed PWA this tag is what the OS paints the strip over the
+   * home indicator with — the black box along the bottom of every screen.
+   * It had two writers before this: theme.js wrote the canvas tone and
+   * accent.js wrote the raw ACCENT hex, so a Crimson robot asked for a red
+   * band and whichever store changed last decided the colour.
+   *
+   * One writer, matching what the page paints, so the strip disappears into
+   * the app instead of ending it with a hard line. The manifest's
+   * `background_color` is the same colour for the same reason, and covers
+   * the launch splash before any of this has run.
+   *
+   * `--cc-tone` is read back off the element rather than imported: theme.js
+   * writes it there as an inline style, so reading it is what keeps this in
+   * step with a background-tone change without duplicating the ladder. */
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) {
+    /* Touched purely to register the dependency — the VALUE comes off the
+     * element below, but without reading the store this effect would never
+     * re-run when the user picked a different background tone. */
+    void theme.tone
+    const tone = getComputedStyle(el).getPropertyValue('--cc-tone').trim()
+    meta.setAttribute('content',
+      ground === 'light' ? '#F4F7F9'
+      : ground === 'cmd' ? (tone || '#0E0E11')
+      : '#010A15')
+  }
+})
 
 // Show iOS install hint on first visit (after 3s)
 const showInstall = ref(false)

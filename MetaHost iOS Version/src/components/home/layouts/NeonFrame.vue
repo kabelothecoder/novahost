@@ -23,12 +23,18 @@
          what lets the art actually be the hero and the controls read as
          controls. -->
     <div class="neon-art">
-      <!-- forceMode: this layout IS the circular frame. With the art mode
-           left to the per-layout picker it can resolve to `bleed`, and the
-           widget then omits the art entirely — leaving a glowing empty box
-           with a name in it while HomeBackdrop draws the portrait
-           full-screen behind it. Observed exactly that. -->
-      <RobotHeroWidget size="md" force-mode="framed" />
+      <!-- forceMode exists for one failure only: with the art mode left to
+           the per-layout picker it can resolve to `bleed`, and the widget
+           then omits the art entirely — leaving a glowing empty box with a
+           name in it while HomeBackdrop draws the portrait full-screen
+           behind it. Observed exactly that.
+
+           It forces `portrait` rather than `framed` now. The circle rendered
+           the mentor's art at 132px inside a panel drawn to be the hero of
+           the screen, so the accent border framed a token and the rest of the
+           card was empty. Portrait hands the whole card to the art and hangs
+           the name off the bottom of it, which is what the frame was for. -->
+      <RobotHeroWidget size="md" force-mode="portrait" />
     </div>
 
     <!-- CONTROLS BELOW, on their own ground.

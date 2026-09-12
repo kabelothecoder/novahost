@@ -60,12 +60,38 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-html { height: 100%; }
+/* ── The ground ───────────────────────────────────────────────────────
+   The colour painted BEHIND the app, and the reason for the black band
+   that appeared along the bottom of every screen once installed.
+
+   In an installed iOS PWA the web view does not always hand `100dvh` the
+   whole screen: the strip over the home indicator is left to the page
+   canvas, which the CSS spec says is painted from `body`'s background.
+   That was `--obsidian` (#010A15) — a blue-black from the glass system —
+   while Home, Settings, Symbols, Scanner and Trades all paint the command
+   canvas, which the user can tone purple. Two different darks meeting at a
+   hard horizontal line reads as a black box stuck to the bottom of the app.
+
+   So the ground follows whatever the current route actually paints.
+   `data-ground` is set by App.vue per route family; the value is a `var()`
+   rather than a literal so a tone change repaints it with no JS, since
+   theme.js already writes `--cc-tone` to :root.
+
+   This is also why `html` is painted and not only `body`: overscroll on a
+   scroll container reveals the html canvas, not body's. */
+:root                      { --app-ground: var(--obsidian, #010A15); }
+:root[data-ground="cmd"]   { --app-ground: var(--cc-tone, #0E0E11); }
+:root[data-ground="light"] { --app-ground: #F4F7F9; }
+
+html {
+  height: 100%;
+  background: var(--app-ground);
+}
 
 body {
   width: 100%;
   height: 100%;
-  background: var(--obsidian);
+  background: var(--app-ground);
   color: #E8F0FF;
   font-family: var(--font-main);
   font-weight: 400;

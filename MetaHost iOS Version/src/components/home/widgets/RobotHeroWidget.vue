@@ -7,6 +7,23 @@
       <span v-if="mode === 'framed'" class="hero-ring"></span>
 
       <!--
+        Portrait's copy lives INSIDE the art, over its own gradient, rather
+        than in `.hero-copy` below it. That is the difference between a card
+        with a picture in it and a card that IS the robot: the name reads as a
+        caption on the poster instead of a label under a thumbnail.
+
+        The gradient is unconditional. Mentor art is arbitrary — a pale
+        background behind white text is one upload away — and the project has
+        already measured that blur does not rescue contrast on saturated art.
+        This is an opaque-at-the-bottom ramp, not a blur.
+      -->
+      <div v-if="mode === 'portrait'" class="hero-plate">
+        <span v-if="mentorHandle" class="hero-mentor hero-mentor-on-art">{{ mentorHandle }}</span>
+        <h1 class="hero-name cc-name">{{ robot.name }}</h1>
+        <p v-if="symbolLine" class="hero-symbols hero-symbols-on-art">{{ symbolLine }}</p>
+      </div>
+
+      <!--
         v2's corner badge. It reports the LICENCE-BOUND robot's version
         and only appears in Avatar mode, where there is a card corner to
         pin it to — on the circular Framed crop it would clip.
@@ -22,7 +39,9 @@
       </span>
     </div>
 
-    <div class="hero-copy">
+    <!-- Portrait carries its own copy over the art (see `.hero-plate`), so
+         repeating it here would print the robot's name twice. -->
+    <div v-if="mode !== 'portrait'" class="hero-copy">
       <!-- v2 writes the mentor as a handle ("@swooshfx") rather than
            "Mentor · Swoosh FX". The @ is added only when the stored
            value is not already one, so a licence that supplies a real
@@ -153,6 +172,74 @@ const symbolLine = computed(() => {
 }
 .hero-lg .art-avatar { width: 168px; height: 168px }
 .hero-sm .art-avatar { width: 84px;  height: 84px }
+
+/* ── Portrait — the art IS the card ───────────────────────────────────
+   A tall poster rather than a token: full card width, a 4:5 box, and the
+   name hung off the bottom of the image instead of printed under it.
+
+   `aspect-ratio` on the CONTAINER here, not only on the image. The note on
+   `.hero-art img` explains why the image cannot size a grid row it is also
+   filling; giving the box its own ratio resolves that cycle from the outside
+   and lets `object-fit: cover` crop into a real rectangle. The image rule
+   below then overrides the square ratio it inherits from the shared selector.
+
+   The accent border is the Neon Frame identity, kept and scaled to the new
+   size. Its glow follows --cc-glow like everything else, so Glow: Off leaves
+   a clean bordered poster rather than removing the layout's premise. */
+.art-portrait {
+  width: 100%;
+  max-width: 340px;
+  aspect-ratio: 4 / 5;
+  border-radius: var(--cc-r-card-lg);
+  overflow: hidden;
+  border: 1px solid var(--cc-accent-line);
+  box-shadow: var(--cc-shadow-raised), var(--cc-glow-halo);
+  /* Establishes the containing block for the caption plate below. */
+  position: relative;
+}
+.hero-lg .art-portrait { max-width: 380px }
+.hero-sm .art-portrait { max-width: 260px }
+
+.art-portrait img {
+  aspect-ratio: auto;        /* the BOX owns the ratio in this mode */
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Higher than the shared 38%: on a 4:5 crop of a 9:16 source there is
+     headroom to spare and the face is what the card is for. */
+  object-position: 50% 30%;
+}
+
+/* The caption plate. Sized in `em` off its own font-size so the ramp grows
+   with the copy rather than clipping a three-line robot name. */
+.hero-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 46px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.88) 0%,
+    rgba(0, 0, 0, 0.66) 38%,
+    rgba(0, 0, 0, 0.22) 72%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* On the plate the copy sits on black, not on the card ground, so it takes
+   literal white rather than the ink tokens — those are tuned against
+   --cc-canvas and go grey-on-grey here. The robot name keeps
+   --cc-name-color, because that is a setting the user chose. */
+.hero-mentor-on-art { color: #FFF; opacity: 0.86 }
+.hero-symbols-on-art { color: rgba(255, 255, 255, 0.72) }
+.hero-plate .hero-name { text-shadow: 0 2px 14px rgba(0, 0, 0, 0.6) }
 
 /* Framed — the Neon Frame treatment: circular, with a glowing ring
    that is a separate element so the glow is not clipped by the

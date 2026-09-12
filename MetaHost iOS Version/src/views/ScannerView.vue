@@ -203,10 +203,28 @@
                 <span class="scan-drop-s cc-caption">Your drawings and levels are read too</span>
               </template>
 
+              <!--
+                The image gets its own framed box and the status line gets its
+                own row underneath it.
+
+                Before this they shared one stacking context: `.scan-preview`
+                was `width: 100%` with no height bound, so a portrait phone
+                screenshot — which is what a user actually attaches — rendered
+                at roughly 4:3 taller than the card and pushed the section off
+                screen, while `.scan-busy` was absolutely positioned at
+                `bottom: 10px` and therefore printed "READING THE CHART…"
+                directly over the candles at the bottom of that image. The
+                overlap was not a z-index accident; the caption had nowhere
+                else to be.
+              -->
               <template v-else>
-                <img :src="preview" class="scan-preview" alt="Chart to analyse" />
-                <span v-if="scanning" class="scan-laser" aria-hidden="true"></span>
-                <span v-if="scanning" class="scan-busy cc-mono">Reading the chart…</span>
+                <span class="scan-frame">
+                  <img :src="preview" class="scan-preview" alt="Chart to analyse" />
+                  <span v-if="scanning" class="scan-laser" aria-hidden="true"></span>
+                </span>
+                <span class="scan-status cc-mono" :class="{ 'is-busy': scanning }">
+                  {{ scanning ? 'Reading the chart…' : 'Tap to choose a different chart' }}
+                </span>
               </template>
             </button>
 
@@ -1294,10 +1312,32 @@ onMounted(async () => {
 }
 .scan-drop-t { font-size: 13.5px; font-weight: 600; color: var(--cc-ink-2) }
 .scan-drop-s { text-align: center }
-.scan-preview { width: 100%; border-radius: var(--cc-r-tile); display: block }
+/* The attached chart, in a box of its own.
+   `max-height` in dvh is what stops a portrait screenshot from running off
+   the screen, and `contain` is what keeps the chart READABLE inside it — a
+   `cover` crop on a chart throws away the levels the scan is about to be
+   judged on, which is the one thing this image is for. The letterboxing that
+   leaves is filled by the recess rather than by the card, so the frame reads
+   as a viewport onto the image instead of a broken fit. */
+.scan-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  border-radius: var(--cc-r-tile);
+  overflow: hidden;
+  background: var(--cc-recess);
+  /* The laser is anchored to this box, so it must clip here. */
+  isolation: isolate;
+}
+.scan-preview {
+  display: block;
+  width: 100%;
+  max-height: 46dvh;
+  object-fit: contain;
+}
 
 /* The laser is decoration, and decoration must not be the thing that tells
-   you a scan is running — the mono caption under it does that. */
+   you a scan is running — the mono caption below it does that. */
 .scan-laser {
   position: absolute; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--cc-accent), transparent);
@@ -1305,12 +1345,18 @@ onMounted(async () => {
   animation: scanSweep 1.6s var(--cc-ease) infinite;
 }
 @keyframes scanSweep { 0% { top: 4% } 50% { top: 92% } 100% { top: 4% } }
-.scan-busy {
-  position: absolute; bottom: 10px;
+
+/* In flow, under the frame — never over the chart. It also carries the
+   idle copy, because once an image is attached the drop zone's own
+   instructions are replaced by it and nothing else says the box is still
+   tappable. */
+.scan-status {
+  display: block;
   font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--cc-ink-2);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+  color: var(--cc-ink-4);
+  text-align: center;
 }
+.scan-status.is-busy { color: var(--cc-accent-text) }
 
 .scan-err { margin: 0; color: var(--cc-warn) }
 

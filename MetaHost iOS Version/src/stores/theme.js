@@ -37,10 +37,13 @@ import { accent } from './accent.js'
  * and full-bleed art under a bento of glass cards is unreadable.
  */
 export const LAYOUTS = [
-  { id: 'classic', name: 'Classic Core',  blurb: 'Reworked · text bottom nav', defaultArt: 'avatar' },
+  { id: 'classic', name: 'Classic Core',  blurb: 'Reworked · text bottom nav', defaultArt: 'portrait' },
   { id: 'focus',   name: 'Focus Engine',  blurb: 'Art forward · floating pill', defaultArt: 'bleed'  },
   { id: 'bleed',   name: 'Full-Bleed Art', blurb: 'The marketing screen',       defaultArt: 'bleed'  },
-  { id: 'neon',    name: 'Neon Frame',    blurb: 'Circular art · text nav',     defaultArt: 'framed' },
+  /* Was `framed`. The circle put the mentor's art on screen at 132px in the
+     middle of an otherwise empty panel, so the layout's glowing border framed
+     a token rather than a subject. Portrait gives it the whole card. */
+  { id: 'neon',    name: 'Neon Frame',    blurb: 'Framed art · text nav',       defaultArt: 'portrait' },
   /* The id stays 'feed' — it is a stored preference — but the section it
      was named for now lists what the robot TRADED rather than what the
      mentor broadcast, so the blurb had to follow it. */
@@ -49,9 +52,14 @@ export const LAYOUTS = [
 ]
 
 export const ART_MODES = [
-  { id: 'avatar', name: 'Avatar',    blurb: 'Contained portrait' },
-  { id: 'framed', name: 'Framed',    blurb: 'Circular, ringed'   },
-  { id: 'bleed',  name: 'Full bleed', blurb: 'Fills the screen'  },
+  { id: 'avatar',   name: 'Avatar',     blurb: 'Contained portrait' },
+  { id: 'framed',   name: 'Framed',     blurb: 'Circular, ringed'   },
+  /* The robot fills its own card rather than sitting as a token inside one.
+     Between Framed and Full bleed in weight: the art is the card, but the
+     card is still a card — so the layout keeps its structure and the widgets
+     below it keep a ground to sit on. */
+  { id: 'portrait', name: 'Portrait',   blurb: 'Art fills the card' },
+  { id: 'bleed',    name: 'Full bleed', blurb: 'Fills the screen'   },
 ]
 
 /**
@@ -587,12 +595,16 @@ function writeTokens() {
      here. This one is a bare number, so it is safe. */
   root.setProperty('--cc-name-scale', String(theme.nameScale))
 
-  // PWA status bar / theme colour follows the canvas, not the accent —
-  // accent.js points it at the accent for the obsidian views, and Home
-  // reclaims it while mounted. It has to follow the tone too, or a navy
-  // app sits under an obsidian status bar.
-  const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', light ? '#F4F7F9' : tone.canvas)
+  /* `theme-color` is NOT written here any more.
+   *
+   * It was set to the canvas tone from this function and to the ACCENT hex
+   * from accent.js, so the tag's value depended on which store had last
+   * changed. On an installed handset that tag paints the chrome around the
+   * web view, which is how a magenta robot ended up with a coloured band
+   * under the app.
+   *
+   * App.vue is the single writer now, because the right value is the ground
+   * the CURRENT ROUTE paints — and this function cannot see the route. */
 }
 
 watch(

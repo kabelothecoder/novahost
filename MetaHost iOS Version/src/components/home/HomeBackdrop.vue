@@ -124,25 +124,45 @@ const artSrc = computed(() => {
   opacity: 0.85;
 }
 
-/* Avatar / Framed: the hero widget owns the real art, so the backdrop
-   keeps a blurred wash of it rather than the image.
+/* Avatar / Framed / Portrait: the hero widget owns the sharp art, so the
+   backdrop keeps a blurred wash of it rather than a second copy of the image.
 
-   0.28 at blur(46px) was not a wash, it was a rumour — on the layouts
-   that also lay an opaque ground over the top (Signal Feed, Command
-   Deck) the art contributed about five percent of the final pixel and
-   the robot was effectively absent from its own Home. 0.38 at 34px is
-   still unmistakably blurred — nothing here competes with text — but the
-   silhouette and the colour of the mentor's art are visible, which is
-   the whole reason the layer exists. */
+   This has been walked up twice. 0.28 at blur(46px) was not a wash, it was a
+   rumour — on the layouts that also lay an opaque ground over the top (Signal
+   Feed, Command Deck) the art contributed about five percent of the final
+   pixel and the robot was effectively absent from its own Home. 0.38 at 34px
+   made the silhouette visible but still read as a tint rather than as the
+   robot being behind the screen.
+
+   0.62 at blur(30px) is the ask: the art is unmistakably THERE behind
+   everything, still soft enough that no edge in it competes with a label.
+
+   `brightness(0.78)` in the same filter chain is what makes that opacity
+   safe. It darkens the ART ITSELF rather than laying another black sheet over
+   the whole backdrop — an overlay at this strength would take the accent
+   pools down with it, and the pools are what the glass cards read against.
+   Blur does not buy contrast on saturated art; this does.
+
+   It only has to carry the MIDDLE of the screen. The two scrims are opaque at
+   the very top and bottom and fade out by 42%/58%, so the top bar and the
+   dock are already protected and this value is tuned for the band where cards
+   sit — which is why it can stay this light. */
 .cc-art-avatar,
-.cc-art-framed {
-  opacity: 0.38;
-  filter: blur(34px) saturate(130%);
-  transform: scale(1.18); /* hides the blur's transparent edges */
+.cc-art-framed,
+.cc-art-portrait {
+  opacity: 0.62;
+  filter: blur(30px) saturate(125%) brightness(0.78);
+  transform: scale(1.2); /* hides the blur's transparent edges */
 }
+
+/* Light keeps a much weaker wash, and keeps its brightness: the same alpha
+   that reads as a glow on #0E0E11 reads as a stain on #F4F7F9, and darkening
+   art on a pale canvas makes it MORE visible, not less. */
 .cmd[data-scheme="light"] .cc-art-avatar,
-.cmd[data-scheme="light"] .cc-art-framed {
-  opacity: 0.16;
+.cmd[data-scheme="light"] .cc-art-framed,
+.cmd[data-scheme="light"] .cc-art-portrait {
+  opacity: 0.2;
+  filter: blur(30px) saturate(115%);
 }
 .cmd[data-scheme="light"] .cc-art-bleed {
   opacity: 0.62;
