@@ -76,3 +76,5 @@ keystore.properties
 
 # Rendered email-template preview (regenerate with supabase/templates/preview.mjs)
 **/templates/preview.out.html
+
+.vercel

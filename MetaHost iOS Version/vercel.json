@@ -2,31 +2,31 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/:path(.*)",
       "has": [{ "type": "host", "value": "novahost-app.vercel.app" }],
-      "destination": "https://app.novahost-ea.app/:path*",
+      "destination": "https://app.novahost-ea.app/:path",
       "permanent": false
     },
     {
-      "source": "/:path*",
+      "source": "/:path(.*)",
       "has": [
         {
           "type": "host",
           "value": "novahost-app-kabelothecoders-projects.vercel.app"
         }
       ],
-      "destination": "https://app.novahost-ea.app/:path*",
+      "destination": "https://app.novahost-ea.app/:path",
       "permanent": false
     },
     {
-      "source": "/:path*",
+      "source": "/:path(.*)",
       "has": [
         {
           "type": "host",
           "value": "novahost-app-git-main-kabelothecoders-projects.vercel.app"
         }
       ],
-      "destination": "https://app.novahost-ea.app/:path*",
+      "destination": "https://app.novahost-ea.app/:path",
       "permanent": false
     }
   ],
