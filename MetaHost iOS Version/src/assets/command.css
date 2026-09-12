@@ -728,6 +728,86 @@
 }
 
 /* =================================================================
+   GLOW REACH
+
+   Glow Mode was a setting with one visible consequence: the ignition
+   control's halo, plus a faint inner wash on Neon cards. On Off vs Soft
+   nothing else on the screen moved, so the control read as broken —
+   three of its four settings changed one button.
+
+   It is a LIGHTING setting, so it now lights everything that already
+   carries the accent. Each rule follows the same shape as the tokens
+   above: every length and every alpha is multiplied by --cc-glow, so
+   Off (0) collapses each one to nothing rather than leaving a stub
+   behind, and Intense (1.6) is a real step up rather than a rounding.
+
+   Nothing here changes a COLOUR — only what that colour emits. An
+   element that fails contrast at Off still fails it at Intense, so the
+   setting can never be the reason something became unreadable.
+   ================================================================= */
+
+/* Accent chips — the Live pill, the licence badge, the platform mark. */
+.cc-chip-accent {
+  box-shadow: 0 0 calc(12px * var(--cc-glow)) calc(1px * var(--cc-glow))
+              rgba(var(--cc-accent-rgb), calc(0.30 * var(--cc-glow)));
+}
+
+/* Accent-as-text: section labels, the brand half of the Powered mark,
+   the "Open" affordances. Text has no spread, so --cc-glow-text does its
+   compensating second pass. */
+.cc-label-accent { text-shadow: var(--cc-glow-text) }
+
+/* The live dot. Its own 10px halo was a FIXED value, so it was the one
+   accent element on the screen that ignored the setting entirely. */
+.cc-dot-live {
+  box-shadow: 0 0 calc(10px * var(--cc-glow)) calc(1px * var(--cc-glow)) var(--cc-live);
+}
+
+/* Every glass surface takes a faint accent rim as the glow rises. At
+   Medium this is barely there, which is the intent — it is what makes
+   Intense read as the whole screen lighting up rather than one button. */
+.cmd[data-card="glass"] .cc-card,
+.cmd:not([data-card]) .cc-card {
+  box-shadow:
+    inset 0  1px 0 var(--cc-glass-lip),
+    inset 0 -1px 0 var(--cc-glass-seat),
+    0 0 calc(22px * var(--cc-glow)) calc(-6px * var(--cc-glow))
+      rgba(var(--cc-accent-rgb), calc(0.34 * var(--cc-glow))),
+    var(--cc-shadow-raised);
+}
+
+/* The thin material — dock, top-bar chips, sheet pills. */
+.cc-thin {
+  box-shadow:
+    inset 0 1px 0 var(--cc-glass-lip),
+    0 0 calc(16px * var(--cc-glow)) calc(-5px * var(--cc-glow))
+      rgba(var(--cc-accent-rgb), calc(0.30 * var(--cc-glow))),
+    var(--cc-shadow-card);
+}
+
+/* An accent-filled control — the selected platform, the on segment.
+   Filled accent is already the loudest thing in its row, so this is
+   the most restrained of the set. */
+.cmd .cc-fill-glow {
+  box-shadow: 0 0 calc(16px * var(--cc-glow)) calc(2px * var(--cc-glow))
+              rgba(var(--cc-accent-rgb), calc(0.32 * var(--cc-glow)));
+}
+
+/* Light mode takes roughly half. The same alpha that reads as emission
+   on #0E0E11 reads as a smudge on #F4F7F9 — a glow is light ADDED to a
+   surface, and there is far less headroom above a white one.
+
+   Damped via a SECOND token rather than by restating --cc-glow with a
+   literal. theme.js writes the user's setting to --cc-glow-user on :root
+   and `.cmd` resolves it, so the light rule scales the real value
+   instead of overwriting it with a constant — which is the same trap the
+   note at the top of this file records for the accent tokens: a
+   declaration on `.cmd` shadows the inherited runtime value for its
+   whole subtree, so it has to DERIVE from it, never replace it. */
+.cmd                        { --cc-glow: var(--cc-glow-user, 1) }
+.cmd[data-scheme="light"]   { --cc-glow: calc(var(--cc-glow-user, 1) * 0.55) }
+
+/* =================================================================
    MOTION
    ================================================================= */
 @keyframes ccPulse  { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }

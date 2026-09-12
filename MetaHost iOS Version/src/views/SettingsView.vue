@@ -36,7 +36,7 @@
             <span class="st-name">Accent colour</span>
             <span class="cc-caption">Buttons and active states</span>
           </span>
-          <span class="st-value">{{ theme.accent.name }}</span>
+          <span class="st-value">{{ accentLabel }}</span>
           <span class="st-dot" :style="{ background: theme.accent.hex }"></span>
           <span class="st-chev" v-html="CHEV"></span>
         </button>
@@ -446,6 +446,14 @@ function openSheet(tab) {
 }
 
 function go(to) { haptic(20); router.push(to) }
+
+/* A preset accent has a name; one picked off the spectrum rails is a hex,
+   and `swatchByName` stores it under its own value. Printing that raw in the
+   slot where "Amber" goes reads as a bug, so it is labelled for what it is —
+   the same wording the Interface Style sheet's own caption uses. */
+const accentLabel = computed(() =>
+  theme.accent.custom ? `Custom · ${theme.accent.hex}` : theme.accent.name
+)
 </script>
 
 <style scoped>
