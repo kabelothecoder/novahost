@@ -61,6 +61,14 @@
          control in it changes what is on the screen behind it, so
          navigating away would hide the thing being adjusted. -->
     <InterfaceStyleSheet v-if="sheetOpen" @close="sheetOpen = false" />
+
+    <!-- Same reasoning: switching robot repaints the art, the name and
+         the accent of the screen underneath, so it happens over it. -->
+    <RobotSwitcherSheet
+      v-if="robotsOpen"
+      @close="robotsOpen = false"
+      @toast="showToast"
+    />
   </div>
 </template>
 
@@ -70,13 +78,14 @@ import { useRouter } from 'vue-router'
 
 import { supabase } from '../utils/supabaseClient.ts'
 import { theme, resolvedScheme } from '../stores/theme.js'
-import { robot, ensureSeeded } from '../stores/robot.js'
+import { robot, ensureSeeded, refreshFleet } from '../stores/robot.js'
 import { session, startSession, stopSession, pushEvent } from '../stores/session.js'
 import { useSpeech } from '../composables/useSpeech.js'
 import { startFleetPolling, stopFleetPolling } from '../services/fleetService.js'
 
 import HomeBackdrop from '../components/home/HomeBackdrop.vue'
 import InterfaceStyleSheet from '../components/settings/InterfaceStyleSheet.vue'
+import RobotSwitcherSheet from '../components/home/RobotSwitcherSheet.vue'
 import ClassicCore from '../components/home/layouts/ClassicCore.vue'
 import FocusEngine from '../components/home/layouts/FocusEngine.vue'
 import FullBleedArt from '../components/home/layouts/FullBleedArt.vue'
@@ -118,8 +127,12 @@ function showToast(text, ms = 2600) {
 
 /* ── Navigation out of the layouts ───────────────────────────────── */
 const sheetOpen = ref(false)
+const robotsOpen = ref(false)
 function openInterface() { sheetOpen.value = true }
-function openRobots()    { showToast('Robot switching arrives with the Robot List widget') }
+/* Was a toast saying switching "arrives with the Robot List widget". The
+   list and the switcher are the same rows now (components/home/RobotRows.vue),
+   backed by `my-licenses` — so the chip opens them. */
+function openRobots()    { robotsOpen.value = true }
 // The real Asset Hub is a per-symbol sheet over `license_symbol_config`
 // and lands with the data wiring. /pairs is the honest destination for now.
 // (It used to say "TradingSymbols.vue is mock data, not a hub" — that
@@ -225,7 +238,12 @@ function onTrade() {
 
 /* ── Lifecycle ───────────────────────────────────────────────────── */
 onMounted(() => {
+  /* Seed first so the first paint has a row, then ask the server. The
+     seed is a single locally-derived robot; refreshFleet replaces it with
+     every licence this device holds, and keeps the seed if the read fails
+     or comes back empty. */
   ensureSeeded()
+  refreshFleet()
   checkUserSession()
   setupRealtime()
   startFleetPolling()

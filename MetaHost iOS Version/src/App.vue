@@ -102,9 +102,14 @@ const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return'
 // one control on purpose. A floating pill across the bottom of either is the
 // one element that stops them being the thing they were designed to be.
 //
-// Neither becomes a dead end: HomeTopBar's left button goes to the Settings
-// hub, which reaches every destination the dock offers. This only applies on
-// Home — the layout preference says nothing about Scanner or Terminal.
+// Neither becomes a dead end. HomeTopBar's layers button opens the Interface
+// Style sheet, whose header carries an "All settings" route to the hub — and
+// the hub reaches every destination the dock offers. That route is what makes
+// this safe: the top bar used to hold a SECOND button going straight to
+// Settings, and it was removed as a duplicate of the layers one. On a layout
+// that also hides the dock, removing it without the sheet's route would have
+// left no way off the screen at all. This only applies on Home — the layout
+// preference says nothing about Scanner or Terminal.
 const DOCKLESS_LAYOUTS = ['bleed', 'focus']
 
 const showDock = computed(() => {

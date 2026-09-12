@@ -2,7 +2,8 @@ import { reactive } from 'vue'
 import { supabase } from '../utils/supabaseClient'
 import { secStorage } from '../utils/secStorage'
 import { getDeviceId } from '../utils/deviceId'
-import { accent, SWATCHES } from '../stores/accent.js'
+import { accent } from '../stores/accent.js'
+import { swatchByName } from '../stores/palette.js'
 
 /**
  * How long a verification may hang before we stop waiting on it.
@@ -429,10 +430,20 @@ export async function activateLicenseKey(rawKey) {
     const robotName = data.product_name || data.display_name || 'NovaHost AI'
     const allowedSymbols = data.allowed_symbols || []
 
-    // The server returns a hex; the iOS palette is named swatches.
-    const HEX_TO_SWATCH = { '#FF6B35': 'Amber', '#00E5FF': 'Cyan', '#A259FF': 'Violet' }
-    const serverHex = data.accent_color ? String(data.accent_color).toUpperCase() : null
-    const swatchName = HEX_TO_SWATCH[serverHex] || data.accent_color || 'Crimson'
+    /* The server returns a HEX. It used to be mapped through a three-entry
+       lookup — #FF6B35, #00E5FF, #A259FF — and anything else fell through to
+       the raw hex, which `SWATCHES.find(name === …)` could never match. So
+       every mentor colour outside those three collapsed to Crimson, silently.
+       Measured against production: the four robots on the busiest device carry
+       #ffbf00, #3b82f6, #3b82f6 and #ff00ff. None of them are in the map; all
+       four were rendering as Crimson.
+
+       The lookup is gone. `swatchByName` takes a preset name OR a hex and
+       derives the ink and the two accent-as-text siblings for the latter with
+       the same contrast maths the presets were measured with — which is what
+       the spectrum picker needed too, and is why this now works at all. The
+       three legacy names still resolve, because a name is still a name. */
+    const swatchName = data.accent_color || 'Crimson'
 
     secStorage.setItem('LICENSE_KEY', data.license_key || key)
     secStorage.setItem('ROBOT_NAME', robotName)
@@ -456,8 +467,7 @@ export async function activateLicenseKey(rawKey) {
     if (!overridden) secStorage.setItem('ACCENT_COLOR', swatchName)
 
     const liveName = overridden ? (secStorage.getItem('ACCENT_COLOR') || swatchName) : swatchName
-    const swatch = SWATCHES.find(sw => sw.name === liveName) || SWATCHES[0]
-    accent.current = swatch
+    accent.current = swatchByName(liveName)
     accent.robotName = robotName
     accent.avatarUrl = data.avatar_url || ''
     accent.allowedSymbols = allowedSymbols
