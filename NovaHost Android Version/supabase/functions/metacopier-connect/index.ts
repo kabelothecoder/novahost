@@ -83,16 +83,181 @@ Deno.serve(async (req: Request) => {
     const wantLogin = String(account_number).replace(/\s+/g, '')
     const normalize = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
-    /** Deletes a MetaCopier account. Best-effort -- a failed cleanup is logged, not fatal. */
+    /**
+     * MetaCopier reports faults as bracketed codes, and many of them carry
+     * parameters: `[ACCOUNT_LIMIT_PER_PROJECT_REACHED_TRIAL|allowed=10|needed=160]`.
+     *
+     * The first version of this matched `/\[([A-Z0-9_]+)\]/g`, which requires the
+     * WHOLE bracket to be a bare code -- so every parameterised fault parsed to
+     * an empty code list and fell through to the generic "check the login,
+     * password and server". That is how a project sitting at its trial account
+     * cap told users their credentials were wrong: four different brokers, ten
+     * attempts, all correct, all blamed on the password.
+     *
+     * Stopping at the first `|` keeps the code and discards the parameters.
+     */
+    const codesIn = (detail: string) =>
+      [...detail.matchAll(/\[([A-Z0-9_]+)(?:\|[^\]]*)?\]/g)].map((m) => m[1])
+
+    /** Stops an account, so a DELETE is not refused for one still running. */
+    const stopAccount = async (id: string) => {
+      try {
+        await fetch(
+          `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/actions/stop`,
+          { method: 'POST', headers: mcHeaders },
+        )
+      } catch { /* best effort -- the delete below is what matters */ }
+    }
+
+    /**
+     * Deletes a MetaCopier account. Best-effort -- a failed cleanup is logged,
+     * not fatal.
+     *
+     * Stops it first. A bare DELETE on a running account was answering 400, and
+     * because the failure is non-fatal every orphan it was meant to clear stayed
+     * in the project and kept consuming a slot against the plan's account cap.
+     */
     const deleteAccount = async (id: string) => {
       try {
+        await stopAccount(id)
         const r = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}`, {
           method: 'DELETE', headers: mcHeaders,
         })
-        console.log(`[MetaCopier] deleted account ${id}: ${r.status}`)
+        if (!r.ok) {
+          console.warn(`[MetaCopier] delete ${id} refused ${r.status}: ${await r.text()}`)
+          return false
+        }
+        console.log(`[MetaCopier] deleted account ${id}`)
+        return true
       } catch (e) {
         console.warn(`[MetaCopier] delete ${id} failed: ${(e as Error).message}`)
+        return false
       }
+    }
+
+    /**
+     * Every account in the project, following pagination.
+     *
+     * The list call used to be a bare `GET /accounts`, which returns one
+     * default-sized page. With ~160 accounts in the project that meant the
+     * de-duplication step below could not see most of them: a duplicate past the
+     * first page was invisible, so a "no existing account" conclusion was drawn
+     * from a partial list and yet another duplicate was created.
+     */
+    const listAllAccounts = async (): Promise<Record<string, unknown>[]> => {
+      const out: Record<string, unknown>[] = []
+      const PAGE = 200
+      for (let offset = 0; offset < 5000; offset += PAGE) {
+        const r = await fetch(
+          `${METACOPIER_BASE}/rest/api/v1/accounts?limit=${PAGE}&offset=${offset}`,
+          { headers: mcHeaders },
+        )
+        if (!r.ok) break
+        const raw = await r.json()
+        // Bare array from the accounts endpoint today; unwrap the common
+        // pagination envelopes too so a shape change does not silently turn the
+        // de-dup off and let a duplicate through.
+        const page: unknown[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw?.content) ? raw.content
+          : Array.isArray(raw?.data) ? raw.data
+          : Array.isArray(raw?.accounts) ? raw.accounts
+          : []
+        out.push(...(page as Record<string, unknown>[]))
+        if (page.length < PAGE) break
+      }
+      return out
+    }
+
+    /**
+     * Frees account slots by deleting MetaCopier accounts that no licence claims.
+     *
+     * ## The safety rule
+     *
+     * An account is deleted only when NOTHING in our own database points at it.
+     * The keep-set is built from two independent signals, and an account matching
+     * either one survives:
+     *
+     *   1. `licenses.metadata->>metacopier_account_id` for every licence that is
+     *      not revoked -- this is the binding `metacopier-execute` resolves
+     *      orders against, so an id in here is a live trading link by definition.
+     *   2. the alias `NovaHost <LICENCE KEY>` that `resolveAndCreate` stamps on
+     *      every account it makes. This is the backstop for the window where an
+     *      account was created but the write-back to the licence had not landed
+     *      yet -- without it, a connect interrupted at the wrong moment would
+     *      leave an account that looks orphaned and is not.
+     *
+     * Anything the keep-set does not name was made by a licence that has since
+     * been deleted, or by a create whose write-back never happened and whose
+     * licence has since linked elsewhere. Those are the ~150 records sitting on
+     * this project's cap.
+     *
+     * ## Why the DB read cannot fail open
+     *
+     * If the licence query errors, the keep-set would be empty and every account
+     * in the project would look like an orphan -- the reclaim would delete live
+     * trading links for all users. It returns 0 on any error instead, so the
+     * failure mode is "the cap stays full", never "everyone is disconnected".
+     */
+    const reclaimOrphanAccounts = async (): Promise<number> => {
+      const { data: live, error: liveErr } = await novaHost
+        .from('licenses')
+        .select('license_key, status, metadata')
+        .neq('status', 'revoked')
+
+      if (liveErr || !Array.isArray(live)) {
+        console.error('[MetaCopier] reclaim aborted: could not read licences', liveErr)
+        return 0
+      }
+
+      const keepIds = new Set<string>()
+      const keepAliases = new Set<string>()
+      for (const l of live) {
+        const id = String((l.metadata as Record<string, unknown> | null)?.metacopier_account_id ?? '').trim()
+        if (id) keepIds.add(id)
+        const k = String(l.license_key ?? '').trim().toUpperCase()
+        if (k) keepAliases.add(`NOVAHOST ${k}`)
+      }
+
+      // A project with no recorded links at all is not a project full of
+      // orphans -- it is a read that told us nothing useful. Refuse to treat
+      // every account in it as disposable.
+      if (keepIds.size === 0 && keepAliases.size === 0) {
+        console.error('[MetaCopier] reclaim aborted: no live licence references found')
+        return 0
+      }
+
+      let all: Record<string, unknown>[]
+      try {
+        all = await listAllAccounts()
+      } catch (e) {
+        console.error(`[MetaCopier] reclaim aborted: account list failed: ${(e as Error).message}`)
+        return 0
+      }
+      if (!all.length) return 0
+
+      const orphans = all.filter((a) => {
+        if (a.deleted === true) return false          // already gone; a second DELETE answers 400
+        const id = String(a.id ?? '')
+        if (!id || keepIds.has(id)) return false
+        const alias = String(a.alias ?? '').trim().toUpperCase()
+        return !keepAliases.has(alias)
+      })
+
+      console.log(
+        `[MetaCopier] reclaim: ${all.length} accounts in project, ` +
+        `${keepIds.size} bound to a licence, ${orphans.length} orphaned`
+      )
+
+      let freed = 0
+      for (const a of orphans) {
+        if (await deleteAccount(String(a.id))) freed++
+        // One free slot is all this connect needs. Stopping early keeps the
+        // request inside its wall-clock budget on a project holding hundreds of
+        // orphans; the next connect reclaims the next one.
+        if (freed >= 5) break
+      }
+      return freed
     }
 
     /**
@@ -101,7 +266,7 @@ Deno.serve(async (req: Request) => {
      * Returns the new account id, or a ready-to-send error Response when the
      * platform/region cannot be resolved or the broker refuses the login.
      */
-    const resolveAndCreate = async (): Promise<{ id: string } | { errorResponse: Response }> => {
+    const resolveAndCreate = async (): Promise<{ id: string } | { errorResponse: Response; limited?: boolean }> => {
       const [typesRes, regionsRes] = await Promise.all([
         fetch(`${METACOPIER_BASE}/rest/api/v1/types/accountTypes`, { headers: mcHeaders }),
         fetch(`${METACOPIER_BASE}/rest/api/v1/types/regions`, { headers: mcHeaders }),
@@ -198,7 +363,7 @@ Deno.serve(async (req: Request) => {
         // MetaCopier reports faults as bracketed codes in an `errors` array, e.g.
         // {"errors":["[WRONG_CREDENTIALS]"]}. Match on the code rather than on
         // loose substrings of the raw body.
-        const codes = (detail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
+        const codes = codesIn(detail)
         const has = (...names: string[]) => names.some((n) => codes.includes(n))
 
         let status = 400
@@ -212,7 +377,29 @@ Deno.serve(async (req: Request) => {
         } else if (codes.some((c) => c.includes('LIMIT'))) {
           status = 502
           code = 'PROVIDER_LIMIT'
-          message = 'The connected-account limit has been reached. Please contact support.'
+
+          /* The numbers go to the LOG, not to the user.
+           *
+           * `allowed=10 | needed=160` is exactly what an operator needs — it
+           * separates a plan ceiling from a genuinely full project, and names
+           * the size of the cleanup — and exactly what a paying customer
+           * should never read. "Our provider is on a trial plan" is not a
+           * status update, it is a reason to ask for a refund.
+           *
+           * What the user gets is the one fact that changes their behaviour:
+           * stop retyping your password, it is not you. `details` still
+           * carries the raw body for support. */
+          const allowed = detail.match(/allowed=(\d+)/)?.[1] ?? '?'
+          const needed  = detail.match(/needed=(\d+)/)?.[1] ?? '?'
+          console.error(
+            `[MetaCopier] PROJECT AT ACCOUNT CAP: allowed=${allowed} needed=${needed} ` +
+            `trial=${codes.some((c) => c.includes('TRIAL'))} — no user can link a broker until this is raised or reclaimed`
+          )
+
+          message =
+            'Connecting a trading account is unavailable right now. This is a fault on our side, ' +
+            'not your login details — there is nothing wrong with your account number, password ' +
+            'or server. Please try again shortly, or contact support if it persists.'
         } else if (has('WRONG_CREDENTIALS', 'INVALID_CREDENTIALS', 'AUTHENTICATION_FAILED', 'AUTHENTICATION')) {
           code = 'WRONG_CREDENTIALS'
           message =
@@ -228,7 +415,10 @@ Deno.serve(async (req: Request) => {
         }
 
         // Broker credentials are never echoed back to the client.
-        return { errorResponse: json({ success: false, code, error: message, details: detail }, status) }
+        return {
+          errorResponse: json({ success: false, code, error: message, details: detail }, status),
+          limited: code === 'PROVIDER_LIMIT',
+        }
       }
 
       const created = await createRes.json().catch(() => ({}))
@@ -321,37 +511,25 @@ Deno.serve(async (req: Request) => {
 
     if (!metacopierAccountId) {
       try {
-        const listRes = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts`, { headers: mcHeaders })
-        if (listRes.ok) {
-          const raw = await listRes.json()
-          // Bare array from the accounts endpoint today; unwrap the common
-          // pagination envelopes too so a shape change does not silently turn the
-          // de-dup off and let a duplicate through.
-          const all: unknown[] = Array.isArray(raw)
-            ? raw
-            : Array.isArray(raw?.content) ? raw.content
-            : Array.isArray(raw?.data) ? raw.data
-            : Array.isArray(raw?.accounts) ? raw.accounts
-            : []
-          const matches = (all as Record<string, unknown>[]).filter((a) =>
-            normalize(a.loginAccountNumber) === normalize(wantLogin) &&
-            normalize(a.loginServer) === normalize(finalServer)
-          )
-          matches.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-            String(a.created ?? '').localeCompare(String(b.created ?? '')))
+        const all = await listAllAccounts()
+        const matches = all.filter((a) =>
+          normalize(a.loginAccountNumber) === normalize(wantLogin) &&
+          normalize(a.loginServer) === normalize(finalServer)
+        )
+        matches.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+          String(a.created ?? '').localeCompare(String(b.created ?? '')))
 
-          if (matches.length === 1) {
-            // Exactly one -- reuse it. A stale password on it is caught by the
-            // verify step below and repaired there.
-            metacopierAccountId = String(matches[0].id)
-            reused = true
-            console.log(`[MetaCopier] reusing existing account ${metacopierAccountId} for login ${wantLogin}`)
-          } else if (matches.length > 1) {
-            // Already in a contending state. Clear them all and build one clean
-            // account, so the outcome does not depend on which duplicate wins.
-            console.warn(`[MetaCopier] ${matches.length} duplicate accounts for login ${wantLogin} -- clearing`)
-            for (const a of matches) await deleteAccount(String(a.id))
-          }
+        if (matches.length === 1) {
+          // Exactly one -- reuse it. A stale password on it is caught by the
+          // verify step below and repaired there.
+          metacopierAccountId = String(matches[0].id)
+          reused = true
+          console.log(`[MetaCopier] reusing existing account ${metacopierAccountId} for login ${wantLogin}`)
+        } else if (matches.length > 1) {
+          // Already in a contending state. Clear them all and build one clean
+          // account, so the outcome does not depend on which duplicate wins.
+          console.warn(`[MetaCopier] ${matches.length} duplicate accounts for login ${wantLogin} -- clearing`)
+          for (const a of matches) await deleteAccount(String(a.id))
         }
       } catch (e) {
         console.warn(`[MetaCopier] account list failed (will create fresh): ${(e as Error).message}`)
@@ -359,7 +537,24 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!metacopierAccountId) {
-      const r = await resolveAndCreate()
+      let r = await resolveAndCreate()
+
+      // Out of account slots. Reclaim what this project is holding for licences
+      // that no longer exist, then try once more.
+      //
+      // Not a nicety: a project that has been creating a duplicate on every
+      // reconnect accumulates orphans until the cap is hit, and from that moment
+      // NOBODY can connect an account -- the failure is total and permanent, and
+      // it presents to every user as "your password is wrong". Reclaiming is the
+      // difference between a self-healing cap and a dead product.
+      if ('errorResponse' in r && r.limited) {
+        const freed = await reclaimOrphanAccounts()
+        if (freed > 0) {
+          console.log(`[MetaCopier] reclaimed ${freed} orphaned account(s); retrying create`)
+          r = await resolveAndCreate()
+        }
+      }
+
       if ('errorResponse' in r) return r.errorResponse
       metacopierAccountId = r.id
     }
