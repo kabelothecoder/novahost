@@ -57,7 +57,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
    accepts either; `deviceId` is sent because this is not an Android handset
    and naming it otherwise would be a lie that the next reader has to
    untangle. */
-export async function scanChart(imageBase64, mode) {
+export async function scanChart(imageBase64, mode, strategy) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/analyze-chart`, {
     method: 'POST',
     headers: {
@@ -68,6 +68,16 @@ export async function scanChart(imageBase64, mode) {
     body: JSON.stringify({
       imageBase64,
       trading_mode: mode || 'day',
+      /* Which school of reading produces the setup. `analyze-chart` keys
+         STRATEGY_BRIEFS off this and frames the whole read with it.
+
+         This call never sent the field, so the server fell through to its
+         `?? STRATEGY_BRIEFS.SMC` default and **every scan this app has ever
+         run was a Smart Money read** — including the ones a user picked Price
+         Action, CRT or Breakout for on the other handset. The four briefs have
+         been live server-side the whole time; iOS simply could not reach
+         three of them. */
+      strategy: String(strategy || 'SMC').toUpperCase(),
       email: authState.email || '',
       deviceId: getDeviceId(),
     }),

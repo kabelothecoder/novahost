@@ -90,13 +90,13 @@ fun GuardrailSheet(
     // keystroke deletes the character someone just typed the moment it is not
     // yet a valid figure -- "1." being the obvious one.
     var rrText by remember { mutableStateOf(trimmed(config.minBlendedRR)) }
-    var stopText by remember { mutableStateOf(trimmed(config.maxStopPips)) }
+    var stopText by remember { mutableStateOf(trimmed(config.maxStopAtr)) }
     var lossText by remember { mutableStateOf(config.maxConsecutiveLosses.toString()) }
     var eventText by remember { mutableStateOf(config.minEventClearanceMinutes.toString()) }
 
     fun edited() = GuardrailConfig(
         minBlendedRR = rrText.toDoubleOrNull() ?: config.minBlendedRR,
-        maxStopPips = stopText.toDoubleOrNull() ?: config.maxStopPips,
+        maxStopAtr = stopText.toDoubleOrNull() ?: config.maxStopAtr,
         maxConsecutiveLosses = lossText.toIntOrNull() ?: config.maxConsecutiveLosses,
         minEventClearanceMinutes = eventText.toIntOrNull() ?: config.minEventClearanceMinutes
     ).sanitised()
@@ -158,11 +158,12 @@ fun GuardrailSheet(
                 label = "MAXIMUM STOP",
                 value = stopText,
                 onValue = { stopText = it.filter { c -> c.isDigit() || c == '.' } },
-                suffix = "pips",
+                suffix = "x ATR",
                 accent = accent,
                 blocking = false,
-                help = "A warning, not a block. A wider stop is already paid for by the smaller " +
-                    "position the risk sizing hands back, so this is information rather than a veto."
+                help = "Measured in average candles rather than pips, so one setting means the same " +
+                    "thing on gold as on EURUSD. A warning, not a block: a wider stop is already " +
+                    "paid for by the smaller position the risk sizing hands back."
             )
 
             Spacer(Modifier.height(14.dp))
@@ -214,7 +215,7 @@ fun GuardrailSheet(
                         .clickable {
                             val d = GuardrailConfig.Defaults
                             rrText = trimmed(d.minBlendedRR)
-                            stopText = trimmed(d.maxStopPips)
+                            stopText = trimmed(d.maxStopAtr)
                             lossText = d.maxConsecutiveLosses.toString()
                             eventText = d.minEventClearanceMinutes.toString()
                         }

@@ -262,9 +262,24 @@
               <span class="cc-caption">{{ balanceNote }}</span>
             </div>
             <div class="sym-money">
-              <span class="sym-cur cc-figure">{{ risk.currency }}</span>
+              <!--
+                The currency was a read-only echo of the broker's, which left
+                anyone without a linked account typing a rand balance under a
+                "USD" label — and the suggested lot below divides by a dollar
+                constant, so the mismatch sized the position rather than just
+                mislabelling it.
+              -->
+              <span class="sym-cur cc-figure">{{ signFor(risk.currency) }}</span>
               <input class="sym-input sym-input-lg" type="text" inputmode="decimal"
                      :value="risk.balance" @input="onNum('balance', $event.target.value)" />
+            </div>
+            <div class="sym-ccy" role="group" aria-label="Account currency">
+              <button
+                v-for="c in SUPPORTED" :key="c"
+                class="sym-ccy-b" :class="{ 'is-on': risk.currency === c }"
+                :aria-pressed="risk.currency === c"
+                @click="pickCurrency(c)"
+              >{{ c }}</button>
             </div>
           </div>
 
@@ -482,6 +497,7 @@ import {
   loadPlan, savePlan, syncPlan, normaliseSymbol, cleanBrokerSymbol, DEFAULT_ROW,
 } from '../services/symbolPlanService.js'
 import { loadWire, whenLabel, ageLabel } from '../services/marketWireService.js'
+import { loadRates, convert, signFor, SUPPORTED } from '../services/fxRates.js'
 
 /* ── Allowance ───────────────────────────────────────────────────────
    The robot's permitted symbols, straight from the licence. Category is
@@ -614,12 +630,25 @@ const exposure = computed(() => {
    linked yet still needs the calculator. */
 const risk = reactive({
   balance: '',
-  currency: session.brokerCurrency || 'USD',
+  /* Seeded from the broker and then the user's to change. Constrained to the
+     three the picker offers, because the suggested lot has to cross this into
+     USD to mean anything and an unsupported code would make that null. */
+  currency: SUPPORTED.includes(session.brokerCurrency) ? session.brokerCurrency : 'USD',
   riskPercent: '1',
   /* Only consulted while `linkTrades` is false — see planTrades below. */
   riskTrades: '3',
   linkTrades: true,
 })
+
+/** The USD rate table. Null until it arrives; `convert` falls back to its own
+ *  offline set rather than returning nothing while the fetch is in flight. */
+const fxTable = ref(null)
+
+function pickCurrency(code) {
+  if (risk.currency === code) return
+  risk.currency = code
+  haptic(20)
+}
 
 /**
  * How many trades the robot can actually have open, from the plan itself.
@@ -700,6 +729,16 @@ function relinkTrades() {
  * It is a STARTING size, not a broker-accurate one: pip value varies by
  * instrument and account currency, and this screen has neither. Labelled
  * as an estimate rather than presented as a computed truth.
+ *
+ * ## The $200 is dollars, and the balance is not
+ *
+ * `perAmt / 200` is 20 pips at the conventional $10 per lot per pip — a
+ * DOLLAR constant. The balance above it is whatever the account holds, and
+ * this screen defaults that to the broker's currency. Dividing a rand budget
+ * by a dollar-per-lot figure sized every suggestion about seventeen times too
+ * large, and the lot it produced looked perfectly ordinary.
+ *
+ * The estimate stays an estimate. It is now an estimate in one currency.
  */
 const calc = computed(() => {
   const bal = parseFloat(risk.balance) || 0
@@ -708,11 +747,14 @@ const calc = computed(() => {
   const totalAmt = (bal * pct) / 100
   const perAmt = totalAmt / n
   const perPct = pct / n
-  const lotNum = perAmt > 0 ? Math.max(0.01, Math.round((perAmt / 200) * 100) / 100) : 0
-  const money = v => `${risk.currency} ${Math.round(v).toLocaleString('en-US')}`
+
+  const perAmtUsd = convert(perAmt, risk.currency, 'USD', fxTable.value)
+  const lotNum = perAmtUsd > 0 ? Math.max(0.01, Math.round((perAmtUsd / 200) * 100) / 100) : 0
+
+  const money = v => `${signFor(risk.currency)}${Math.round(v).toLocaleString('en-US')}`
   return {
     lotNum,
-    lot: lotNum.toFixed(2),
+    lot: perAmtUsd == null ? '—' : lotNum.toFixed(2),
     lotNote: 'est · 20-pip stop',
     perPct: `${perPct.toFixed(2)}%`,
     perAmt: bal ? money(perAmt) : '—',
@@ -865,10 +907,11 @@ onMounted(() => {
   ensureRows()
   if (session.brokerBalance != null && !risk.balance) {
     risk.balance = String(Math.round(session.brokerBalance))
-    risk.currency = session.brokerCurrency || 'USD'
+    if (SUPPORTED.includes(session.brokerCurrency)) risk.currency = session.brokerCurrency
   }
   clock = setInterval(() => { now.value = new Date() }, 30_000)
   loadFeeds()
+  loadRates().then(t => { fxTable.value = t })
 })
 onUnmounted(() => clearInterval(clock))
 
@@ -1140,6 +1183,17 @@ const allowanceLine = computed(() =>
 .sym-input-md { font-size: 18px }
 .sym-money { display: flex; align-items: baseline; gap: 7px }
 .sym-cur { font-size: 12px; color: var(--cc-ink-3); flex: none }
+
+.sym-ccy { display: flex; gap: 5px; margin-top: 9px }
+.sym-ccy-b {
+  flex: 1 1 0; min-height: 27px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; color: var(--cc-ink-3);
+  border: 1px solid var(--cc-border); border-radius: 9999px;
+  background: var(--cc-card-2); cursor: pointer;
+  transition: border-color 200ms var(--cc-ease), transform 180ms var(--cc-spring);
+}
+.sym-ccy-b:active { transform: scale(0.96) }
+.sym-ccy-b.is-on { border-color: var(--cc-accent); background: var(--cc-accent-dim); color: var(--cc-accent-text) }
 
 .sym-panel-foot {
   display: flex;

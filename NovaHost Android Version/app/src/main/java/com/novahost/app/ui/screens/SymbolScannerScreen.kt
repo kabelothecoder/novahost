@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhonelinkLock
 import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
@@ -1462,6 +1463,27 @@ private fun ScanScoreState(
                     ConvictionChip(confluence.conviction)
                 }
 
+                // Above the narrative, not below it. A stale chart does not make
+                // the reading wrong -- the model read what was in front of it --
+                // so this does not contradict the paragraph underneath. It says
+                // the paragraph describes a market that has already moved, which
+                // is the one thing to know BEFORE reading a confident direction.
+                if (reading.stale) {
+                    Spacer(Modifier.height(12.dp))
+                    // Sell red rather than the amber the mismatch warnings use.
+                    // Those qualify the reading; this one says the reading is
+                    // about a market that is gone, and it blocks execution.
+                    ScanNote(
+                        icon = Icons.Rounded.Schedule,
+                        text = (reading.staleReason ?: "This chart is not current.") +
+                            " This reading describes the chart as it was, not the market as it is.",
+                        tint = ScanSell,
+                        background = ScanSell.copy(alpha = 0.08f),
+                        borderColor = ScanSell.copy(alpha = 0.34f),
+                        textColor = ScanSellText
+                    )
+                }
+
                 Spacer(Modifier.height(12.dp))
                 Text(
                     reading.narrative,
@@ -2280,6 +2302,12 @@ private fun ScanBlockedState(
 }
 
 private fun blockedSummary(report: GuardrailReport): String {
+    // A stale chart is not "a valid setup that missed a rule", and saying so
+    // would invite the user to override something that cannot be overridden by
+    // retuning. It gets the whole summary to itself however many other rules
+    // also failed, because every one of those judged the same dead screenshot.
+    report.blockers.firstOrNull { it.title == "Chart is current" }?.let { return it.detail }
+
     val failed = report.blockers.size + report.warnings.size
     return if (failed == 1) {
         "One check failed. " + report.blockers.firstOrNull()?.detail.orEmpty()

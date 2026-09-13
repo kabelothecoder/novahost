@@ -43,6 +43,33 @@ export function toPips(priceDistance, symbol) {
   return p > 0 ? Math.abs(priceDistance) / p : 0
 }
 
+/**
+ * A chart timeframe label, in minutes. Null when there is nothing to read.
+ *
+ * Handles the spellings a charting package actually prints: `M15`, `15M`, `H4`,
+ * `4H`, `D1`, `1D`, `W1`, `MN1`, and a bare `15`. Mirrors
+ * `ScanSource.timeframeMinutes` on Android — the two engines score the same
+ * chart and must agree about what "higher timeframe" means, or the same
+ * screenshot grades differently on two handsets.
+ *
+ * `MN` is tested before `M`: in MetaTrader `M` is minutes and `MN` is months, so
+ * reading `MN1` as one minute turns the longest timeframe there is into the
+ * shortest.
+ */
+export function timeframeMinutes(raw) {
+  const s = String(raw || '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!s) return null
+  const digits = parseInt(s.replace(/\D/g, ''), 10)
+  if (!(digits > 0)) return null
+  if (s.includes('MN')) return digits * 43200
+  if (s.includes('W')) return digits * 10080
+  if (s.includes('D')) return digits * 1440
+  if (s.includes('H')) return digits * 60
+  if (s.includes('M')) return digits
+  if (/^\d+$/.test(s)) return digits
+  return null
+}
+
 /* ── Ladder ──────────────────────────────────────────────────────────
    TP1 is the model's own first target, kept verbatim — it is the level it
    actually read off the chart. TP2 and TP3 are 2R and 3R projections of the
@@ -178,9 +205,35 @@ export function buildLadder(reading, opts) {
    of four and says so, rather than losing 20 points to a question nobody
    was able to ask. */
 
-/** The ATR band the doc calls "moderate". Below is too quiet to reach a
- *  target, above is too wild for the stop to survive noise. In pips. */
-const ATR_BAND = [10, 22]
+/**
+ * How many candle-ranges of room the stop needs, and how many is too many.
+ *
+ * ## Why this is a ratio and not a pip band
+ *
+ * This check used to compare the chart's ATR against a fixed `[10, 22]` pip
+ * band. That band describes an FX major and nothing else. Gold's pip size here
+ * is 0.01, so an ordinary $3.50 M15 candle measures as **350 pips** and the
+ * check failed — not because gold was volatile, but because the units were
+ * never gold's. The same arithmetic condemned every index and every crypto pair
+ * on the book. A live scan showed it exactly: `ATR ~350.0p vs the 10–22p band`,
+ * a red cross and a permanent −25 on an instrument that could not have passed.
+ *
+ * And it was worse than a lost point. The score is passed-over-KNOWN, so a
+ * check that can only ever fail drags the denominator down with it: four real
+ * questions became three, and every remaining answer got heavier.
+ *
+ * The stop-to-ATR ratio asks the thing the band was reaching for, in units that
+ * cancel. Both numbers come off the same chart in the same price scale, so no
+ * pip conversion happens at all — which removes the entire class of bug rather
+ * than retuning it per instrument:
+ *
+ *  - Under 1 candle-range, the stop sits *inside* normal noise. Ordinary
+ *    two-way movement takes it out before the setup has been wrong about
+ *    anything.
+ *  - Past 8, a 1R target needs eight consecutive candles of one-way movement.
+ *    The R:R on paper is real; reaching it inside the trade's horizon is not.
+ */
+const STOP_ATR_BAND = [1.0, 8.0]
 
 export function scoreConfluence(reading, ladder) {
   const symbol = reading && reading.symbol_on_chart
@@ -205,28 +258,66 @@ export function scoreConfluence(reading, ladder) {
       : 'No usable stop distance',
   })
 
-  // 2 · Pattern aligns with the higher-timeframe trend
+  /* 2 · Pattern aligns with a HIGHER timeframe
+     ─────────────────────────────────────────
+     The qualifier is the whole check, and it used to be missing.
+
+     `analyze-chart` defines `trend_bias` as "the dominant bias of the highest
+     timeframe legible on this chart". On a single-timeframe screenshot — which
+     is what people actually send — the highest legible timeframe IS the chart's
+     own. So a bearish Change of Character on M15 was being scored against an
+     M15 bearish bias and awarded full marks for agreeing with itself. A live
+     scan printed it plainly: `Change of Character · M15 bearish`, a green tick,
+     +25. There is no confirmation in that row. The pattern and the "trend" are
+     one reading of one chart, counted twice.
+
+     Confirmation now has to come from somewhere the setup cannot see. Where the
+     bias timeframe is not strictly wider than the entry timeframe, this FAILS.
+
+     Fails, and does not report unknown — which was the first attempt, and it
+     made the problem worse. The score is passed-over-KNOWN, so a check that
+     leaves the denominator makes every remaining answer heavier: the same gold
+     scan went from 75 to a perfect 100 STRONG for the sole reason that nothing
+     had confirmed it. An unknown is the right answer for the event window,
+     because no calendar exists on this platform and the app genuinely cannot
+     ask. It is the wrong answer here. The question was asked and answered:
+     a single-timeframe screenshot carries no higher-timeframe confluence, the
+     same way a level with one touch is a level with one touch. */
+  const chartTf = timeframeMinutes(reading && reading.timeframe_on_chart)
+  const biasTf = timeframeMinutes(reading && reading.trend_timeframe)
+  const biasLabel = (reading && reading.trend_timeframe) || 'higher timeframe'
+
   let alignOk = null
   let alignDetail = 'No pattern or trend read from this chart'
-  if (patterns.length && bias && bias !== 'NEUTRAL') {
-    alignOk = (dir === 'BUY' && bias === 'BULLISH') || (dir === 'SELL' && bias === 'BEARISH')
-    alignDetail = patterns[0] + ' · ' + (reading.trend_timeframe || 'higher timeframe') + ' ' + bias.toLowerCase()
+
+  if (chartTf != null && biasTf != null && biasTf <= chartTf) {
+    alignOk = false
+    alignDetail = biasLabel + ' is the chart’s own timeframe — nothing wider confirms this setup'
   } else if (bias === 'NEUTRAL') {
     alignOk = false
-    alignDetail = (reading.trend_timeframe || 'Higher timeframe') + ' is ranging — no trend to align with'
+    alignDetail = biasLabel + ' is ranging — no trend to align with'
+  } else if (patterns.length && bias) {
+    alignOk = (dir === 'BUY' && bias === 'BULLISH') || (dir === 'SELL' && bias === 'BEARISH')
+    alignDetail = patterns[0] + ' · ' + biasLabel + ' ' + bias.toLowerCase()
   }
-  checks.push({ id: 'align', label: 'Pattern aligns with the trend', ok: alignOk, detail: alignDetail })
+  checks.push({ id: 'align', label: 'Pattern aligns with a higher timeframe', ok: alignOk, detail: alignDetail })
 
-  // 3 · Volatility inside the band
-  const acr = reading && reading.average_candle_range
+  /* 3 · The stop clears the chart's own noise. See [[STOP_ATR_BAND]] above for
+     why this is a ratio rather than the pip band it replaced. */
+  const acr = Number(reading && reading.average_candle_range)
   let volOk = null
   let volDetail = 'Candles not distinguishable on this chart'
-  if (acr != null && Number(acr) > 0) {
-    const atrPips = toPips(Number(acr), symbol)
-    volOk = atrPips >= ATR_BAND[0] && atrPips <= ATR_BAND[1]
-    volDetail = 'ATR ~' + atrPips.toFixed(1) + 'p vs the ' + ATR_BAND[0] + '–' + ATR_BAND[1] + 'p band'
+  if (Number.isFinite(acr) && acr > 0 && valid) {
+    const ratio = ladder.risk / acr
+    volOk = ratio >= STOP_ATR_BAND[0] && ratio <= STOP_ATR_BAND[1]
+    volDetail = 'Stop is ' + ratio.toFixed(1) + '× the average candle'
+      + (ratio < STOP_ATR_BAND[0]
+        ? ' — inside the noise'
+        : ratio > STOP_ATR_BAND[1]
+          ? ' — too wide for the target to be reached'
+          : '')
   }
-  checks.push({ id: 'vol', label: 'Volatility inside the band', ok: volOk, detail: volDetail })
+  checks.push({ id: 'vol', label: 'Stop clears the chart’s noise', ok: volOk, detail: volDetail })
 
   // 4 · Entry sits on a key level
   const kl = reading && reading.key_level
@@ -274,6 +365,21 @@ export function scoreConfluence(reading, ladder) {
   return { checks, passed, known, failed, unknown, score, grade, direction: dir, each }
 }
 
+/**
+ * A minute count as a trader would say it out loud.
+ *
+ * Deliberately coarse: the input is an age the server derived from a time axis
+ * read off an image, against a chart clock whose timezone is not printed
+ * anywhere. "About 3 days" is the whole of what that supports.
+ */
+export function describeAge(minutes) {
+  const m = Number(minutes)
+  if (!Number.isFinite(m)) return 'an unknown time'
+  if (m < 90) return Math.round(m) + ' minutes'
+  const hours = Math.round(m / 60)
+  return hours < 36 ? hours + ' hours' : Math.round(hours / 24) + ' days'
+}
+
 /* ── Guardrails ──────────────────────────────────────────────────────
    The user's own hard limits. A BLOCK is not advice — the execute control
    refuses. Two of the doc's four are unreachable here and say so; an
@@ -282,14 +388,64 @@ export function scoreConfluence(reading, ladder) {
 
 export const DEFAULT_RULES = {
   minBlendedRR: 1.5,
-  maxStopPips: 50,
+  /** Ceiling on the stop as a multiple of the chart's average candle. Shares
+   *  [[STOP_ATR_BAND]]'s upper bound, and replaces a `maxStopPips: 50` that
+   *  measured gold's ordinary ten-dollar stop as 1000 pips and warned on every
+   *  metal and index trade the app ever planned. */
+  maxStopAtr: 8,
   maxConsecutiveLosses: 3,
   eventBufferMinutes: 30,
 }
 
-export function checkGuardrails(ladder, rules) {
+/**
+ * @param {object} ladder  the plan actually being sent
+ * @param {object} rules   the user's limits, or [[DEFAULT_RULES]]
+ * @param {object} reading the `analyze-chart` reading — needed for the two
+ *                         rules that judge the CHART rather than the plan.
+ *                         Optional; both report UNKNOWN without it.
+ */
+export function checkGuardrails(ladder, rules, reading) {
   const r = rules || DEFAULT_RULES
   const out = []
+
+  /* ── Is the chart still the market? ──────────────────────────────
+     First in the list because it invalidates every rule under it. A stop
+     distance, an R:R and a key level are all statements about a market that
+     existed when the screenshot was taken, and none of them survives the
+     screenshot being old.
+
+     This is a BLOCK rather than a warning, and it is the only new blocker
+     here. It has to be: the scan that prompted it read a gold chart whose
+     last candle was three days back and whose terminal had "Market closed"
+     printed on it, returned a confident SELL at 4348.50, scored it MODERATE,
+     and armed execute. Price had already rallied to 4403 — an hour after that
+     final candle. The reading was a fair account of the chart. The chart was
+     not a fair account of the market, and nothing in the app was looking. */
+  if (reading && reading.stale) {
+    out.push({
+      id: 'stale',
+      label: 'Chart is current',
+      status: 'BLOCK',
+      detail: (reading.stale_reason || 'This chart is not current.')
+        + ' Take a fresh screenshot and scan again.',
+    })
+  } else if (reading && reading.chart_age_minutes == null && !reading.market_closed) {
+    /* The time axis was cropped or unreadable. Unknown, never a pass — an
+       unchecked clock is not a clock that said "now". */
+    out.push({
+      id: 'stale',
+      label: 'Chart is current',
+      status: 'UNKNOWN',
+      detail: 'No readable time axis on this chart — its age could not be checked',
+    })
+  } else if (reading) {
+    out.push({
+      id: 'stale',
+      label: 'Chart is current',
+      status: 'PASS',
+      detail: 'Last candle about ' + describeAge(reading.chart_age_minutes) + ' old',
+    })
+  }
 
   if (ladder && ladder.valid) {
     out.push({
@@ -298,16 +454,32 @@ export function checkGuardrails(ladder, rules) {
       status: ladder.blendedRR >= r.minBlendedRR ? 'PASS' : 'BLOCK',
       detail: 'Plan gives 1:' + ladder.blendedRR.toFixed(2),
     })
-    const over = ladder.slPips > r.maxStopPips
-    out.push({
-      id: 'stop',
-      label: 'Stop loss ≤ ' + r.maxStopPips + ' pips',
-      /* Wider than the limit is a WARN, not a BLOCK: it costs more than
-         planned but the trade is still coherent. The doc grades it so too. */
-      status: over ? 'WARN' : 'PASS',
-      detail: ladder.slPips.toFixed(1) + 'p'
-        + (over ? ' — ' + (ladder.slPips - r.maxStopPips).toFixed(1) + 'p over your limit' : ''),
-    })
+
+    /* Measured against the chart's own candles rather than a pip count, for
+       the reason [[STOP_ATR_BAND]] sets out. UNKNOWN when the model could not
+       measure the candles — there is then no yardstick, and inventing one
+       would warn or clear at random. */
+    const acr = Number(reading && reading.average_candle_range)
+    if (Number.isFinite(acr) && acr > 0) {
+      const ratio = ladder.risk / acr
+      const over = ratio > r.maxStopAtr
+      out.push({
+        id: 'stop',
+        label: 'Stop ≤ ' + r.maxStopAtr + '× the average candle',
+        /* Wider than the limit is a WARN, not a BLOCK: it costs more than
+           planned but the trade is still coherent. The doc grades it so too. */
+        status: over ? 'WARN' : 'PASS',
+        detail: 'Stop is ' + ratio.toFixed(1) + '× the average candle'
+          + (over ? ' — the target needs more candles than the trade has' : ''),
+      })
+    } else {
+      out.push({
+        id: 'stop',
+        label: 'Stop ≤ ' + r.maxStopAtr + '× the average candle',
+        status: 'UNKNOWN',
+        detail: 'The chart’s candles could not be measured',
+      })
+    }
   } else {
     out.push({ id: 'rr', label: 'Blended R:R', status: 'BLOCK', detail: 'No usable stop distance' })
   }

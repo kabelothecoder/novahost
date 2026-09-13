@@ -108,7 +108,7 @@
                 <div class="scan-tile">
                   <span class="cc-label">Pip</span>
                   <span class="scan-tile-v cc-figure">
-                    {{ quote.ok && pipMoney != null ? money(pipMoney) + '/lot' : '—' }}
+                    {{ quote.ok && pipMoney != null ? planMoney(pipMoney) + '/lot' : '—' }}
                   </span>
                 </div>
                 <div class="scan-tile">
@@ -141,6 +141,32 @@
           </section>
 
           <!--
+            How the chart is read, as opposed to how long the trade is held.
+            Four briefs have been live in `analyze-chart` all along; this screen
+            sent none of them, so every scan came back a Smart Money read no
+            matter how the user trades. Two rows rather than a four-across strip
+            because the caption is what makes the choice mean anything, and four
+            captions do not survive a 390px row.
+          -->
+          <section class="scan-sec">
+            <div class="scan-sec-head">
+              <h2 class="scan-sec-t">How to read it</h2>
+              <span class="scan-sec-s">your strategy</span>
+            </div>
+            <div class="scan-strats">
+              <button
+                v-for="s in STRATEGIES" :key="s.id"
+                class="scan-strat" :class="{ 'is-on': strategy === s.id }"
+                :aria-pressed="strategy === s.id"
+                @click="strategy = s.id; haptic(20)"
+              >
+                <span class="scan-mode-n">{{ s.name }}</span>
+                <span class="scan-strat-c">{{ s.cap }}</span>
+              </button>
+            </div>
+          </section>
+
+          <!--
             Balance and risk, which is how the doc sizes a position — and it
             is the right way round. The old control was a raw lot stepper, so
             a user had to know what 0.05 lots risked on a 16-pip stop before
@@ -157,6 +183,24 @@
               <h2 class="scan-sec-t">Risk</h2>
               <span class="scan-sec-s">{{ balance == null ? 'no account linked' : 'per trade' }}</span>
             </div>
+
+            <!--
+              What every money figure below is shown in. The arithmetic happens
+              in the instrument's quote currency either way — this is the
+              conversion applied on the way to the screen, and the same USD /
+              ZAR / EUR set the Android build offers, so one trader reads one
+              figure on both handsets.
+            -->
+            <div class="scan-ccy" role="group" aria-label="Display currency">
+              <button
+                v-for="c in SUPPORTED" :key="c"
+                class="scan-ccy-b" :class="{ 'is-on': displayCurrency === c }"
+                :aria-pressed="displayCurrency === c"
+                @click="pickCurrency(c)"
+              >{{ signFor(c) }} {{ c }}</button>
+              <span v-if="fxEstimated" class="scan-ccy-est">offline rate</span>
+            </div>
+
             <div class="scan-risk">
               <div class="scan-tile cc-card">
                 <span class="cc-label">Balance</span>
@@ -270,6 +314,24 @@
               four sections down under "What it saw", which is where a user
               who already scrolled past the numbers never read it.
             -->
+            <!--
+              Above the narrative, not below it. A stale chart does not make
+              the reading wrong — the model read what was in front of it — so
+              this does not contradict the paragraph underneath. It says the
+              paragraph is about a market that has already moved, which is the
+              one thing a user must know BEFORE they read a confident SELL.
+            -->
+            <div v-if="reading.stale" class="scan-stale cc-card" role="status">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" />
+              </svg>
+              <span>
+                {{ reading.stale_reason }}
+                This reading describes the chart as it was, not the market as it is.
+              </span>
+            </div>
+
             <p v-if="reading.narrative" class="scan-narr cc-body">{{ reading.narrative }}</p>
           </section>
 
@@ -413,8 +475,8 @@
 
               <div class="scan-totals">
                 <span class="cc-caption">
-                  Risk <b class="is-down">{{ ladder.riskMoney == null ? '—' : money(ladder.riskMoney) }}</b>
-                  · Reward <b class="is-up">{{ rewardShown == null ? '—' : money(rewardShown) }}</b>
+                  Risk <b class="is-down">{{ ladder.riskMoney == null ? '—' : planMoney(ladder.riskMoney) }}</b>
+                  · Reward <b class="is-up">{{ rewardShown == null ? '—' : planMoney(rewardShown) }}</b>
                 </span>
                 <span class="scan-totals-rr cc-mono">Blended 1:{{ effectiveLadder.blendedRR.toFixed(2) }}</span>
               </div>
@@ -601,6 +663,7 @@ import { haptic } from '../composables/useSpeech.js'
 import ScannerPaywall from '../components/ScannerPaywall.vue'
 import { scanChart, sendPlan, preflight } from '../services/scannerService.js'
 import { buildLadder, scoreConfluence, checkGuardrails, ALLOCATIONS, MIN_LOT } from '../services/confluence.js'
+import { loadRates, convert, signFor, isEstimate, SUPPORTED } from '../services/fxRates.js'
 import { loadPlan, normaliseSymbol } from '../services/symbolPlanService.js'
 // TEMPORARY dev-only scanner unlock. The `import.meta.env.DEV &&` guard at
 // its call site below makes Rollup drop this import from any production
@@ -625,6 +688,27 @@ const MODES = [
 ]
 const mode = ref('day')
 const activeMode = computed(() => MODES.find(m => m.id === mode.value) || MODES[1])
+
+/**
+ * Which school of reading produces the setup.
+ *
+ * Orthogonal to the mode: the mode says how long the trade is held, this says
+ * how the chart is read. The same H4 chart genuinely yields different entries
+ * under Smart Money and under a breakout reading, and one fixed prompt picks a
+ * side for the user.
+ *
+ * The ids and captions mirror `ScanStrategy` on Android and the keys of
+ * `STRATEGY_BRIEFS` in `analyze-chart`, which is where the prompt text actually
+ * lives — the client sends the name and never the brief, so a reading
+ * instruction can be tuned without shipping a build.
+ */
+const STRATEGIES = [
+  { id: 'SMC',          name: 'Smart Money',  cap: 'Order blocks, liquidity, ChoCH' },
+  { id: 'PRICE_ACTION', name: 'Price Action', cap: 'Support, resistance, candles' },
+  { id: 'CRT',          name: 'CRT',          cap: 'Sweep, then limit at the 50%' },
+  { id: 'BREAKOUT',     name: 'Breakout',     cap: 'Range breaks and retests' },
+]
+const strategy = ref('SMC')
 
 const C = 2 * Math.PI * 42
 
@@ -743,7 +827,47 @@ const balance = computed(() => {
   const n = Number(b)
   return Number.isFinite(n) ? n : null
 })
-const currency = computed(() => trades.currency || quote.value.quote_currency || session.brokerCurrency || null)
+/**
+ * What the account is funded in, which is what [[balance]] is denominated in.
+ *
+ * Distinct from [[quoteCurrency]] below, and conflating the two is the bug this
+ * pair replaces: a single `currency` computed preferred the ACCOUNT's code and
+ * then labelled the ladder's figures with it — but those figures come out of
+ * `contract_size × pip_size`, which is in the INSTRUMENT's quote currency. A
+ * rand account scanning gold was shown dollar amounts with "ZAR" in front of
+ * them, understating the risk by about seventeen times.
+ */
+const accountCurrency = computed(() => trades.currency || session.brokerCurrency || null)
+
+/** What the plan's own arithmetic is denominated in — the broker's spec. */
+const quoteCurrency = computed(() => ladder.value?.currency || quote.value.quote_currency || null)
+
+/* ── Display currency ────────────────────────────────────────────────
+   The user's choice, and the only place a conversion happens. Defaults to
+   the account's own currency when the broker named one — someone funded in
+   rand should not have to set that on every visit — and falls back to USD.
+
+   The picker is the same USD / ZAR / EUR that `FxRates.SUPPORTED` offers on
+   Android, so the same trader reads the same figure on either handset. */
+const displayCurrency = ref('USD')
+const fxTable = ref(null)
+const fxPicked = ref(false)
+
+onMounted(async () => { fxTable.value = await loadRates() })
+
+watch(accountCurrency, code => {
+  if (!fxPicked.value && code && SUPPORTED.includes(code)) displayCurrency.value = code
+}, { immediate: true })
+
+function pickCurrency(code) {
+  if (displayCurrency.value === code) return
+  displayCurrency.value = code
+  fxPicked.value = true
+  haptic(20)
+}
+
+/** True when nothing has ever been fetched and the hardcoded table is in use. */
+const fxEstimated = computed(() => isEstimate(fxTable.value))
 
 const riskPct = ref(1)
 const riskMoney = computed(() =>
@@ -756,12 +880,37 @@ function bumpRisk(d) {
   haptic(15)
 }
 
-/** Signed money in the account's own currency, or an em dash. */
+/**
+ * Renders `v` — an amount denominated in `from` — in the chosen display
+ * currency.
+ *
+ * Everything money-shaped on this screen goes through here, so a call site
+ * cannot convert twice or forget to convert at all. Both mistakes are silent,
+ * and both produce a number the user will size a position against.
+ *
+ * Null when the pair cannot be crossed, which every caller renders as an em
+ * dash. A wrong figure on a risk screen is worse than no figure.
+ */
+function inDisplay(v, from) {
+  return convert(v, from, displayCurrency.value, fxTable.value)
+}
+
+function render(n) {
+  return signFor(displayCurrency.value)
+    + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/** An ACCOUNT-denominated amount — the balance and the risk budget. */
 function money(v) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  const body = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return currency.value ? `${currency.value} ${body}` : body
+  const n = inDisplay(v, accountCurrency.value || displayCurrency.value)
+  return n == null ? '—' : render(n)
+}
+
+/** A PLAN-denominated amount — anything computed from the broker's contract
+ *  spec, which is priced in the instrument's quote currency. */
+function planMoney(v) {
+  const n = inDisplay(v, quoteCurrency.value || displayCurrency.value)
+  return n == null ? '—' : render(n)
 }
 
 /**
@@ -775,18 +924,11 @@ function money(v) {
  * The full figure with its currency is still stated in the totals line and
  * on the quote card above.
  */
-const CURRENCY_SIGN = {
-  USD: '$', EUR: '€', GBP: '£', JPY: '¥', ZAR: 'R',
-  AUD: 'A$', CAD: 'C$', CHF: 'CHF', NZD: 'NZ$',
-}
-
 function moneyShort(v) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  const cur = currency.value
-  const sign = cur ? (CURRENCY_SIGN[cur] || cur + ' ') : ''
+  const n = inDisplay(v, quoteCurrency.value || displayCurrency.value)
+  if (n == null) return '—'
   const body = Math.round(Math.abs(n)).toLocaleString()
-  return (n < 0 ? '-' : '+') + sign + body
+  return (n < 0 ? '-' : '+') + signFor(displayCurrency.value) + body
 }
 
 function legMoney(l) {
@@ -848,7 +990,7 @@ const effectiveLadder = computed(() => {
   }
 })
 
-const guards = computed(() => checkGuardrails(effectiveLadder.value))
+const guards = computed(() => checkGuardrails(effectiveLadder.value, null, reading.value))
 
 const gradeTone = computed(() =>
   ({ STRONG: 'ok', MODERATE: 'warn', WEAK: 'bad', UNKNOWN: 'idle' })[score.value.grade] || 'idle',
@@ -906,7 +1048,7 @@ const rungs = computed(() => {
       label: 'SL',
       kind: 'is-sl',
       price: l.sl,
-      meta: `${l.slPips.toFixed(1)} pips${l.riskMoney == null ? '' : ' · -' + money(l.riskMoney)}`,
+      meta: `${l.slPips.toFixed(1)} pips${l.riskMoney == null ? '' : ' · -' + planMoney(l.riskMoney)}`,
     },
   ]
 
@@ -935,6 +1077,21 @@ const waysForward = computed(() => {
   const out = []
   const g = guards.value
   if (!g.blocked) return out
+
+  /* A stale chart has exactly one way forward, and retuning the plan is not
+     it — every figure in the plan describes a market that has moved on. Listed
+     first and alone, because offering "retune targets" beside it would suggest
+     the setup is salvageable by arithmetic. */
+  if (g.blocks.some(b => b.id === 'stale')) {
+    out.push({
+      id: 'rescan',
+      label: 'Scan a fresh chart',
+      primary: true,
+      detail: 'Open your terminal, screenshot the same pair as it stands now, and scan that.',
+      run: () => { reading.value = null; preview.value = null; pickFile(); },
+    })
+    return out
+  }
 
   const rrBlocked = g.blocks.some(b => b.id === 'rr')
 
@@ -1029,7 +1186,27 @@ const suggestedLot = computed(() => {
   if (!l.valid || riskMoney.value == null || pipMoney.value == null) return null
   const perLot = pipMoney.value * l.slPips
   if (!(perLot > 0)) return null
-  const raw = riskMoney.value / perLot
+
+  /* Both sides of this division have to be in the SAME currency, and until now
+     they were not. `riskMoney` is a slice of the broker balance, denominated in
+     whatever the ACCOUNT holds. `perLot` comes out of `contract_size x
+     pip_size`, denominated in what the INSTRUMENT quotes in. A rand account
+     sizing a gold trade divided rand by dollars-per-pip and got a position
+     about seventeen times too large — with a lot number that looked entirely
+     ordinary on screen, and a risk figure underneath it that agreed.
+
+     Null rather than a guess when the two cannot be crossed: the manual lot
+     stepper stays in charge, which is the same thing this returns when the
+     balance or the contract spec is missing. */
+  const riskInQuote = convert(
+    riskMoney.value,
+    accountCurrency.value || quoteCurrency.value,
+    quoteCurrency.value,
+    fxTable.value,
+  )
+  if (riskInQuote == null) return null
+
+  const raw = riskInQuote / perLot
   const floored = Math.floor(raw / MIN_LOT) * MIN_LOT
   return floored >= MIN_LOT ? Number(floored.toFixed(2)) : null
 })
@@ -1066,7 +1243,7 @@ async function run() {
   error.value = ''
   reading.value = null
   try {
-    const data = await scanChart(preview.value, mode.value)
+    const data = await scanChart(preview.value, mode.value, strategy.value)
     reading.value = data
     seedLot(data)
     /* The chart's instrument wins over the chip. Pricing a EUR/USD reading
@@ -1264,6 +1441,49 @@ onMounted(async () => {
 .scan-mode.is-on .scan-mode-n { color: var(--cc-ink) }
 .scan-mode-tf { font-size: 9px; color: var(--cc-ink-4) }
 .scan-mode.is-on .scan-mode-tf { color: var(--cc-accent-text) }
+
+/* Two columns, and the tile borrows `.scan-mode`'s chrome rather than
+   redefining it — same control, wider label. Left-aligned because the caption
+   is a phrase rather than a figure, and centring prose next to its own heading
+   makes both harder to scan. */
+.scan-stale {
+  display: flex; align-items: flex-start; gap: 9px;
+  margin-top: 12px; padding: 11px 13px;
+  font-size: 12px; line-height: 1.45;
+  color: var(--cc-ink-2);
+  border-color: rgba(224, 84, 78, 0.34);
+  background: rgba(224, 84, 78, 0.10);
+}
+.scan-stale svg { flex: 0 0 auto; margin-top: 1px; color: #e0544e }
+
+/* A segmented row rather than tiles: this is a unit on the figures beside it,
+   not a mode that changes what the scan does. */
+.scan-ccy { display: flex; align-items: center; gap: 6px; margin-bottom: 8px }
+.scan-ccy-b {
+  flex: 1 1 0; min-height: 30px; padding: 0 6px;
+  font-size: 11px; font-weight: 600; color: var(--cc-ink-3);
+  border: 1px solid var(--cc-border); border-radius: 9999px;
+  background: var(--cc-card-2); cursor: pointer;
+  transition: border-color 200ms var(--cc-ease), transform 180ms var(--cc-spring);
+}
+.scan-ccy-b:active { transform: scale(0.96) }
+.scan-ccy-b.is-on { border-color: var(--cc-accent); background: var(--cc-accent-dim); color: var(--cc-accent-text) }
+.scan-ccy-est { flex: 0 0 auto; font-size: 9px; color: var(--cc-warn, var(--cc-ink-4)) }
+
+.scan-strats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px }
+.scan-strat {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px;
+  min-height: 56px; padding: 9px 11px;
+  border: 1px solid var(--cc-border); border-radius: var(--cc-r-tile);
+  background: var(--cc-card-2);
+  cursor: pointer; text-align: left;
+  transition: border-color 200ms var(--cc-ease), transform 180ms var(--cc-spring);
+}
+.scan-strat:active { transform: scale(0.96) }
+.scan-strat.is-on { border-color: var(--cc-accent); background: var(--cc-accent-dim) }
+.scan-strat.is-on .scan-mode-n { color: var(--cc-ink) }
+.scan-strat-c { font-size: 9.5px; line-height: 1.25; color: var(--cc-ink-4) }
+.scan-strat.is-on .scan-strat-c { color: var(--cc-accent-text) }
 
 .scan-allocs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px }
 /* The SPLIT leads and the name follows, reversing the old order: "50/25/25"

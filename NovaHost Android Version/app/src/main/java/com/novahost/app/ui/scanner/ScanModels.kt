@@ -26,18 +26,18 @@ import kotlin.math.roundToInt
 // -- Inputs -----------------------------------------------------------------
 
 /**
- * The horizon the user picked, and the volatility band that follows from it.
+ * The horizon the user picked.
  *
- * The band is part of the mode rather than a global constant because "ATR 14
- * pips" is a calm hour on a day trade and a dead one on a swing. Screen 02
- * scores volatility against this band, so the same chart legitimately scores
- * differently under Scalp and under Swing.
+ * This used to carry an ATR band in pips as well — `4.0..12.0` on a scalp and so
+ * on — and [ConfluenceEngine.volatilityCheck] scored against it. Those numbers
+ * described an FX major and failed every metal, index and crypto pair outright;
+ * the check is a stop-to-ATR ratio now, which needs no per-mode constant because
+ * a ratio carries no units. The fields are gone rather than left unread, so
+ * nothing can quietly start scoring against them again.
  */
 enum class ScanMode(
     val label: String,
     val timeframes: String,
-    val atrFloorPips: Double,
-    val atrCeilingPips: Double,
     /** How long the trade is expected to stay open. Feeds the event-window check. */
     val windowMinutes: Int,
     /**
@@ -52,9 +52,9 @@ enum class ScanMode(
     val chartFloorMinutes: Int,
     val chartCeilingMinutes: Int
 ) {
-    SCALP("Scalp", "M5-M15", 4.0, 12.0, 45, chartFloorMinutes = 1, chartCeilingMinutes = 30),
-    DAY("Day", "H1-H4", 10.0, 22.0, 240, chartFloorMinutes = 15, chartCeilingMinutes = 1440),
-    SWING("Swing", "H4-D1", 18.0, 60.0, 1440, chartFloorMinutes = 60, chartCeilingMinutes = 100_000)
+    SCALP("Scalp", "M5-M15", 45, chartFloorMinutes = 1, chartCeilingMinutes = 30),
+    DAY("Day", "H1-H4", 240, chartFloorMinutes = 15, chartCeilingMinutes = 1440),
+    SWING("Swing", "H4-D1", 1440, chartFloorMinutes = 60, chartCeilingMinutes = 100_000)
 }
 
 /**
@@ -342,6 +342,13 @@ data class ScanReading(
     /** The timeframe whose trend the pattern is being checked against. */
     val trendTimeframe: String,
     val trendBias: Bias,
+    /**
+     * The timeframe printed on the chart itself. Null when it was cropped out.
+     *
+     * Carried so [ConfluenceEngine.trendCheck] can tell a real higher-timeframe
+     * confirmation from the chart agreeing with itself -- see that function.
+     */
+    val chartTimeframe: String? = null,
     /** The nearest structural level, and how well tested it is. */
     val keyLevel: Double,
     val keyLevelTouches: Int,
@@ -362,7 +369,11 @@ data class ScanReading(
      */
     val intendedEntryType: EntryType? = null,
     /** The model's one line on why the entry sits where it does. */
-    val entryNote: String = ""
+    val entryNote: String = "",
+    /** The server's staleness verdict. See [ChartVerdict.stale]. */
+    val stale: Boolean = false,
+    val staleReason: String? = null,
+    val chartAgeMinutes: Int? = null
 )
 
 // -- Ladder -----------------------------------------------------------------
@@ -672,6 +683,12 @@ object ConfluenceEngine {
 
     private const val POINTS_PER_CHECK = 20
 
+    /** Stop-to-ATR bounds. See [volatilityCheck] for why these are a ratio.
+     *  Shared with the iOS engine's `STOP_ATR_BAND`, so one chart grades the
+     *  same on both handsets. */
+    internal const val STOP_ATR_FLOOR = 1.0
+    internal const val STOP_ATR_CEILING = 8.0
+
     /** How close to a level still counts as "on" it, as a fraction of the stop distance. */
     private const val KEY_LEVEL_TOLERANCE = 0.85
 
@@ -693,7 +710,7 @@ object ConfluenceEngine {
         val checks = listOf(
             rewardCheck(plan),
             trendCheck(reading),
-            volatilityCheck(instrument, mode),
+            volatilityCheck(instrument, plan),
             keyLevelCheck(instrument, reading, plan),
             eventCheck(reading, mode, calendarAvailable)
         )
@@ -719,7 +736,37 @@ object ConfluenceEngine {
         )
     }
 
+    /**
+     * Does something the setup cannot see agree with it?
+     *
+     * The qualifier is the whole check, and it used to be missing. `analyze-chart`
+     * defines `trend_bias` as the bias of "the highest timeframe legible on this
+     * chart" -- and on a single-timeframe screenshot, which is what people
+     * actually send, the highest legible timeframe IS the chart's own. So a
+     * bearish Change of Character on M15 was scored against an M15 bearish bias
+     * and awarded a full twenty points for agreeing with itself. A live scan
+     * printed it plainly: `Change of Character - M15 bearish`, ticked, +20.
+     * There is no confirmation in that row. One reading of one chart, counted
+     * twice.
+     *
+     * Confirmation has to come from a wider timeframe than the entry's. Where it
+     * does not, this fails and says why -- rather than the alternative, which is
+     * awarding the points and letting the user believe two things agreed.
+     */
     private fun trendCheck(reading: ScanReading): ConfluenceCheck {
+        val chartMinutes = ScanSource.timeframeMinutes(reading.chartTimeframe)
+        val biasMinutes = ScanSource.timeframeMinutes(reading.trendTimeframe)
+
+        if (chartMinutes != null && biasMinutes != null && biasMinutes <= chartMinutes) {
+            return ConfluenceCheck(
+                title = "Pattern aligns with a higher timeframe",
+                detail = reading.trendTimeframe + " is the chart's own timeframe - " +
+                    "nothing wider confirms this setup",
+                passed = false,
+                points = 0
+            )
+        }
+
         val passed = reading.trendBias.agreesWith(reading.direction)
         val trend = reading.trendBias.label.lowercase()
         return ConfluenceCheck(
@@ -742,26 +789,58 @@ object ConfluenceEngine {
      * "too quiet for the band" is a statement about volatility, and this check
      * would be making it without having seen any.
      */
-    private fun volatilityCheck(instrument: Instrument, mode: ScanMode): ConfluenceCheck {
+    /**
+     * Does the stop have room to breathe, without being so wide the target is
+     * unreachable?
+     *
+     * ## Why this is a ratio and not a pip band
+     *
+     * This check used to compare the chart's ATR against [ScanMode]'s pip band --
+     * 4-12 on a scalp, 10-22 on a day trade, 18-60 on a swing. Every one of those
+     * numbers describes an FX major and nothing else. Gold's pip size here is
+     * 0.1, so an ordinary $3.50 candle measures 35 pips and fails the Day band;
+     * on the iOS engine, where gold's pip is 0.01, the same candle measured 350
+     * against the same 10-22 and the check printed `ATR ~350.0p vs the 10-22p
+     * band` with a red cross. It could not have passed. Neither could an index
+     * or a crypto pair.
+     *
+     * The stop-to-ATR ratio asks what the band was reaching for, in units that
+     * cancel. Both figures are pips of the same instrument, so the ratio is the
+     * same number whatever the pip size is -- which removes the whole class of
+     * bug rather than retuning a constant per instrument:
+     *
+     *  - Under [STOP_ATR_FLOOR], the stop sits inside a single candle's ordinary
+     *    range. Normal two-way movement takes it out before the setup has been
+     *    wrong about anything.
+     *  - Over [STOP_ATR_CEILING], a 1R target needs that many candles of one-way
+     *    movement. The R:R on paper is real; reaching it inside the trade's
+     *    horizon is not.
+     */
+    private fun volatilityCheck(instrument: Instrument, plan: TradePlan): ConfluenceCheck {
         val atr = instrument.atrPips
-        val band = trimmed(mode.atrFloorPips) + "-" + trimmed(mode.atrCeilingPips) + "p"
+        val title = "Stop clears the chart's noise"
 
-        if (atr < 0.0) {
+        // A negative ATR is ScanSource.buildInstrument's "nobody measured one"
+        // marker. An unmeasured ATR must read as unverified rather than as a
+        // verdict -- this check would be making a statement about volatility
+        // without having seen any.
+        if (atr <= 0.0 || plan.stopPips <= 0.0) {
             return ConfluenceCheck(
-                title = "Volatility moderate",
+                title = title,
                 detail = "ATR not measured - the chart's candles were not legible enough",
                 passed = false,
                 points = 0
             )
         }
 
-        val passed = atr >= mode.atrFloorPips && atr <= mode.atrCeilingPips
+        val ratio = plan.stopPips / atr
+        val passed = ratio >= STOP_ATR_FLOOR && ratio <= STOP_ATR_CEILING
         return ConfluenceCheck(
-            title = "Volatility moderate",
-            detail = when {
-                passed -> "ATR " + trimmed(atr) + "p inside the " + band + " band"
-                atr < mode.atrFloorPips -> "ATR " + trimmed(atr) + "p - too quiet for the " + band + " band"
-                else -> "ATR " + trimmed(atr) + "p - above the " + band + " band"
+            title = title,
+            detail = "Stop is " + trimmed(ratio) + "x the average candle" + when {
+                passed -> ""
+                ratio < STOP_ATR_FLOOR -> " - inside the noise"
+                else -> " - too wide for the target to be reached"
             },
             passed = passed,
             points = if (passed) POINTS_PER_CHECK else 0
@@ -867,7 +946,19 @@ data class GuardrailOutcome(
  */
 data class GuardrailConfig(
     val minBlendedRR: Double = 1.5,
-    val maxStopPips: Double = 50.0,
+    /**
+     * Ceiling on the stop, as a multiple of the chart's own average candle.
+     *
+     * Replaces a `maxStopPips = 50.0` that only ever described an FX major.
+     * Gold's ordinary ten-dollar stop is 100 pips at this app's pip size and
+     * every metal, index and crypto plan the scanner ever produced tripped the
+     * rule -- a warning that fires on everything is a warning users learn to
+     * scroll past, and then it is not there for the real one.
+     *
+     * Shares [ConfluenceEngine.STOP_ATR_CEILING], so the guardrail and the
+     * confluence check cannot drift apart and disagree about the same stop.
+     */
+    val maxStopAtr: Double = ConfluenceEngine.STOP_ATR_CEILING,
     val maxConsecutiveLosses: Int = 3,
     val minEventClearanceMinutes: Int = 30
 ) {
@@ -881,13 +972,13 @@ data class GuardrailConfig(
      *
      *  - A minimum R:R below 1 makes the reward check pass on a plan that risks
      *    more than it targets, which is not a guardrail.
-     *  - A zero stop limit blocks every trade ever; 1000 pips is past the point
-     *    where the rule expresses anything.
+     *  - A stop limit below one candle-range blocks every trade ever; past
+     *    thirty it is no longer expressing anything.
      *  - A loss streak of zero locks the engine before the first trade.
      */
     fun sanitised(): GuardrailConfig = copy(
         minBlendedRR = minBlendedRR.coerceIn(1.0, 10.0),
-        maxStopPips = maxStopPips.coerceIn(1.0, 1000.0),
+        maxStopAtr = maxStopAtr.coerceIn(1.0, 30.0),
         maxConsecutiveLosses = maxConsecutiveLosses.coerceIn(1, 20),
         minEventClearanceMinutes = minEventClearanceMinutes.coerceIn(0, 240)
     )
@@ -925,6 +1016,47 @@ object Guardrails {
     ): GuardrailReport {
         val minRrLabel = "1:" + trimmed(config.minBlendedRR)
 
+        /**
+         * Is the chart still the market?
+         *
+         * First in the list because it invalidates every rule under it. A stop
+         * distance, an R:R and a key level are all statements about a market
+         * that existed when the screenshot was taken, and none of them survives
+         * the screenshot being old.
+         *
+         * A BLOCK, and the only new one here. It has to be: the scan that
+         * prompted it read a gold chart whose last candle was three days back,
+         * whose terminal had "Market closed" printed on it, and returned a
+         * confident SELL that scored MODERATE and armed execute. Price had
+         * already rallied ninety dollars, within an hour of that final candle.
+         * The reading was a fair account of the chart. The chart was not a fair
+         * account of the market, and nothing in the app was looking.
+         */
+        val freshness = when {
+            reading.stale -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = (reading.staleReason ?: "This chart is not current.") +
+                    " Take a fresh screenshot and scan again.",
+                severity = RuleSeverity.BLOCK,
+                reading = "stale"
+            )
+            // An unchecked clock is not a clock that said "now". Warns rather
+            // than passing, the same rule the calendar and the loss streak
+            // follow above.
+            reading.chartAgeMinutes == null -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = "No readable time axis on this chart - its age could not be checked",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+            else -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = "Last candle " + humanDuration(reading.chartAgeMinutes) + " old",
+                severity = RuleSeverity.PASS,
+                reading = humanDuration(reading.chartAgeMinutes)
+            )
+        }
+
         val rr = GuardrailOutcome(
             title = "Blended R:R >= " + minRrLabel,
             detail = if (plan.blendedRR >= config.minBlendedRR) {
@@ -938,20 +1070,32 @@ object Guardrails {
             reading = plan.rewardLabel
         )
 
-        val stop = GuardrailOutcome(
-            title = "Stop loss <= " + trimmed(config.maxStopPips) + " pips",
-            detail = if (plan.stopPips <= config.maxStopPips) {
-                trimmed(plan.stopPips) + "p - inside your limit"
-            } else {
-                trimmed(plan.stopPips) + "p - " +
-                    trimmed(plan.stopPips - config.maxStopPips) + "p wider than your limit"
-            },
-            // Warn, not block: a wide stop is already paid for by the smaller
-            // position the risk sizing hands back, so this is information rather
-            // than a veto.
-            severity = if (plan.stopPips <= config.maxStopPips) RuleSeverity.PASS else RuleSeverity.WARN,
-            reading = trimmed(plan.stopPips) + "p"
-        )
+        // Measured against the chart's own candles rather than a pip count, for
+        // the reason GuardrailConfig.maxStopAtr sets out. Unknown when the model
+        // could not measure them: there is then no yardstick, and inventing one
+        // would warn or clear at random.
+        val stopAtr = plan.instrument.atrPips.takeIf { it > 0.0 }?.let { plan.stopPips / it }
+        val stop = when {
+            stopAtr == null -> GuardrailOutcome(
+                title = "Stop <= " + trimmed(config.maxStopAtr) + "x the average candle",
+                detail = "The chart's candles could not be measured",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+            else -> GuardrailOutcome(
+                title = "Stop <= " + trimmed(config.maxStopAtr) + "x the average candle",
+                detail = if (stopAtr <= config.maxStopAtr) {
+                    trimmed(stopAtr) + "x - inside your limit"
+                } else {
+                    trimmed(stopAtr) + "x - the target needs more candles than the trade has"
+                },
+                // Warn, not block: a wide stop is already paid for by the smaller
+                // position the risk sizing hands back, so this is information rather
+                // than a veto.
+                severity = if (stopAtr <= config.maxStopAtr) RuleSeverity.PASS else RuleSeverity.WARN,
+                reading = trimmed(stopAtr) + "x"
+            )
+        }
 
         // Null is not zero. An unread streak warns rather than passing: this rule
         // spent its whole life being handed a literal 0, so it rendered green,
@@ -1006,7 +1150,7 @@ object Guardrails {
             )
         }
 
-        return GuardrailReport(listOf(rr, stop, streak, event))
+        return GuardrailReport(listOf(freshness, rr, stop, streak, event))
     }
 }
 
