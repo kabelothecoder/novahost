@@ -23,6 +23,17 @@
       "autoPort": true
     },
     {
+      "name": "admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:admin"
+      ],
+      "cwd": "MetaHost Portal",
+      "port": 8081,
+      "autoPort": true
+    },
+    {
       "name": "novahost-ios",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
