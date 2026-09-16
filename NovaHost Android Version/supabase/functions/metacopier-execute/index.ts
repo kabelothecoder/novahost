@@ -738,6 +738,24 @@ Deno.serve(async (req: Request) => {
     const key = license_key ? String(license_key).trim().toUpperCase() : null
     const dryRun = dry_run === true
 
+    /**
+     * True when a person pressed Execute, rather than a signal arriving on its
+     * own. Governs the concurrency cap below and nothing else.
+     *
+     * Every automated path names the signal it is acting on -- the server's
+     * `auto-execute-signals` sends `signal.signal_id ?? signal.id`, Android's
+     * SignalListener sends `signal.signal_id ?: signal.id` -- and the chart
+     * scanner has no signal to name, on either platform. So the ABSENCE of
+     * `signal_id` is the distinction, and it needs no new field.
+     *
+     * Inferred rather than read from a client-set flag on purpose: a new request
+     * field would only take effect on handsets that had installed a new build,
+     * and the users living with this are precisely the ones who cannot be asked
+     * to reinstall. Read this way, the fix lands on every device already out
+     * there the moment this function deploys.
+     */
+    const manual = !signal_id
+
     // ---- Every outcome is recorded, not just the ones the broker saw --------
     //
     // This function used to write `signal_logs` only after MetaCopier had
@@ -941,8 +959,23 @@ Deno.serve(async (req: Request) => {
       }
 
       // ---- Concurrency cap --------------------------------------------------
+      //
+      // `max_trades` is the ROBOT's appetite for a symbol, and it was being
+      // charged against the user's own hand as well. That made one shape of
+      // refusal dominate this endpoint: gold, one position open, limit one, 58
+      // times -- the hosted robot holding the only slot, so a subscriber could
+      // never execute their own scan of the instrument their robot was already
+      // trading. From the handset it read as "execute is broken".
+      //
+      // A deliberate tap on Execute is not the runaway this limit exists to
+      // stop, so it is exempt. Automated signals are still counted and still
+      // capped, which is the half that was doing real work.
       const maxTrades = Number(symbolCfg.max_trades) || 0
-      if (maxTrades > 0) {
+      if (maxTrades > 0 && manual) {
+        console.log(
+          `[metacopier-execute] ${cleanPair} manual order: max_trades ${maxTrades} not applied`
+        )
+      } else if (maxTrades > 0) {
         const open = await countOpenPositions(account_id, symbolCandidates(cleanPair, metadata, userSymbol), METACOPIER_API_KEY)
 
         // null means the broker could not be asked. Fail open and say so: a
@@ -1438,7 +1471,10 @@ Deno.serve(async (req: Request) => {
       // it tells the user they hold a position they do not hold.
       message: `${orderType} ${filledAs} ${effectiveLots} lots sent.`,
       requestId,
-    }, { request: buildRequest(filledAs), account_id, capped_from: cappedFrom, tried: attempted })
+      // `cap_exempt` is recorded, not merely acted on: this order may sit above
+      // the user's own max_trades, and a position nobody can explain later is
+      // worse than one the audit trail accounts for.
+    }, { request: buildRequest(filledAs), account_id, capped_from: cappedFrom, tried: attempted, cap_exempt: manual })
   } catch (error) {
     console.error('[metacopier-execute] fatal:', error)
     return new Response(

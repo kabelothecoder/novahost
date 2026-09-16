@@ -1306,7 +1306,7 @@ async function execute() {
   /* Validate server-side before anything real goes out — licence, allowance,
      position cap, stop sanity and symbol resolution all answered by the
      executor while `dry_run` keeps it from placing. */
-  const pre = await preflight(plan)
+  const pre = await preflight(plan, mode2.value)
   if (!pre.ok) {
     sending.value = false
     resultOk.value = false

@@ -53,6 +53,47 @@ const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /**
+ * How many times one scan will ask Gemini before giving up.
+ *
+ * The free tier is the first traffic shed when a model is busy, so a 503
+ * UNAVAILABLE here is routine rather than exceptional: seven of the eleven scan
+ * failures in the day this was written were that, and every one was handed back
+ * to the handset as "The scan did not complete. Try again." with no attempt made
+ * to do exactly that. The user then retries by hand -- the same request a few
+ * seconds later -- so the function may as well make it for them. "The scanner
+ * never works" is, in a good share of cases, this.
+ *
+ * Three and no more: a scan is a person holding a phone waiting on an answer,
+ * and a fourth attempt buys less than the wait costs.
+ */
+const GEMINI_ATTEMPTS = 3;
+
+/** Floor between attempts, per retry. Google's own retryDelay wins if longer. */
+const GEMINI_BACKOFF_MS = [700, 1800];
+
+/**
+ * Whether a failed Gemini call is worth repeating, and after how long.
+ * Null means no -- answer the user now.
+ *
+ * 503 is capacity and clears on its own, so it is retried immediately. 429 is
+ * quota, and the two quotas behind that status are not the same failure: a
+ * per-minute limit refills inside the time someone would wait, a per-DAY limit
+ * does not refill today at all. Google names which one ran out in `quotaId` and
+ * how long to wait in `retryDelay`, so both are read rather than assumed --
+ * sleeping through a retry against a daily cap only makes the refusal slower.
+ */
+function retryAfterMs(status: number, detail: string): number | null {
+  if (status === 503) return 0;
+  if (status !== 429) return null;
+  if (/PerDay/i.test(detail)) return null;
+
+  const named = detail.match(/"retryDelay"s*:s*"(d+(?:.d+)?)s"/);
+  const delay = named ? Number(named[1]) * 1000 : 0;
+  // Longer than anyone will hold a phone for. Refuse now and say so.
+  return delay > 30_000 ? null : delay;
+}
+
+/**
  * How to read the chart, keyed by [ScanStrategy] on the handset.
  *
  * Server-side on purpose. The client sends the *name* and never the text, so
@@ -469,7 +510,7 @@ Deno.serve(async (req: Request) => {
         : null,
     ].filter(Boolean).join(" ");
 
-    const geminiResponse = await fetch(`${GEMINI_BASE}/${MODEL}:generateContent`, {
+    const geminiRequest: RequestInit = {
       method: "POST",
       headers: {
         // Header rather than ?key= in the URL: query strings end up in access
@@ -500,18 +541,53 @@ Deno.serve(async (req: Request) => {
           temperature: 0.2,
         },
       }),
-    });
+    };
+
+    // Retried rather than surfaced -- see GEMINI_ATTEMPTS. `detail` outlives the
+    // loop because the refusal written below is shaped from the LAST failure.
+    let geminiResponse!: Response;
+    let detail = "";
+
+    for (let attempt = 1; attempt <= GEMINI_ATTEMPTS; attempt++) {
+      geminiResponse = await fetch(`${GEMINI_BASE}/${MODEL}:generateContent`, geminiRequest);
+      if (geminiResponse.ok) break;
+
+      detail = await geminiResponse.text();
+      console.error(
+        `[analyze-chart] Gemini ${geminiResponse.status} ` +
+        `(attempt ${attempt}/${GEMINI_ATTEMPTS}): ${detail}`
+      );
+
+      const wait = retryAfterMs(geminiResponse.status, detail);
+      if (wait === null || attempt === GEMINI_ATTEMPTS) break;
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(wait, GEMINI_BACKOFF_MS[attempt - 1] ?? 1800))
+      );
+    }
 
     if (!geminiResponse.ok) {
-      const detail = await geminiResponse.text();
-      console.error(`[analyze-chart] Gemini ${geminiResponse.status}: ${detail}`);
-
-      // 429 is the free tier's shape of failure, not a bug, and it is the one
-      // the user can act on -- waiting works. Named so it does not read as a
-      // broken scanner.
+      // A busy minute and a spent day arrive as the same status and are not the
+      // same failure. "Give it a minute" against an exhausted DAILY quota walks
+      // a paying user into the same wall every minute until the quota rolls
+      // over -- which is how a billing setting on a Google project turns into
+      // "the scanner never works" in a support queue.
       if (geminiResponse.status === 429) {
+        const daily = /PerDay/i.test(detail);
+        if (daily) {
+          console.error(
+            "[analyze-chart] DAILY Gemini quota exhausted. This key is on the FREE TIER: " +
+            "20 requests per day for the whole project, shared by every paying scanner user. " +
+            "Enable billing on the Google AI project -- no code change can move this ceiling."
+          );
+        }
         return json(
-          { error: "The scanner is busy right now. Give it a minute and scan again.", code: "RATE_LIMITED" },
+          {
+            error: daily
+              ? "The scanner has hit a daily limit on our side, not on your account. Please try again later."
+              : "The scanner is busy right now. Give it a minute and scan again.",
+            code: daily ? "QUOTA_EXHAUSTED" : "RATE_LIMITED",
+          },
           429
         );
       }

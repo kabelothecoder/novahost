@@ -170,8 +170,23 @@ export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType,
   }
 
   try {
-    const { data, error } = await supabase.functions.invoke('metacopier-execute', { body })
-    if (error) throw error
+    let { data, error } = await supabase.functions.invoke('metacopier-execute', { body })
+
+    /* supabase-js v2 hands a non-2xx back as a FunctionsHttpError with `data`
+       null and the body on `error.context` — the same unwrap robotService does.
+       Without it nothing below this line could run on a refusal, and EVERY
+       refusal this executor makes is a 4xx: POSITION_CAP is 409, BAD_VOLUME and
+       INVALID_STOPS are 400, SYMBOL_DISABLED is 403. So `error` was thrown, the
+       catch read `err.message`, and the user was shown the library's own words
+       — "Edge Function returned a non-2xx status code" — in place of "Already
+       holding 1 XAUUSD position(s); your limit is 1." CODE_HINTS above, and the
+       broker's plain-English refusals it exists to preserve, were unreachable
+       code for as long as this line read `if (error) throw error`. */
+    if (error && !data && error.context && typeof error.context.json === 'function') {
+      try { data = await error.context.json(); error = null } catch { /* genuinely no body */ }
+    }
+
+    if (error && !data) throw error
     if (!data || data.success !== true) {
       return { ok: false, code: data && data.code, message: describe(data) }
     }
@@ -182,15 +197,38 @@ export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType,
 }
 
 /**
- * Preflight. Runs the FIRST leg as `dry_run` so the licence, allowance,
- * position cap, symbol resolution and stop sanity are all checked by the
- * server before anything real is sent.
+ * The legs that will actually be sent.
+ *
+ * Shared by `preflight` and `sendPlan` on purpose. The preflight used to check
+ * `plan.legs[0].lot` whatever the mode, and in single mode that is the LADDER's
+ * first slice rather than the order being placed. `buildLadder` floors a slice
+ * under 0.01 to zero, so at the 0.01 minimum most users trade, the dry run
+ * asked the executor to validate a 0.00-lot order, was told BAD_VOLUME, and the
+ * real — perfectly valid — 0.01 order was never sent. A preflight of anything
+ * other than the order you are about to place is not a preflight.
+ */
+function legsToSend(plan, mode) {
+  return mode === 'ladder'
+    ? plan.legs.filter(l => l.lot > 0)
+    : [{ ...plan.legs[0], lot: plan.totalLot }]
+}
+
+/**
+ * Preflight. Runs the first leg THIS MODE will actually send as `dry_run`, so
+ * the licence, allowance, position cap, symbol resolution and stop sanity are
+ * all checked by the server before anything real goes out.
+ *
+ * `mode` is not optional and matches `sendPlan`'s: the two must agree on what
+ * is being sent or the check is of a different order than the one placed.
  *
  * Worth the extra round trip: the alternative on a ladder is discovering at
  * leg 2 that the symbol was disabled, having already opened leg 1.
  */
-export async function preflight(plan) {
-  const first = plan.legs[0]
+export async function preflight(plan, mode) {
+  const first = legsToSend(plan, mode)[0]
+  if (!first) {
+    return { ok: false, message: 'Every slice rounds below the 0.01 minimum. Raise the lot or use Single.' }
+  }
   return placeOrder({
     pair: plan.pair,
     side: plan.side,
@@ -220,9 +258,7 @@ export async function preflight(plan) {
  * worse than one that failed outright.
  */
 export async function sendPlan(plan, mode, onProgress) {
-  const legs = mode === 'ladder'
-    ? plan.legs.filter(l => l.lot > 0)
-    : [{ ...plan.legs[0], lot: plan.totalLot }]
+  const legs = legsToSend(plan, mode)
 
   if (!legs.length) {
     return { ok: false, placed: [], failed: [], message: 'Every slice rounds below the 0.01 minimum. Raise the lot or use Single.' }
