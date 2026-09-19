@@ -225,10 +225,22 @@ Deno.serve(async (req: Request) => {
       }, 503)
     }
 
+    // No fallback sender on purpose: Resend's onboarding@resend.dev sandbox
+    // address delivers ONLY to the Resend account owner, so defaulting to it
+    // does not fail -- it succeeds silently for every test and fails silently
+    // for every real user, which is worse than refusing outright.
+    const from = Deno.env.get('RESEND_FROM')
+    if (!from) {
+      console.error('[device-move] RESEND_FROM is unset -- cannot send move codes.')
+      return json({
+        success: false,
+        code: 'EMAIL_NOT_CONFIGURED',
+        error: 'Device moves are unavailable right now. Please contact support.',
+      }, 503)
+    }
+
     const code = mintCode()
     const expiresAt = new Date(Date.now() + TICKET_TTL_MINUTES * 60 * 1000)
-
-    const from = Deno.env.get('RESEND_FROM') ?? 'NovaHost <onboarding@resend.dev>'
     const deviceLabel = deviceId.slice(-6).toUpperCase()
 
     const res = await fetch('https://api.resend.com/emails', {

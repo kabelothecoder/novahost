@@ -115,12 +115,16 @@ fixes this — the host is the auth service's own. A custom domain (a paid
 add-on) makes it `auth.novahost.co`; until then the email body is fully branded
 but the URL is not. This is the last visible piece of the rename.
 
-**The sender address comes from SMTP settings, not from here.** While the
-project is on the built-in mailer the From line reads `noreply@mail.app.supabase.io`
-and delivery is rate-limited to a handful an hour. Point **Project Settings →
-Auth → SMTP** at the same Resend account `send-license-email` already uses, with
-a verified `novahost.co` sender, and both the From line and the throughput
-problem go away together.
+**The sender address comes from SMTP settings, not from here.** Run
+`node smtp.mjs` (same directory) to point the mailer at Resend; it fixes the From
+line and the throughput cap together. Until it is run, the From line reads
+`noreply@mail.app.supabase.io` and delivery is capped at a couple of emails an
+hour — real signups fail with `429 over_email_send_rate_limit` and the customer
+sees "Email rate limit exceeded" with no account created. **Being on Pro does not
+lift this.** Pro raises the ceiling you are allowed to configure; the built-in
+sender's own throttle is unchanged, so custom SMTP is the only fix. The verified
+sender is `novahost-ea.app` — the live domain — not `novahost.co`, which is parked
+with no mail configured.
 
 **Dark-background mail gets inverted by some clients.** `color-scheme: dark` is
 declared, which modern Gmail, Apple Mail and Outlook.com honour. Older Outlook
