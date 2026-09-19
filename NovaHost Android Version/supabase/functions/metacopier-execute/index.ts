@@ -336,6 +336,36 @@ function aliasesFor(base: string): string[] {
   return ALIAS_FAMILY[base] ?? []
 }
 
+/**
+ * Whether a chart-reported symbol should count as one the licence allows.
+ *
+ * The chart scanner reports whatever text is printed on the chart, which on
+ * many brokers carries their own decoration -- BTCUSDM, XAUUSDPRO -- rather
+ * than the canonical name a mentor's allowance is written against. Reading
+ * that as "not licensed" was the actual fault behind a subscriber whose
+ * licence allowed BTCUSD being refused it outright: the allowance said
+ * BTCUSD, the chart said BTCUSDM, and the two were compared for exact
+ * equality with no room for a broker's own spelling.
+ *
+ * Checked against every member of the canonical's alias family, not just
+ * itself -- an allowance written as GOLD must still cover a chart reporting
+ * XAUUSDM. The extra characters must be LETTERS ONLY: this gate decides
+ * whether a trade is allowed to happen at all, so unlike the order-routing
+ * lookups elsewhere in this file, a length-tolerant guess is not safe here
+ * -- US30 must never satisfy an allowance written for US300, and a trailing
+ * digit is a different instrument, never a broker's decoration.
+ */
+function coversSymbol(reported: string, allowedCanonical: string): boolean {
+  const family = aliasesFor(allowedCanonical)
+  const members = family.length > 0 ? family : [allowedCanonical]
+  return members.some((member) => {
+    if (reported === member) return true
+    if (!reported.startsWith(member)) return false
+    const extra = reported.slice(member.length)
+    return extra.length > 0 && extra.length <= 5 && /^[A-Z]+$/.test(extra)
+  })
+}
+
 /** A broker suffix reduced to what MetaTrader permits inside a symbol name. */
 function safeSuffix(metadata: Record<string, unknown> | null): string {
   return String(metadata?.symbol_suffix ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '')
@@ -889,7 +919,7 @@ Deno.serve(async (req: Request) => {
     // Respect a per-licence symbol restriction when one is set.
     const allowed = Array.isArray(license.allowed_symbols) ? license.allowed_symbols : []
     const cleanPair = baseSymbol(pair)
-    if (allowed.length > 0 && !allowed.map((s: string) => baseSymbol(s)).includes(cleanPair)) {
+    if (allowed.length > 0 && !allowed.some((s: string) => coversSymbol(cleanPair, baseSymbol(s)))) {
       return await finish('rejected', 403, {
         success: false, code: 'SYMBOL_NOT_LICENSED',
         error: `Symbol ${cleanPair} is not enabled on this licence.`,
