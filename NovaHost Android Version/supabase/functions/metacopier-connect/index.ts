@@ -237,7 +237,7 @@ Deno.serve(async (req: Request) => {
       if (!all.length) return 0
 
       const orphans = all.filter((a) => {
-        if (a.deleted === true) return false          // already gone; a second DELETE answers 400
+        if (isDead(a)) return false          // already gone; a second DELETE answers 400
         const id = String(a.id ?? '')
         if (!id || keepIds.has(id)) return false
         const alias = String(a.alias ?? '').trim().toUpperCase()
@@ -439,7 +439,7 @@ Deno.serve(async (req: Request) => {
      * turns that window from a failed trade into a "still connecting" state the
      * app can show honestly.
      */
-    const startAndVerify = async (id: string): Promise<'connected' | 'connecting' | 'wrong_credentials'> => {
+    const startAndVerify = async (id: string): Promise<'connected' | 'connecting' | 'wrong_credentials' | 'account_gone'> => {
       await fetch(
         `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/actions/start`,
         { method: 'POST', headers: mcHeaders }
@@ -452,7 +452,22 @@ Deno.serve(async (req: Request) => {
             `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/information`,
             { headers: mcHeaders },
           )
-          if (!infoRes.ok) continue
+          if (!infoRes.ok) {
+            // isDead() above stops an ALREADY-deleted account from being
+            // reused. This covers the account dying mid-poll instead -- a
+            // concurrent reclaim, or the user deleting it at their broker
+            // while we sit in this loop. Only codes that mean "this id is
+            // never coming back" short-circuit to account_gone; anything else
+            // (rate limits, a transient 5xx, a region still spinning up)
+            // keeps polling exactly as before.
+            const detail = await infoRes.text().catch(() => '')
+            const codes = codesIn(detail)
+            if (codes.some((c) => c === 'ACCOUNT_WAS_DELETED' || c === 'ACCOUNT_WAS_ALREADY_DELETED' || c === 'ACCOUNT_NOT_FOUND')) {
+              console.warn(`[MetaCopier] account ${id} gone mid-verify: ${detail}`)
+              return 'account_gone'
+            }
+            continue
+          }
           const info = await infoRes.json()
           if (info?.wrongCredentials === true) return 'wrong_credentials'
           if (info?.connected === true) return 'connected'
@@ -469,6 +484,22 @@ Deno.serve(async (req: Request) => {
         return await r.json() as Record<string, unknown>
       } catch { return null }
     }
+
+    /**
+     * True when MetaCopier still knows about an account but has deleted it.
+     *
+     * `GET /accounts/{id}` answers 200 for a deleted account -- it does not
+     * 404 -- and hands back the same shape as a live one, just with
+     * `deleted` set and `status.name === 'Deleted'`. Every call the account
+     * needs (`/actions/start`, `/information`) then 400s with
+     * `[ACCOUNT_WAS_DELETED]`. Without this check, `fetchAccount` returning a
+     * truthy value reads as "still there", the corpse gets reused, and
+     * `startAndVerify` cannot tell that 400 apart from "still starting" --
+     * so the licence reports CONNECTING forever no matter how many times the
+     * user retries, because every retry lands on the same dead id.
+     */
+    const isDead = (a: Record<string, unknown> | null | undefined): boolean =>
+      !!a && (a.deleted === true || (a.status as Record<string, unknown> | undefined)?.name === 'Deleted')
 
     // ---- De-duplicate: one MetaCopier account per broker login --------------
     //
@@ -491,7 +522,13 @@ Deno.serve(async (req: Request) => {
     const priorId = String((license.metadata as Record<string, unknown> | null)?.metacopier_account_id ?? '').trim()
     if (priorId) {
       const prior = await fetchAccount(priorId)
-      if (prior) {
+      if (prior && isDead(prior)) {
+        // Gone at the provider already -- deleting it again would just 400
+        // with [ACCOUNT_WAS_ALREADY_DELETED]. Leave metacopierAccountId unset
+        // so a fresh account gets created below, and the write-back at the
+        // end of this function replaces the dead id on the licence.
+        console.log(`[MetaCopier] licence ${license.id}'s stored account ${priorId} was deleted at the provider -- abandoning it`)
+      } else if (prior) {
         const sameLogin =
           normalize(prior.loginAccountNumber) === normalize(wantLogin) &&
           normalize(prior.loginServer) === normalize(finalServer)
@@ -513,6 +550,7 @@ Deno.serve(async (req: Request) => {
       try {
         const all = await listAllAccounts()
         const matches = all.filter((a) =>
+          !isDead(a) &&
           normalize(a.loginAccountNumber) === normalize(wantLogin) &&
           normalize(a.loginServer) === normalize(finalServer)
         )
@@ -573,6 +611,18 @@ Deno.serve(async (req: Request) => {
       linkState = await startAndVerify(metacopierAccountId)
     }
 
+    // The account died while we were polling it (see the TODO in
+    // startAndVerify) -- not a credentials problem, so recreate exactly like
+    // the branch above rather than reporting a false CONNECTING.
+    if (linkState === 'account_gone') {
+      console.log(`[MetaCopier] account ${metacopierAccountId} was deleted mid-verify -- recreating`)
+      reused = false
+      const r = await resolveAndCreate()
+      if ('errorResponse' in r) return r.errorResponse
+      metacopierAccountId = r.id
+      linkState = await startAndVerify(metacopierAccountId)
+    }
+
     if (linkState === 'wrong_credentials') {
       return json({
         success: false,
@@ -582,6 +632,16 @@ Deno.serve(async (req: Request) => {
           `${wantPlatform} trading password (not the investor password), and that "${finalServer}" ` +
           `is the server name exactly as MetaTrader shows it.`,
       }, 400)
+    }
+
+    // Recreated once above and it STILL came back gone/uncertain -- give up
+    // rather than write an outcome the type system never promised callers.
+    if (linkState === 'account_gone') {
+      return json({
+        success: false,
+        code: 'CONNECT_FAILED',
+        error: 'Could not establish a trading session for this account. Please try again.',
+      }, 502)
     }
 
     // ---- Record the link, WITHOUT storing broker credentials ----------------
