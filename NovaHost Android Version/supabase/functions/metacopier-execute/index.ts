@@ -1388,6 +1388,52 @@ Deno.serve(async (req: Request) => {
       else if (hit('CONNTECT') || hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
         code = 'ACCOUNT_DISCONNECTED'
         message = "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
+      }
+      // ---- The account itself is gone, not merely offline --------------------
+      //
+      // Distinct from the branch above: `[ACCOUNT_IS_NOT_CONNTECTED]` describes a
+      // live account whose broker session is temporarily down and may come back
+      // on its own, so it is safe to leave the licence's stored link alone.
+      // `[ACCOUNT_WAS_DELETED]` / `[ACCOUNT_WAS_ALREADY_DELETED]` mean the
+      // MetaCopier account has been deleted at the provider -- see
+      // metacopier-connect's `isDead()` for how a licence ends up pointing at
+      // one -- and it will NEVER reconnect on its own.
+      //
+      // Reported with the same code and copy as a normal disconnect (the app
+      // already knows how to render `ACCOUNT_DISCONNECTED`), but this branch
+      // ALSO clears the dead id off the licence. Without that, this was the
+      // silent half of the stuck-connecting incident: two licences kept
+      // showing CONNECTED on the dashboard and traded against a deleted
+      // account for days, because nothing ever told `licenses.metadata` the
+      // account was gone -- every signal just failed here, alone, unread,
+      // forever. Clearing it makes `license-status` report NOT LINKED
+      // immediately, so the user has a reason to open Broker Setup, and the
+      // next signal fails fast on NO_ACCOUNT_LINKED instead of spending a
+      // broker round trip rediscovering the same corpse.
+      else if (hit('DELETED') || hit('NOT_FOUND')) {
+        code = 'ACCOUNT_DISCONNECTED'
+        message = "Your trading account's connection to the broker was lost. Reconnect it in Broker Setup to keep trading."
+
+        const clearedMetadata = { ...(metadata ?? {}) } as Record<string, unknown>
+        delete clearedMetadata.metacopier_account_id
+        clearedMetadata.metacopier_status = 'disconnected'
+        clearedMetadata.disconnected_at = new Date().toISOString()
+        clearedMetadata.disconnected_reason = codes[0] ?? 'ACCOUNT_WAS_DELETED'
+
+        const { error: clearErr } = await novaHost
+          .from('licenses')
+          .update({ metadata: clearedMetadata })
+          .eq('id', license.id)
+
+        if (clearErr) {
+          // Best-effort, like every other write in this file: a failed
+          // cleanup must not turn an already-failed trade into a crashed
+          // request, and the next signal on this licence gets another chance
+          // to clear it.
+          console.error(`[metacopier-execute] could not clear dead account link for licence ${license.id}: ${clearErr.message}`)
+        } else {
+          console.warn(`[metacopier-execute] licence ${license.id}'s account ${account_id} was deleted at the provider -- link cleared, will now show NOT LINKED`)
+        }
       } else if (hit('SYMBOL')) {
         code = 'UNKNOWN_SYMBOL'
         // By this point the account's own symbol list has been read and searched,
