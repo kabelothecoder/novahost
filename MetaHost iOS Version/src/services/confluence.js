@@ -398,13 +398,27 @@ export const DEFAULT_RULES = {
 }
 
 /**
+ * How far the chart's entry may sit from the live quote before the chart is
+ * judged to be of a different instrument. A current chart is within a percent
+ * or two of the market, and stale ones are blocked separately; gold against
+ * the Nasdaq is off by more than eighty. Shared with Android's
+ * `Guardrails.MAX_PRICE_GAP`.
+ */
+export const MAX_PRICE_GAP = 0.10
+
+/**
  * @param {object} ladder  the plan actually being sent
  * @param {object} rules   the user's limits, or [[DEFAULT_RULES]]
  * @param {object} reading the `analyze-chart` reading — needed for the two
  *                         rules that judge the CHART rather than the plan.
  *                         Optional; both report UNKNOWN without it.
+ * @param {object} ctx     { livePrice, symbol, sizing } from the screen.
+ *                         `sizing` is { risk, budget, share, pct, lots,
+ *                         atMinimum, maxStopPips, riskText, balanceText } —
+ *                         `risk` and `budget` in the ACCOUNT's currency, `share`
+ *                         as a percent of balance — or null without a broker.
  */
-export function checkGuardrails(ladder, rules, reading) {
+export function checkGuardrails(ladder, rules, reading, ctx) {
   const r = rules || DEFAULT_RULES
   const out = []
 
@@ -444,6 +458,71 @@ export function checkGuardrails(ladder, rules, reading) {
       label: 'Chart is current',
       status: 'PASS',
       detail: 'Last candle about ' + describeAge(reading.chart_age_minutes) + ' old',
+    })
+  }
+
+  /* ── Is the chart a picture of the instrument being priced? ──────────
+     Price is the one thing on a chart that cannot be mislabelled. On
+     2026-10-01 a gold chart (entries near 4180) was scanned as NAS100, where
+     the Nasdaq trades near 25,000, and a NAS100 sell with its stop at 4183.5
+     reached the executor — a deleted broker account stopped it, not the app. */
+  const live = Number(ctx && ctx.livePrice)
+  const sym = (ctx && ctx.symbol) || 'this instrument'
+  if (ladder && ladder.valid && Number.isFinite(live) && live > 0) {
+    const gap = Math.abs(ladder.entry - live) / live
+    const px = v => (v >= 1000 ? v.toFixed(2) : v.toFixed(v < 10 ? 5 : 3))
+    out.push(gap > MAX_PRICE_GAP
+      ? {
+          id: 'scale',
+          label: 'Chart is ' + sym,
+          status: 'BLOCK',
+          detail: 'The chart’s entry ' + px(ladder.entry) + ' is ' + (gap * 100).toFixed(0)
+            + '% from ' + sym + '’s live ' + px(live) + ' — this is a chart of a different instrument.',
+        }
+      : {
+          id: 'scale',
+          label: 'Chart is ' + sym,
+          status: 'PASS',
+          detail: 'Entry is within ' + (gap * 100).toFixed(1) + '% of the live price',
+        })
+  } else if (ladder && ladder.valid) {
+    out.push({
+      id: 'scale',
+      label: 'Chart is ' + sym,
+      status: 'UNKNOWN',
+      detail: 'No live price from your broker — could not confirm the chart shows this instrument',
+    })
+  }
+
+  /* ── Does the stop cost what the user said they would lose? ──────────
+     The rule this list was missing. Sizing floors to the 0.01 minimum and
+     cannot go below it, so on a small account a wide stop risks many times
+     the budget — and nothing compared the two. On Android a R1,008 gold
+     account at 1% was shown a plan risking R784, 78% of the balance, with
+     every rule green; here the stepper simply kept its 0.05 default. A BLOCK,
+     because it is the user's own number. */
+  const s = ctx && ctx.sizing
+  if (!s) {
+    out.push({
+      id: 'risk',
+      label: 'Risk within your budget',
+      status: 'UNKNOWN',
+      detail: 'No broker balance — the plan cannot be checked against your account',
+    })
+  } else {
+    const pctLabel = s.pct + '%'
+    const over = s.risk > s.budget * 1.001
+    out.push({
+      id: 'risk',
+      label: 'Risk ≤ ' + pctLabel + ' of balance',
+      status: over ? 'BLOCK' : 'PASS',
+      detail: s.lots.toFixed(2) + ' lots risks ' + s.riskText + ' on this stop — '
+        + s.share.toFixed(1) + '% of your ' + s.balanceText + ' balance',
+      remedy: !over ? null : s.atMinimum
+        ? '0.01 lots is the smallest order a broker accepts, and on this stop it already risks more than your '
+          + pctLabel + '. At this balance, ' + pctLabel + ' covers a stop of about '
+          + Math.floor(s.maxStopPips) + ' pips on ' + sym + '. This setup does not fit this account.'
+        : 'This plan is larger than your ' + pctLabel + ' allows.',
     })
   }
 

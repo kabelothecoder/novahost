@@ -990,7 +990,20 @@ const effectiveLadder = computed(() => {
   }
 })
 
-const guards = computed(() => checkGuardrails(effectiveLadder.value, null, reading.value))
+/* Only a quote for the instrument on the chart. The chip's previous symbol is
+   still in `quote` while the scanned one is being fetched, and judging a gold
+   chart against a EUR/USD price would flash a wrong-instrument block. */
+const livePrice = computed(() => {
+  const q = quote.value
+  if (!q.ok || quoteLoading.value || normaliseSymbol(String(q.symbol || '')) !== pair.value) return null
+  return q.price
+})
+
+const guards = computed(() => checkGuardrails(effectiveLadder.value, null, reading.value, {
+  livePrice: livePrice.value,
+  symbol: pair.value,
+  sizing: sizing.value,
+}))
 
 const gradeTone = computed(() =>
   ({ STRONG: 'ok', MODERATE: 'warn', WEAK: 'bad', UNKNOWN: 'idle' })[score.value.grade] || 'idle',
@@ -1093,6 +1106,50 @@ const waysForward = computed(() => {
     return out
   }
 
+  /* A chart of a different instrument is the same shape: nothing on the plan
+     describes the pair being sent. */
+  if (g.blocks.some(b => b.id === 'scale')) {
+    out.push({
+      id: 'rescan',
+      label: 'Scan the right chart',
+      primary: true,
+      detail: 'Screenshot the ' + (pair.value || 'pair') + ' chart you mean to trade and scan that.',
+      run: () => { reading.value = null; preview.value = null; pickFile(); },
+    })
+    return out
+  }
+
+  /* Over budget. The one in-app fix is handing the lot back to the risk
+     sizing, and it is offered only when that size actually fits — on an
+     account too small for the stop even 0.01 does not, and the honest answer
+     is a different setup, not a different button. */
+  const riskBlock = g.blocks.find(b => b.id === 'risk')
+  if (riskBlock) {
+    const fit = budgetLot.value
+    if (fit != null && fit >= MIN_LOT && fit < totalLot.value) {
+      out.push({
+        id: 'fit',
+        label: 'Use ' + fit.toFixed(2) + ' lots',
+        primary: true,
+        detail: 'The size your ' + riskPct.value + '% buys on this stop.',
+        run: () => {
+          lotTouched.value = false
+          totalLot.value = fit
+          lotSource.value = `${riskPct.value}% of balance`
+          haptic(30)
+        },
+      })
+    }
+    out.push({
+      id: 'rescan',
+      label: 'Scan again',
+      primary: !out.length,
+      detail: riskBlock.remedy || 'Wait for a setup with a tighter stop.',
+      run: reset,
+    })
+    return out
+  }
+
   const rrBlocked = g.blocks.some(b => b.id === 'rr')
 
   if (rrBlocked && ladder.value.valid) {
@@ -1169,6 +1226,25 @@ function biasArrow(b) {
   return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>'
 }
 
+/* Both sides of the sizing division have to be in the SAME currency, and once
+   they were not. `riskMoney` is a slice of the broker balance, denominated in
+   whatever the ACCOUNT holds. `pipMoney` comes out of `contract_size x
+   pip_size`, denominated in what the INSTRUMENT quotes in. A rand account
+   sizing a gold trade divided rand by dollars-per-pip and got a position
+   about seventeen times too large — with a lot number that looked entirely
+   ordinary on screen, and a risk figure underneath it that agreed.
+
+   Null rather than a guess when the two cannot be crossed. */
+const budgetInQuote = computed(() => {
+  if (riskMoney.value == null) return null
+  return convert(
+    riskMoney.value,
+    accountCurrency.value || quoteCurrency.value,
+    quoteCurrency.value,
+    fxTable.value,
+  )
+})
+
 /**
  * The lot the risk budget actually buys.
  *
@@ -1179,36 +1255,58 @@ function biasArrow(b) {
  * missing and this is null, and the manual stepper stays in charge.
  *
  * Floored to the 0.01 step, never rounded up: rounding up spends risk the
- * user did not allocate, which is the whole thing they just set.
+ * user did not allocate, which is the whole thing they just set. Zero when
+ * the budget buys less than a broker will take.
  */
-const suggestedLot = computed(() => {
+const budgetLot = computed(() => {
   const l = ladder.value
-  if (!l.valid || riskMoney.value == null || pipMoney.value == null) return null
+  if (!l.valid || budgetInQuote.value == null || pipMoney.value == null) return null
   const perLot = pipMoney.value * l.slPips
   if (!(perLot > 0)) return null
+  return Number((Math.floor(budgetInQuote.value / perLot / MIN_LOT) * MIN_LOT).toFixed(2))
+})
 
-  /* Both sides of this division have to be in the SAME currency, and until now
-     they were not. `riskMoney` is a slice of the broker balance, denominated in
-     whatever the ACCOUNT holds. `perLot` comes out of `contract_size x
-     pip_size`, denominated in what the INSTRUMENT quotes in. A rand account
-     sizing a gold trade divided rand by dollars-per-pip and got a position
-     about seventeen times too large — with a lot number that looked entirely
-     ordinary on screen, and a risk figure underneath it that agreed.
+const suggestedLot = computed(() => {
+  const b = budgetLot.value
+  if (b == null) return null
+  /* Under the floor the budget buys nothing a broker will take. This used to
+     return null, which left the stepper on whatever it last held — 0.05 on a
+     fresh screen, five times the smallest order — on exactly the accounts
+     least able to carry it. The smallest order is shown instead, and the
+     budget guardrail blocks it and says why. */
+  return b >= MIN_LOT ? b : MIN_LOT
+})
 
-     Null rather than a guess when the two cannot be crossed: the manual lot
-     stepper stays in charge, which is the same thing this returns when the
-     balance or the contract spec is missing. */
-  const riskInQuote = convert(
-    riskMoney.value,
+/**
+ * What the plan being SENT loses at the stop, beside what the user said they
+ * would lose — both in the account's currency, which is what the balance is.
+ *
+ * Read off the effective ladder, so single mode is the one full-size order and
+ * ladder mode is the sum of the funded rungs. Null without a balance, a
+ * contract spec or a rate to cross them; the rule then reports UNKNOWN.
+ */
+const sizing = computed(() => {
+  const l = effectiveLadder.value
+  if (!l.valid || riskMoney.value == null || pipMoney.value == null || !(balance.value > 0)) return null
+  const lots = l.legs.reduce((sum, leg) => sum + (Number(leg.lot) || 0), 0)
+  const risk = convert(
+    lots * pipMoney.value * l.slPips,
+    quoteCurrency.value || accountCurrency.value,
     accountCurrency.value || quoteCurrency.value,
-    quoteCurrency.value,
     fxTable.value,
   )
-  if (riskInQuote == null) return null
-
-  const raw = riskInQuote / perLot
-  const floored = Math.floor(raw / MIN_LOT) * MIN_LOT
-  return floored >= MIN_LOT ? Number(floored.toFixed(2)) : null
+  if (risk == null) return null
+  return {
+    risk,
+    budget: riskMoney.value,
+    share: (risk / balance.value) * 100,
+    pct: riskPct.value,
+    lots,
+    atMinimum: lots <= MIN_LOT + 1e-9,
+    maxStopPips: budgetInQuote.value == null ? 0 : budgetInQuote.value / (MIN_LOT * pipMoney.value),
+    riskText: money(risk),
+    balanceText: money(balance.value),
+  }
 })
 
 /* Follows the risk budget until the user takes the wheel. Not a watcher on
