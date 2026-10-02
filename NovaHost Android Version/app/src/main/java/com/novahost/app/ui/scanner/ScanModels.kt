@@ -419,6 +419,10 @@ data class TradePlan(
     val stop: Double,
     val stopPips: Double,
     val riskAmount: Double,
+    /** What [riskAmount] is a slice of, in USD. Kept so a rule can say "of your balance". */
+    val balance: Double = 0.0,
+    /** The user's per-trade risk, in percent. [riskAmount] is this much of [balance]. */
+    val riskPercent: Double = 0.0,
     val totalLots: Double,
     val legs: List<TradeLeg>,
     val preset: AllocationPreset,
@@ -524,6 +528,16 @@ data class TradePlan(
     val totalReward: Double get() = legs.sumOf { it.estimatedPl }
 
     /**
+     * The legs that carry volume, and so the only ones sent.
+     *
+     * A small position cannot fill three targets: 0.01 lots is one order, and
+     * the legs it cannot reach sit at zero. Every count and every send loop
+     * reads this rather than [legs], or the screen promises orders that will
+     * never exist.
+     */
+    val fundedLegs: List<TradeLeg> get() = legs.filter { it.lots > 0.0 }
+
+    /**
      * What the stop actually costs, as opposed to what was budgeted.
      *
      * [riskAmount] is the intent (balance x risk%). This is the outcome after
@@ -588,10 +602,11 @@ object TradePlanner {
         if (totalLots <= 0.0) return null
 
         val sign = if (reading.direction == Direction.BUY) 1 else -1
+        val split = splitLots(totalLots, preset.splits)
 
         val legs = LADDER_R.mapIndexed { index, r ->
             val allocation = preset.splits[index]
-            val lots = floorLots(totalLots * allocation)
+            val lots = split[index]
             val targetPips = stopPips * r
             TradeLeg(
                 name = "TP" + (index + 1),
@@ -610,6 +625,8 @@ object TradePlanner {
             stop = reading.stop,
             stopPips = stopPips,
             riskAmount = riskAmount,
+            balance = balance,
+            riskPercent = riskPercent,
             totalLots = totalLots,
             legs = legs,
             preset = preset,
@@ -634,10 +651,38 @@ object TradePlanner {
      * The 0.01 floor is the one case that can still exceed the budget, because
      * it is the smallest position a broker will accept and there is nothing
      * below it to round to. [TradePlan.actualRisk] reports what that really
-     * costs rather than repeating the budget back.
+     * costs rather than repeating the budget back, and the budget guardrail
+     * blocks the plan when it is more than the user said they would lose.
      */
     private fun floorLots(value: Double): Double =
         (floor(value * 100) / 100.0).coerceAtLeast(0.01)
+
+    /**
+     * Shares [total] across the legs in whole 0.01 steps, summing to exactly [total].
+     *
+     * Each slice used to go through [floorLots] on its own, which promotes
+     * anything under 0.01 back up to 0.01 -- so a 0.01 position became three
+     * 0.01 orders. 0.03 lots went to the broker under a header that said 0.01,
+     * and on a R1,008 gold account that was R784 at risk against a 1% budget,
+     * with no rule anywhere comparing the two.
+     *
+     * Largest remainder instead: floor every slice, then hand the leftover
+     * steps to the slices the floor cut deepest, earliest target first on a
+     * tie. A leg that ends on zero carries no volume and is not sent -- see
+     * [TradePlan.fundedLegs].
+     */
+    private fun splitLots(total: Double, splits: List<Double>): List<Double> {
+        val steps = (total * 100).roundToInt()
+        val exact = splits.map { it * steps }
+        val shares = exact.map { floor(it).toInt() }.toMutableList()
+        var spare = steps - shares.sum()
+        for (i in exact.indices.sortedByDescending { exact[it] - shares[it] }) {
+            if (spare <= 0) break
+            shares[i]++
+            spare--
+        }
+        return shares.map { it / 100.0 }
+    }
 }
 
 // -- Confluence -------------------------------------------------------------
@@ -934,7 +979,24 @@ data class GuardrailOutcome(
     val detail: String,
     val severity: RuleSeverity,
     /** The measured figure, printed on the right of the row. */
-    val reading: String
+    val reading: String,
+    /**
+     * What would actually clear this rule, for the blocked screen.
+     *
+     * That screen used to say "rebalance toward the further targets" whatever
+     * had blocked it -- advice that fixes an R:R shortfall and nothing else.
+     * Told to a stale chart or an account too small for the stop, it sends the
+     * user to tap a button that cannot change the outcome.
+     */
+    val remedy: String? = null,
+    /** True when changing the allocation preset can clear this rule. */
+    val retunable: Boolean = false,
+    /**
+     * True when this failure makes every other figure meaningless -- the chart
+     * is old, or it is a chart of something else. Such a rule gets the blocked
+     * screen's summary to itself.
+     */
+    val voidsPlan: Boolean = false
 )
 
 /**
@@ -1002,9 +1064,24 @@ data class GuardrailReport(
 
 object Guardrails {
 
+    /** The smallest volume a broker accepts. Mirrors [TradePlanner]'s floor. */
+    private const val MIN_LOT = 0.01
+
+    /**
+     * How far the chart's entry may sit from the live quote before it is
+     * judged a chart of a different instrument. A current chart is within a
+     * percent or two of the market, and stale ones are blocked separately; ten
+     * percent is beyond any intraday move on anything this app trades, while
+     * gold against the Nasdaq or US30 against the Nasdaq is off by more than
+     * forty.
+     */
+    private const val MAX_PRICE_GAP = 0.10
+
     /**
      * @param calendarAvailable false when the economic feed could not be read.
      *        The event rule warns rather than passing in that case.
+     * @param balanceIsStandIn true when neither the calculator nor a linked
+     *        broker supplied a balance, so [plan] is sized against a placeholder.
      */
     fun evaluate(
         plan: TradePlan,
@@ -1012,7 +1089,8 @@ object Guardrails {
         config: GuardrailConfig,
         /** Null when the broker's trade history could not be read. Not zero. */
         consecutiveLosses: Int?,
-        calendarAvailable: Boolean
+        calendarAvailable: Boolean,
+        balanceIsStandIn: Boolean
     ): GuardrailReport {
         val minRrLabel = "1:" + trimmed(config.minBlendedRR)
 
@@ -1038,7 +1116,9 @@ object Guardrails {
                 detail = (reading.staleReason ?: "This chart is not current.") +
                     " Take a fresh screenshot and scan again.",
                 severity = RuleSeverity.BLOCK,
-                reading = "stale"
+                reading = "stale",
+                remedy = "Open your terminal, screenshot the same pair as it stands now, and scan that.",
+                voidsPlan = true
             )
             // An unchecked clock is not a clock that said "now". Warns rather
             // than passing, the same rule the calendar and the loss streak
@@ -1057,6 +1137,108 @@ object Guardrails {
             )
         }
 
+        /**
+         * Is the chart a picture of the instrument being traded?
+         *
+         * The label check beside the score only warns, and only when the chart
+         * prints a label. On 2026-10-01 a gold chart -- entries around 4180 --
+         * was scanned with NAS100 selected, where the Nasdaq trades near 25,000,
+         * and a NAS100 sell with its stop at 4183.5 reached the executor. A
+         * deleted broker account is what stopped it, not the app. Price is the
+         * one thing on a chart that cannot be mislabelled, so it is checked
+         * against the selected instrument's live quote.
+         */
+        val symbol = plan.instrument.symbol
+        val live = plan.instrument.price.takeIf { it > 0.0 }
+        val scale = if (live == null) {
+            GuardrailOutcome(
+                title = "Chart is " + symbol,
+                detail = "No live " + symbol + " price - could not confirm the chart shows this instrument",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+        } else {
+            val gap = abs(plan.entry - live) / live
+            if (gap > MAX_PRICE_GAP) {
+                GuardrailOutcome(
+                    title = "Chart is " + symbol,
+                    detail = "The chart's entry " + plan.instrument.formatPrice(plan.entry) + " is " +
+                        trimmed(gap * 100) + "% from " + symbol + "'s live " +
+                        plan.instrument.formatPrice(live) + " - this is a chart of a different instrument.",
+                    severity = RuleSeverity.BLOCK,
+                    reading = trimmed(gap * 100) + "% off",
+                    remedy = "Go back and select the pair this chart actually shows, or screenshot the " +
+                        symbol + " chart and scan that.",
+                    voidsPlan = true
+                )
+            } else {
+                GuardrailOutcome(
+                    title = "Chart is " + symbol,
+                    detail = "Entry is within " + trimmed(gap * 100) + "% of the live " +
+                        plan.instrument.formatPrice(live),
+                    severity = RuleSeverity.PASS,
+                    reading = "match"
+                )
+            }
+        }
+
+        /**
+         * Does the stop cost what the user said they would lose?
+         *
+         * The rule this screen was missing. Sizing floors to the 0.01 minimum and
+         * cannot go below it, so on a small account a wide stop risks many times
+         * the budget -- and nothing compared the two. A R1,008 gold account at 1%
+         * was shown a three-order plan risking R784, 78% of the balance, with
+         * every rule green. A BLOCK because it is the user's own number: a
+         * "proceed anyway" here is the account.
+         */
+        val riskLabel = trimmed(plan.riskPercent) + "%"
+        val budget = when {
+            // Sized against the placeholder, every lot on the plan describes an
+            // account the user does not have.
+            balanceIsStandIn -> GuardrailOutcome(
+                title = "Risk <= " + riskLabel + " of balance",
+                detail = "No balance to size against - this plan assumes a stand-in " +
+                    plan.money(plan.balance) + " account",
+                severity = RuleSeverity.BLOCK,
+                reading = "no balance",
+                remedy = "Type your real balance into the trade calculator, or link your broker, then scan again."
+            )
+            plan.actualRisk > plan.riskAmount * 1.001 -> {
+                val share = plan.actualRisk / plan.balance * 100
+                val atMinimum = plan.totalLots <= MIN_LOT + 1e-9
+                // The widest stop the budget pays for at the minimum lot.
+                val maxStop = plan.riskAmount / (MIN_LOT * plan.instrument.pipValuePerLot)
+                GuardrailOutcome(
+                    title = "Risk <= " + riskLabel + " of balance",
+                    detail = String.format("%.2f", plan.totalLots) + " lots risks " +
+                        plan.money(plan.actualRisk) + " on this stop - " + trimmed(share) +
+                        "% of your " + plan.money(plan.balance) + " balance",
+                    severity = RuleSeverity.BLOCK,
+                    reading = trimmed(share) + "%",
+                    remedy = if (atMinimum) {
+                        "0.01 lots is the smallest order a broker accepts, and on this " +
+                            trimmed(plan.stopPips) + "-pip stop it already risks more than your " +
+                            riskLabel + ". At this balance, " + riskLabel + " covers a stop of about " +
+                            trimmed(maxStop) + " pips on " + symbol + ". This setup does not fit this account."
+                    } else {
+                        "This plan is larger than your risk setting allows. Scan again once the calculator matches your account."
+                    }
+                )
+            }
+            else -> GuardrailOutcome(
+                title = "Risk <= " + riskLabel + " of balance",
+                detail = "Risks " + plan.money(plan.actualRisk) + " - " +
+                    trimmed(plan.actualRisk / plan.balance * 100) + "% of balance",
+                severity = RuleSeverity.PASS,
+                reading = trimmed(plan.actualRisk / plan.balance * 100) + "%"
+            )
+        }
+
+        // Rebalancing only helps when every target is funded. On a position too
+        // small to reach them all, the shortfall is volume, not allocation.
+        val allFunded = plan.fundedLegs.size == plan.legs.size
+        val nearest = plan.fundedLegs.firstOrNull()
         val rr = GuardrailOutcome(
             title = "Blended R:R >= " + minRrLabel,
             detail = if (plan.blendedRR >= config.minBlendedRR) {
@@ -1067,7 +1249,15 @@ object Guardrails {
             // A blocker, not a warning: this is the rule the whole ladder exists
             // to satisfy, so a plan that fails it is not a trade with a caveat.
             severity = if (plan.blendedRR >= config.minBlendedRR) RuleSeverity.PASS else RuleSeverity.BLOCK,
-            reading = plan.rewardLabel
+            reading = plan.rewardLabel,
+            remedy = if (allFunded || nearest == null) {
+                "Rebalance toward the further targets to lift the blended reward past your minimum."
+            } else {
+                String.format("%.2f", plan.totalLots) + " lots only reaches " + plan.fundedLegs.size +
+                    " of the " + plan.legs.size + " targets, and the nearest pays 1:" +
+                    trimmed(nearest.rMultiple) + ". The further targets need more volume than your risk setting buys."
+            },
+            retunable = allFunded
         )
 
         // Measured against the chart's own candles rather than a pip count, for
@@ -1150,7 +1340,7 @@ object Guardrails {
             )
         }
 
-        return GuardrailReport(listOf(freshness, rr, stop, streak, event))
+        return GuardrailReport(listOf(freshness, scale, budget, rr, stop, streak, event))
     }
 }
 

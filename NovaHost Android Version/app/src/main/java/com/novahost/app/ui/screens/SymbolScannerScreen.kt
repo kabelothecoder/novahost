@@ -321,7 +321,7 @@ fun SymbolScannerScreen(
     }
     // Re-evaluated when the rules change, so saving in the sheet re-scores the
     // plan behind it immediately -- including flipping it to BLOCKED.
-    val guardrails = remember(plan, reading, calendarAvailable, guardrailConfig, lossStreak) {
+    val guardrails = remember(plan, reading, calendarAvailable, guardrailConfig, lossStreak, balanceIsStandIn, isSample) {
         val r = reading
         val p = plan
         if (r == null || p == null) null
@@ -332,7 +332,10 @@ fun SymbolScannerScreen(
             // Read from the broker's closed trades by `broker-history`, and null
             // when that could not be established. Null warns; it does not pass.
             consecutiveLosses = lossStreak,
-            calendarAvailable = calendarAvailable
+            calendarAvailable = calendarAvailable,
+            // The sample is a preview that never sends; judging it against a
+            // balance nobody has typed yet would block the tour, not a trade.
+            balanceIsStandIn = balanceIsStandIn && !isSample
         )
     }
 
@@ -603,7 +606,9 @@ fun SymbolScannerScreen(
                     val confirmed = plan
                     scope.launch {
                         executionNote = "Sending..."
-                        val results = confirmed.legs.map { leg ->
+                        // Funded legs only. A leg the position was too small to
+                        // reach is zero lots, and zero is not an order.
+                        val results = confirmed.fundedLegs.map { leg ->
                             MetaAPIManager.executeTrade(
                                 context = context,
                                 pair = confirmed.instrument.symbol.replace("/", ""),
@@ -1593,7 +1598,7 @@ private fun ScanPlanState(
                         .padding(horizontal = 11.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        plan.legs.size.toString() + " ORDERS",
+                        plan.fundedLegs.size.toString() + " ORDERS",
                         color = ScanBuy,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
@@ -1724,12 +1729,15 @@ private fun PlanTable(plan: TradePlan) {
                 }
                 TableCell("1:" + trimmed(leg.rMultiple), 0.8f)
                 TableCell((leg.allocation * 100).toInt().toString() + "%", 0.9f)
-                TableCell(String.format("%.2f", leg.lots), 0.9f, end = true)
+                // A leg the position cannot reach is shown, not hidden: the user
+                // should see that 0.01 lots buys one target, not three.
+                val funded = leg.lots > 0.0
+                TableCell(if (funded) String.format("%.2f", leg.lots) else "—", 0.9f, end = true)
                 TableCell(
-                    "+" + plan.money(leg.estimatedPl),
+                    if (funded) "+" + plan.money(leg.estimatedPl) else "not sent",
                     1.2f,
                     end = true,
-                    tint = ScanBuy
+                    tint = if (funded) ScanBuy else HomeTextFaint
                 )
             }
         }
@@ -1918,7 +1926,7 @@ private fun ScanContextState(
         ) {
             ScanPrimaryCta(
                 label = if (isSample) "PREVIEW ONLY" else
-                    "EXECUTE " + plan.legs.size + " ORDERS · " + String.format("%.2f", plan.totalLots),
+                    "EXECUTE " + plan.fundedLegs.size + " ORDERS · " + String.format("%.2f", plan.totalLots),
                 icon = if (isSample) Icons.Rounded.Lock else Icons.Rounded.Bolt,
                 fill = ScanBuy,
                 enabled = !isSample,
@@ -2230,6 +2238,10 @@ private fun ScanBlockedState(
                 }
             }
 
+            // The first blocker leads, in the order Guardrails declares them --
+            // chart, instrument, budget, then R:R -- so the advice answers the
+            // rule that matters most rather than always being about targets.
+            val lead = report.blockers.firstOrNull()
             Spacer(Modifier.height(12.dp))
             ScanCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -2252,27 +2264,33 @@ private fun ScanBlockedState(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "Rebalance toward the further targets to lift the blended reward past your minimum.",
+                            lead?.remedy
+                                ?: "Rebalance toward the further targets to lift the blended reward past your minimum.",
                             color = HomeTextDim,
                             fontSize = 10.sp,
                             lineHeight = 15.sp,
                             modifier = Modifier.padding(top = 3.dp)
                         )
-                        Spacer(Modifier.height(9.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(accent.copy(alpha = 0.16f))
-                                .border(1.dp, accent.copy(alpha = 0.44f), CircleShape)
-                                .clickable(onClick = onRetune)
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                "Retune targets",
-                                color = HomeTextPrimary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        // Only where a different split can clear the block. On a
+                        // stale chart or an account too small for the stop, the
+                        // button would be a promise the arithmetic cannot keep.
+                        if (lead?.retunable == true) {
+                            Spacer(Modifier.height(9.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(accent.copy(alpha = 0.16f))
+                                    .border(1.dp, accent.copy(alpha = 0.44f), CircleShape)
+                                    .clickable(onClick = onRetune)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    "Retune targets",
+                                    color = HomeTextPrimary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -2306,7 +2324,7 @@ private fun blockedSummary(report: GuardrailReport): String {
     // would invite the user to override something that cannot be overridden by
     // retuning. It gets the whole summary to itself however many other rules
     // also failed, because every one of those judged the same dead screenshot.
-    report.blockers.firstOrNull { it.title == "Chart is current" }?.let { return it.detail }
+    report.blockers.firstOrNull { it.voidsPlan }?.let { return it.detail }
 
     val failed = report.blockers.size + report.warnings.size
     return if (failed == 1) {
@@ -2376,7 +2394,7 @@ private fun ExecuteReviewSheet(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                plan.legs.size.toString() + " " + plan.entryType.label.uppercase() + " orders on " +
+                plan.fundedLegs.size.toString() + " " + plan.entryType.label.uppercase() + " orders on " +
                     plan.instrument.symbol + " · " + plan.direction.label + " · " +
                     String.format("%.2f", plan.totalLots) + " lots total",
                 color = HomeTextDim,
@@ -2430,6 +2448,7 @@ private fun ExecuteReviewSheet(
 
             Spacer(Modifier.height(18.dp))
             plan.legs.forEachIndexed { index, leg ->
+                if (leg.lots <= 0.0) return@forEachIndexed
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -2476,7 +2495,7 @@ private fun ExecuteReviewSheet(
             ScanNote(
                 icon = Icons.Rounded.GppMaybe,
                 text = "Worst case on this plan is " + plan.money(plan.actualRisk) +
-                    " if the stop fills on all " + plan.legs.size + " legs.",
+                    " if the stop fills on all " + plan.fundedLegs.size + " legs.",
                 tint = ScanSell,
                 background = ScanSell.copy(alpha = 0.05f),
                 borderColor = ScanSell.copy(alpha = 0.28f),
@@ -2485,7 +2504,7 @@ private fun ExecuteReviewSheet(
 
             Spacer(Modifier.height(20.dp))
             ScanPrimaryCta(
-                label = "SEND " + plan.legs.size + " ORDERS",
+                label = "SEND " + plan.fundedLegs.size + " ORDERS",
                 icon = Icons.Rounded.Bolt,
                 fill = ScanBuy,
                 onClick = onConfirm
