@@ -42,7 +42,12 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}))
     const { license_key, account_number, password, server, platform, region_name, symbol_suffix, account_type } = body
 
-    if (!license_key || !account_number || !password || !server) {
+    // `action: 'servers'` is a read-only lookup of the server names MetaCopier
+    // can dial, for autocomplete and "did you mean". It needs a licence and
+    // nothing else -- no credentials, and it never creates or touches an account.
+    const serversOnly = body?.action === 'servers'
+
+    if (!license_key || (!serversOnly && (!account_number || !password || !server))) {
       return json({
         success: false,
         error: 'Account number, password and server are all required.',
@@ -79,9 +84,84 @@ Deno.serve(async (req: Request) => {
     }
 
     const wantPlatform = String(platform ?? 'MT5').toUpperCase().replace(/[^A-Z0-9]/g, '')
-    const finalServer = String(server).trim()
-    const wantLogin = String(account_number).replace(/\s+/g, '')
+    const typedServer = String(server ?? '').trim()
+    const wantLogin = String(account_number ?? '').replace(/\s+/g, '')
     const normalize = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+    /**
+     * Every server name MetaCopier knows for this platform, or null when the
+     * list cannot be read. Callers must treat null as "unknown", never as
+     * "no servers": a lookup failure must not block a connect that would work.
+     */
+    const fetchServerList = async (): Promise<string[] | null> => {
+      try {
+        const r = await fetch(
+          `${METACOPIER_BASE}/rest/api/v1/brokers/${wantPlatform === 'MT4' ? 'mt4' : 'mt5'}/all`,
+          { headers: mcHeaders },
+        )
+        if (!r.ok) {
+          console.warn(`[MetaCopier] server list ${r.status}: ${await r.text()}`)
+          return null
+        }
+        const raw = await r.json()
+        return Array.isArray(raw) ? raw.map((s) => String(s)) : null
+      } catch (e) {
+        console.warn(`[MetaCopier] server list failed: ${(e as Error).message}`)
+        return null
+      }
+    }
+
+    /**
+     * The closest known servers to what the user typed, best first.
+     *
+     * Restricted to the same broker -- the text before the first "-", so
+     * "XMGlobal" for "XMGlobal-MT5 20" -- because a suggestion from a different
+     * broker is worse than none. Ranked by how long a prefix they share once
+     * spacing and case are ignored. Only used for names that fit no family the
+     * broker has; a missing server NUMBER is handled separately, because the
+     * neighbouring number is a different server, not a correction.
+     */
+    const suggestServers = (list: string[], typed: string, max = 6): string[] => {
+      const t = normalize(typed)
+      const brand = normalize(typed.split('-')[0])
+      if (brand.length < 2) return []
+      const shared = (s: string) => {
+        const n = normalize(s)
+        let i = 0
+        while (i < n.length && i < t.length && n[i] === t[i]) i++
+        return i * 100 - Math.abs(n.length - t.length)
+      }
+      return list
+        .filter((s) => normalize(s).startsWith(brand))
+        .sort((a, b) => shared(b) - shared(a) || a.localeCompare(b))
+        .slice(0, max)
+    }
+
+    if (serversOnly) {
+      const list = await fetchServerList()
+      if (!list) return json({ success: false, code: 'SERVER_LIST_UNAVAILABLE', error: 'Could not load the server list.' }, 502)
+      const q = String(body?.query ?? '').trim()
+      const servers = q
+        ? list.filter((s) => normalize(s).includes(normalize(q))).slice(0, 50)
+        : list.slice(0, 50)
+      return json({ success: true, platform: wantPlatform, total: list.length, servers })
+    }
+
+    // MetaCopier matches loginServer by its exact spelling, but users copy it
+    // from a phone screen: "XMGlobal-MT520" for "XMGlobal-MT5 20", or the wrong
+    // case. When exactly one known server is the same name once spacing, case
+    // and punctuation are ignored, that IS the server they meant -- send its
+    // real spelling. Anything less certain is left as typed, so a lookup that
+    // fails or a list that does not cover the broker changes nothing.
+    let finalServer = typedServer
+    const knownServers = await fetchServerList()
+    if (knownServers && !knownServers.includes(typedServer)) {
+      const same = knownServers.filter((s) => normalize(s) === normalize(typedServer))
+      if (same.length === 1) {
+        console.log(`[MetaCopier] server "${typedServer}" resolved to known spelling "${same[0]}"`)
+        finalServer = same[0]
+      }
+    }
 
     /**
      * MetaCopier reports faults as bracketed codes, and many of them carry
@@ -200,9 +280,15 @@ Deno.serve(async (req: Request) => {
      * failure mode is "the cap stays full", never "everyone is disconnected".
      */
     const reclaimOrphanAccounts = async (): Promise<number> => {
+      // Pulls only the one metadata key this needs, not the whole jsonb
+      // column. `licenses.metadata` carries a multi-megabyte base64 avatar
+      // on ~all 200+ rows (~180MB total) -- selecting the full column here
+      // forced PostgREST to detoast and serialize every one of those blobs
+      // just to read a 36-character account id, which is what was timing
+      // out (Postgres error 57014) on every single reclaim attempt.
       const { data: live, error: liveErr } = await novaHost
         .from('licenses')
-        .select('license_key, status, metadata')
+        .select('license_key, status, metacopier_account_id:metadata->>metacopier_account_id')
         .neq('status', 'revoked')
 
       if (liveErr || !Array.isArray(live)) {
@@ -212,8 +298,8 @@ Deno.serve(async (req: Request) => {
 
       const keepIds = new Set<string>()
       const keepAliases = new Set<string>()
-      for (const l of live) {
-        const id = String((l.metadata as Record<string, unknown> | null)?.metacopier_account_id ?? '').trim()
+      for (const l of live as { license_key?: string; metacopier_account_id?: string }[]) {
+        const id = String(l.metacopier_account_id ?? '').trim()
         if (id) keepIds.add(id)
         const k = String(l.license_key ?? '').trim().toUpperCase()
         if (k) keepAliases.add(`NOVAHOST ${k}`)
@@ -364,11 +450,26 @@ Deno.serve(async (req: Request) => {
         // {"errors":["[WRONG_CREDENTIALS]"]}. Match on the code rather than on
         // loose substrings of the raw body.
         const codes = codesIn(detail)
+
+        // Keep the raw refusal where an operator can query it: users only see a
+        // generic message and function logs are not reachable from our tooling.
+        // Best-effort and credential-free -- the body is MetaCopier's reply, not
+        // our request, and a failure here must never change the response.
+        try {
+          await novaHost.from('provider_refusals').insert({
+            source: 'metacopier-connect',
+            http_status: createRes.status,
+            code: codes[0] ?? null,
+            detail: detail.slice(0, 2000),
+            context: { platform: wantPlatform, server: finalServer, type: matchedType.name, region: matchedRegion.name },
+          })
+        } catch (_) { /* logging only */ }
         const has = (...names: string[]) => names.some((n) => codes.includes(n))
 
         let status = 400
         let code = codes[0] ?? 'CONNECT_FAILED'
         let message = 'Could not connect this trading account. Check the login, password and server.'
+        let suggestions: string[] = []
 
         if (has('PLEASE_FUND_YOUR_PROJECT')) {
           status = 502
@@ -409,14 +510,45 @@ Deno.serve(async (req: Request) => {
             `${wantPlatform === 'MT5' ? 'MT4' : 'MT5'}, switch the platform tab and try again.`
         } else if (codes.some((c) => c.includes('SERVER'))) {
           code = 'UNKNOWN_SERVER'
-          message =
-            `"${finalServer}" was not recognised as a ${wantPlatform} server. Copy it exactly ` +
-            `as it appears in MetaTrader under Tools -> Options -> Server.`
+          // "Copy it exactly" is no help when they already did: a server can be
+          // real at the broker and still missing from MetaCopier's catalogue.
+          // Seen 2026-10-07: it lists XMGlobal-MT5, 2 and 4-18, but not
+          // "XMGlobal-MT5 20", and a correctly typed name was rejected over and over.
+          //
+          // A numbered server is NOT a typo of its neighbour. An account lives on
+          // one server, so suggesting "XMGlobal-MT5 2" to someone on "20" only
+          // trades this error for a wrong-password one. When the broker's
+          // family is known and only this number is missing, say so plainly and
+          // suggest nothing. Suggestions are only for a name that does not fit
+          // any family the broker has, which is a real typo.
+          const stem = (s: string) => normalize(s).replace(/\d+$/, '')
+          const family = knownServers
+            ? knownServers.filter((s) => stem(s) === stem(finalServer))
+            : []
+          if (family.length) {
+            code = 'SERVER_NOT_SUPPORTED'
+            message =
+              `"${finalServer}" is your broker's server, but our trading provider cannot connect ` +
+              `to that one yet. Do not switch to a different server number, because your account ` +
+              `only works on this one. Please contact support so we can get it added.`
+            console.error(
+              `[MetaCopier] server "${finalServer}" missing from provider catalogue; ` +
+              `known in family: ${family.join(', ')}`
+            )
+          } else {
+            suggestions = knownServers ? suggestServers(knownServers, finalServer) : []
+            message = suggestions.length
+              ? `"${finalServer}" is not a ${wantPlatform} server we can connect to. ` +
+                `Did you mean: ${suggestions.join(', ')}? Check the exact name in MetaTrader ` +
+                `under Tools -> Options -> Server.`
+              : `"${finalServer}" was not recognised as a ${wantPlatform} server. Copy it exactly ` +
+                `as it appears in MetaTrader under Tools -> Options -> Server.`
+          }
         }
 
         // Broker credentials are never echoed back to the client.
         return {
-          errorResponse: json({ success: false, code, error: message, details: detail }, status),
+          errorResponse: json({ success: false, code, error: message, suggestions, details: detail }, status),
           limited: code === 'PROVIDER_LIMIT',
         }
       }
