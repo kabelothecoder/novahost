@@ -64,6 +64,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Wrong codes tolerated on one ticket before it is dead. */
 const MAX_CODE_ATTEMPTS = 5;
 
+/** How long a verified ticket lives while it waits for an admin and a payment. */
+const APPROVAL_WINDOW_HOURS = 72;
+
 /**
  * SHA-256 of a move code, to compare against the stored hash.
  *
@@ -360,17 +363,9 @@ serve(async (req: Request) => {
       }
 
       // Proof of mailbox control. Without it, R150 evicts a stranger.
-      if (!moveCode) {
-        return json({
-          route: "MOVE_CODE_REQUIRED",
-          move: eligibility,
-          message: "We'll email a 6-digit code to confirm this licence is yours.",
-        });
-      }
-
       const { data: ticket, error: ticketErr } = await novaHost
         .from("device_move_tickets")
-        .select("id, code_hash, attempts, expires_at")
+        .select("id, code_hash, attempts, verified_at, approval_status, decision_note")
         .eq("email", cleanEmail)
         .eq("target_device_id", androidId)
         .is("consumed_at", null)
@@ -385,37 +380,88 @@ serve(async (req: Request) => {
         return json({
           route: "MOVE_CODE_REQUIRED",
           move: eligibility,
-          message: "That code has expired. Request a new one.",
+          message: moveCode
+            ? "That code has expired. Request a new one."
+            : "We'll email a 6-digit code to confirm this licence is yours.",
         });
       }
 
-      if (ticket.attempts >= MAX_CODE_ATTEMPTS) {
+      // The code is checked once. A verified ticket is then waiting on an
+      // admin, and the app polls this same endpoint for the answer -- making the
+      // user retype a code they already used to ask "is it approved yet?" would
+      // be absurd, and the ticket is bound to this handset and this mailbox.
+      if (!ticket.verified_at) {
+        if (!moveCode) {
+          return json({
+            route: "MOVE_CODE_REQUIRED",
+            move: eligibility,
+            message: "Enter the 6-digit code we emailed you.",
+          });
+        }
+
+        if (ticket.attempts >= MAX_CODE_ATTEMPTS) {
+          return json({
+            route: "MOVE_CODE_REQUIRED",
+            move: eligibility,
+            message: "Too many wrong codes. Request a new one.",
+          });
+        }
+
+        if (await sha256Hex(moveCode) !== ticket.code_hash) {
+          await novaHost
+            .from("device_move_tickets")
+            .update({ attempts: ticket.attempts + 1 })
+            .eq("id", ticket.id);
+
+          return json({
+            route: "MOVE_CODE_INVALID",
+            move: eligibility,
+            message: `That code is not right. ${MAX_CODE_ATTEMPTS - ticket.attempts - 1} tries left.`,
+          });
+        }
+
+        // Verified. The ticket's life stretches from minutes to days: it now has
+        // to survive an admin's decision and a PayFast payment, not just an
+        // email round trip. The webhook consumes it when the money lands, so
+        // abandoning the Payfast page and coming back does not cost a new code.
+        await novaHost
+          .from("device_move_tickets")
+          .update({
+            verified_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + APPROVAL_WINDOW_HOURS * 60 * 60 * 1000).toISOString(),
+          })
+          .eq("id", ticket.id);
+      }
+
+      // ---- Admin approval ----------------------------------------------------
+      // Every move is reviewed. Nothing below this line is reachable until a
+      // person has approved this ticket in the admin console, and the webhook
+      // checks the same flag, so skipping this screen buys nothing.
+      if (ticket.approval_status === "pending") {
+        return json({
+          route: "MOVE_PENDING_APPROVAL",
+          move: eligibility,
+          message: "Your move request has been sent for review. You will get a reply shortly.",
+        });
+      }
+
+      if (ticket.approval_status === "rejected") {
+        return json({
+          route: "MOVE_REJECTED",
+          move: eligibility,
+          message: ticket.decision_note
+            ? `Your move request was declined: ${ticket.decision_note}`
+            : "Your move request was declined. Contact support if you think this is a mistake.",
+        });
+      }
+
+      if (ticket.approval_status !== "approved") {
         return json({
           route: "MOVE_CODE_REQUIRED",
           move: eligibility,
-          message: "Too many wrong codes. Request a new one.",
+          message: "That request is no longer valid. Start the move again.",
         });
       }
-
-      if (await sha256Hex(moveCode) !== ticket.code_hash) {
-        await novaHost
-          .from("device_move_tickets")
-          .update({ attempts: ticket.attempts + 1 })
-          .eq("id", ticket.id);
-
-        return json({
-          route: "MOVE_CODE_INVALID",
-          move: eligibility,
-          message: `That code is not right. ${MAX_CODE_ATTEMPTS - ticket.attempts - 1} tries left.`,
-        });
-      }
-
-      // Verified, not consumed. The webhook consumes it when the money lands,
-      // so abandoning the Payfast page and coming back does not cost a new code.
-      await novaHost
-        .from("device_move_tickets")
-        .update({ verified_at: new Date().toISOString() })
-        .eq("id", ticket.id);
 
       product = "REACTIVATE";
       route = "ACTIVE_NEW_DEVICE";

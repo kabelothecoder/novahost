@@ -115,6 +115,8 @@ object Entitlements {
      * @param route       ACTIVE_SAME_DEVICE / SCANNER_OWNED mean already paid.
      *                    MOVE_CODE_REQUIRED / MOVE_CODE_INVALID / MOVE_COOLDOWN /
      *                    MOVE_LIMIT_REACHED are the device-move refusals.
+     *                    MOVE_PENDING_APPROVAL means the code was accepted and an
+     *                    admin has not answered yet; MOVE_REJECTED means they said no.
      */
     data class Checkout(
         val route: String,
@@ -124,11 +126,20 @@ object Entitlements {
         val move: MoveStatus? = null
     )
 
-    /** The result of asking for a move code by email. */
+    /**
+     * The result of asking for a move code by email.
+     *
+     * @param approval  set when this handset already has a verified request in
+     *                  flight (no new code was sent): "pending" or "approved".
+     * @param rejected  an admin declined this licence's move recently, so it
+     *                  cannot ask again yet. [message] says why.
+     */
     data class MoveRequest(
         val sent: Boolean,
         val message: String?,
-        val code: String?
+        val code: String?,
+        val approval: String? = null,
+        val rejected: Boolean = false
     )
 
     // ── Wire types ─────────────────────────────────────────────────────────
@@ -194,7 +205,8 @@ object Entitlements {
     @Serializable
     private data class MoveCodeRequest(
         @SerialName("email") val email: String,
-        @SerialName("android_id") val android_id: String
+        @SerialName("android_id") val android_id: String,
+        @SerialName("reason") val reason: String
     )
 
     @Serializable
@@ -203,7 +215,9 @@ object Entitlements {
         val sent: Boolean = false,
         val message: String? = null,
         val error: String? = null,
-        val code: String? = null
+        val code: String? = null,
+        @SerialName("already_requested") val alreadyRequested: Boolean = false,
+        val approval: String? = null
     )
 
     // ── Calls ──────────────────────────────────────────────────────────────
@@ -289,8 +303,11 @@ object Entitlements {
      * Step one of moving a paid licence onto this handset. The code proves
      * whoever is paying can read the mailbox the licence belongs to -- without
      * it, R150 would buy the eviction of a stranger.
+     *
+     * [reason] is why the licence is changing handset. Every move is reviewed
+     * by an admin who decides on it, so the server refuses a request without one.
      */
-    suspend fun requestMove(context: Context, email: String): MoveRequest {
+    suspend fun requestMove(context: Context, email: String, reason: String): MoveRequest {
         val cleaned = email.trim().lowercase()
         if (cleaned.isEmpty()) {
             return MoveRequest(false, "Enter the email you paid with.", null)
@@ -301,7 +318,8 @@ object Entitlements {
                 MoveCodeRequest.serializer(),
                 MoveCodeRequest(
                     email = cleaned,
-                    android_id = DeviceSecurityHelper.getDeviceId(context)
+                    android_id = DeviceSecurityHelper.getDeviceId(context),
+                    reason = reason.trim()
                 )
             )
 
@@ -315,7 +333,9 @@ object Entitlements {
             MoveRequest(
                 sent = decoded.success && decoded.sent,
                 message = decoded.message ?: decoded.error,
-                code = decoded.code
+                code = decoded.code,
+                approval = decoded.approval.takeIf { decoded.success && decoded.alreadyRequested },
+                rejected = decoded.code == "MOVE_REJECTED"
             )
 
         } catch (e: Exception) {
@@ -333,7 +353,9 @@ object Entitlements {
      * back the same way with a MOVE_* route -- those are answers, not errors,
      * and each needs its own sentence in front of the user.
      *
-     * @param moveCode the six digits from [requestMove]. Only a REACTIVATE needs one.
+     * @param moveCode the six digits from [requestMove]. Only the FIRST REACTIVATE
+     *                 call needs one: once the server has accepted it, the same
+     *                 call with no code is how the app asks "approved yet?".
      */
     suspend fun checkout(
         context: Context,

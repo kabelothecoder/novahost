@@ -14,6 +14,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,8 +36,14 @@ enum class GateStage {
     CHECKING,
     /** The server answered and the answer was no. [GateState.message] says why. */
     DENIED,
+    /** Step one of a device move: the user is writing why the licence is moving. */
+    MOVE_REASON_ENTRY,
     /** A move code has been emailed; waiting for the user to type it in. */
     MOVE_CODE_ENTRY,
+    /** Code accepted; an admin has to approve the move before it can be paid for. */
+    MOVE_PENDING,
+    /** An admin approved the move; the user can now go on to pay. */
+    MOVE_APPROVED,
     /** Checkout URL is ready; the browser is about to open. */
     CHECKOUT_READY,
     /** Back from Payfast, polling for the ITN to land. */
@@ -270,7 +277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun buyAppAccess(email: String) {
         if (_appGate.value.reason == "device_mismatch") {
-            startDeviceMove(email)
+            beginDeviceMove(email)
             return
         }
 
@@ -308,16 +315,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Device move (R150, once-off) ───────────────────────────────────────
 
+    /** Moves can be reviewed for days; polling this often costs nothing and answers fast. */
+    private val movePollMs = 15_000L
+    private var movePollJob: Job? = null
+
+    private fun stopMovePolling() {
+        movePollJob?.cancel()
+        movePollJob = null
+    }
+
     /**
-     * Step one of the move: ask the server to email a six-digit code.
+     * Opens the move: first the reason.
+     *
+     * Every device move is reviewed by an admin, who decides on what the user
+     * says here, so it is asked before the code is emailed rather than after.
+     */
+    fun beginDeviceMove(email: String) {
+        val cleaned = email.trim().lowercase().ifEmpty { _userEmail.value }
+        if (cleaned.isEmpty()) {
+            _appGate.value = GateState(GateStage.DENIED, "Enter the email you paid with.")
+            return
+        }
+        _userEmail.value = cleaned
+        _appGate.value = GateState(
+            stage = GateStage.MOVE_REASON_ENTRY,
+            reason = "device_mismatch",
+            move = _appGate.value.move
+        )
+    }
+
+    /**
+     * Step two of the move: send the reason and ask the server to email a code.
      *
      * Nothing is charged here. The code proves the person paying can read the
      * mailbox the licence belongs to, which is what stops R150 from buying the
      * eviction of a stranger -- both the target email and the target handset
      * otherwise travel through the browser under the payer's control.
      */
-    fun startDeviceMove(email: String) {
-        val cleaned = email.trim().lowercase().ifEmpty { _userEmail.value }
+    fun startDeviceMove(reason: String) {
+        val cleaned = _userEmail.value.ifEmpty { Entitlements.savedEmail(getApplication()) }
         if (cleaned.isEmpty()) {
             _appGate.value = GateState(GateStage.DENIED, "Enter the email you paid with.")
             return
@@ -327,23 +363,150 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val keepMove = _appGate.value.move
             _appGate.value = GateState(GateStage.CHECKING, reason = "device_mismatch", move = keepMove)
 
-            val request = Entitlements.requestMove(getApplication(), cleaned)
+            val request = Entitlements.requestMove(getApplication(), cleaned, reason)
 
-            _appGate.value = if (request.sent) {
-                _userEmail.value = cleaned
-                GateState(
-                    stage = GateStage.MOVE_CODE_ENTRY,
-                    message = request.message ?: "We emailed you a 6-digit code.",
+            _appGate.value = when {
+                request.sent -> {
+                    _userEmail.value = cleaned
+                    GateState(
+                        stage = GateStage.MOVE_CODE_ENTRY,
+                        message = request.message ?: "We emailed you a 6-digit code.",
+                        reason = "device_mismatch",
+                        move = keepMove
+                    )
+                }
+
+                // This handset already has a verified request in flight: there
+                // is no code to type, only an answer to wait for.
+                request.approval == "approved" -> GateState(
+                    stage = GateStage.MOVE_APPROVED,
+                    message = request.message,
                     reason = "device_mismatch",
                     move = keepMove
                 )
-            } else {
-                GateState(
+
+                request.approval == "pending" -> {
+                    startMovePolling()
+                    GateState(
+                        stage = GateStage.MOVE_PENDING,
+                        message = request.message,
+                        reason = "device_mismatch",
+                        move = keepMove
+                    )
+                }
+
+                // A refused reason (too short) goes back to the field, not the gate.
+                request.code == "REASON_REQUIRED" ->
+                    GateState(
+                        stage = GateStage.MOVE_REASON_ENTRY,
+                        message = request.message,
+                        reason = "device_mismatch",
+                        move = keepMove
+                    )
+
+                else -> GateState(
                     stage = GateStage.DENIED,
                     message = request.message ?: "Could not start the move. Try again.",
                     reason = "device_mismatch",
                     move = keepMove
                 )
+            }
+        }
+    }
+
+    /**
+     * "Is it approved yet?" -- the same checkout call, with no code.
+     *
+     * The code is checked once; after that the ticket is the proof. [silent] is
+     * the background poll: it may move the screen to "approved" but never opens
+     * PayFast by itself, because a browser appearing unprompted is a jolt. A tap
+     * (not silent) goes straight to checkout when the answer is yes.
+     */
+    fun checkMoveStatus(silent: Boolean = false) {
+        val email = _userEmail.value.ifEmpty { Entitlements.savedEmail(getApplication()) }
+        if (email.isEmpty()) return
+
+        viewModelScope.launch {
+            val keepMove = _appGate.value.move
+            if (!silent) {
+                _appGate.value = GateState(GateStage.CHECKING, reason = "device_mismatch", move = keepMove)
+            }
+
+            val checkout = Entitlements.checkout(
+                getApplication(),
+                email,
+                Entitlements.Product.REACTIVATE
+            )
+
+            when {
+                checkout == null -> {
+                    // A dropped connection is not an answer. Stay where we were.
+                    if (!silent) {
+                        _appGate.value = GateState(
+                            GateStage.MOVE_PENDING,
+                            "Could not reach the server. Check your connection.",
+                            reason = "device_mismatch",
+                            move = keepMove
+                        )
+                        startMovePolling()
+                    }
+                }
+
+                checkout.route == "ACTIVE_SAME_DEVICE" -> {
+                    stopMovePolling()
+                    _isPremium.value = true
+                    _appGate.value = GateState(GateStage.GRANTED)
+                }
+
+                checkout.checkoutUrl != null -> {
+                    stopMovePolling()
+                    if (silent) {
+                        _appGate.value = GateState(
+                            GateStage.MOVE_APPROVED,
+                            "Your move is approved.",
+                            reason = "device_mismatch",
+                            move = keepMove
+                        )
+                    } else {
+                        prefs.edit().putString("pending_payment_email", email).apply()
+                        _appGate.value = GateState(GateStage.CHECKOUT_READY, checkout.message, checkout.checkoutUrl)
+                    }
+                }
+
+                checkout.route == "MOVE_PENDING_APPROVAL" -> {
+                    _appGate.value = GateState(
+                        GateStage.MOVE_PENDING,
+                        checkout.message,
+                        reason = "device_mismatch",
+                        move = checkout.move ?: keepMove
+                    )
+                    startMovePolling()
+                }
+
+                else -> {
+                    // Declined, expired, or no longer a move. Say so and stop asking.
+                    stopMovePolling()
+                    _appGate.value = GateState(
+                        GateStage.DENIED,
+                        checkout.message ?: "That move could not be continued.",
+                        reason = "device_mismatch",
+                        move = checkout.move ?: keepMove
+                    )
+                }
+            }
+        }
+    }
+
+    /** Polls while the screen is waiting on an admin. Ends itself on any other stage. */
+    private fun startMovePolling() {
+        stopMovePolling()
+        movePollJob = viewModelScope.launch {
+            while (_appGate.value.stage == GateStage.MOVE_PENDING ||
+                _appGate.value.stage == GateStage.CHECKING
+            ) {
+                delay(movePollMs)
+                if (_appGate.value.stage != GateStage.MOVE_PENDING) continue
+                checkMoveStatus(silent = true)
             }
         }
     }
@@ -397,6 +560,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 checkout.checkoutUrl != null ->
                     GateState(GateStage.CHECKOUT_READY, checkout.message, checkout.checkoutUrl)
 
+                // Code accepted. From here it is an admin's call, and the screen
+                // waits on it instead of offering a payment that would be refused.
+                checkout.route == "MOVE_PENDING_APPROVAL" -> {
+                    startMovePolling()
+                    GateState(
+                        GateStage.MOVE_PENDING,
+                        checkout.message,
+                        reason = "device_mismatch",
+                        move = checkout.move ?: keepMove
+                    )
+                }
+
                 // Wrong code, expired ticket, or too many tries: stay put.
                 checkout.route == "MOVE_CODE_INVALID" || checkout.route == "MOVE_CODE_REQUIRED" ->
                     GateState(
@@ -416,9 +591,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Drops out of code entry back to the gate, e.g. to try another email. */
+    /** Drops out of the move back to the gate, e.g. to try another email. */
     fun cancelDeviceMove() {
+        stopMovePolling()
         _appGate.value = GateState(GateStage.IDLE)
+    }
+
+    override fun onCleared() {
+        stopMovePolling()
+        super.onCleared()
     }
 
     // ── Chart scanner (R349, once-off) ─────────────────────────────────────

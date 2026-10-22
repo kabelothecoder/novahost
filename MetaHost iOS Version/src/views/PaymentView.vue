@@ -97,6 +97,24 @@
           </button>
         </div>
 
+        <!-- ── Every move is reviewed by an admin, who decides on this. ───────-->
+        <div v-if="isMove && !awaiting && !approved && !rejected" class="pay-code">
+          <label class="pay-code-label" for="pay-move-reason">Why are you moving?</label>
+          <textarea
+            id="pay-move-reason"
+            v-model="reason"
+            class="pay-reason-input"
+            rows="3"
+            :maxlength="REASON_MAX"
+            placeholder="e.g. My old phone broke and I bought a new one."
+            :disabled="busy"
+            @input="notice = ''"
+          ></textarea>
+          <p class="pay-code-help">
+            An admin reviews every device move before you pay, and replies shortly. Be specific.
+          </p>
+        </div>
+
         <!-- ── The move needs proof of mailbox control before it will take
              R150 and evict whoever is on the other handset. ──────────────-->
         <div v-if="needsCode" class="pay-code">
@@ -121,6 +139,20 @@
           <p class="pay-code-help">{{ codeHelp }}</p>
         </div>
 
+        <!-- ── Code accepted; waiting on the admin. ───────────────────────-->
+        <div v-if="awaiting" class="pay-code" role="status">
+          <p class="pay-code-label">Waiting for approval</p>
+          <p class="pay-wait-body">
+            Your request is with us. We'll email {{ email }} as soon as it's reviewed, and this
+            screen checks automatically. You won't be charged until it's approved.
+          </p>
+        </div>
+
+        <div v-if="approved" class="pay-code" role="status">
+          <p class="pay-code-label">Approved</p>
+          <p class="pay-wait-body">Your move is approved. Continue to pay and bind NovaHost to this device.</p>
+        </div>
+
         <Transition name="pay-note">
           <p v-if="notice" class="pay-notice" :class="{ 'pay-notice-bad': noticeBad }" role="status">
             <span>{{ notice }}</span>
@@ -132,7 +164,7 @@
             <span v-if="!busy">{{ ctaLabel }}</span>
             <span v-else class="pay-cta-busy">
               <span class="pay-spinner"></span>
-              <span>Opening checkout</span>
+              <span>{{ isMove && !approved ? 'Working' : 'Opening checkout' }}</span>
             </span>
           </NovaCta>
           <span v-if="!busy && canPay" class="pay-cta-gloss" aria-hidden="true"></span>
@@ -248,6 +280,17 @@ const moveCode = ref('')
 const codeSent = ref(false)
 const codeSending = ref(false)
 
+// A move is: reason → emailed code → admin review → pay. Exactly one of these
+// is true at a time once the code has been accepted.
+const REASON_MIN = 15
+const REASON_MAX = 500
+const reason = ref('')
+const awaiting = ref(false)  // code accepted, admin has not answered
+const approved = ref(false)  // admin said yes; the checkout URL is available
+const rejected = ref(false)  // admin said no
+
+const reasonValid = computed(() => reason.value.trim().length >= REASON_MIN)
+
 const title = computed(() => (isMove.value ? 'Move your licence.' : 'Get NovaHost.'))
 
 const body = computed(() => {
@@ -257,11 +300,20 @@ const body = computed(() => {
   return 'One once-off payment, no subscription. Your purchase binds to this device and stays yours.'
 })
 
-const ctaLabel = computed(() => (needsCode.value ? 'Confirm & continue' : 'Continue to secure checkout'))
+const ctaLabel = computed(() => {
+  if (awaiting.value) return 'Check status'
+  if (isMove.value && !approved.value) return needsCode.value ? 'Submit for approval' : 'Email me a code'
+  return 'Continue to secure checkout'
+})
 
 const canPay = computed(() => {
   if (!emailValid.value) return false
-  if (needsCode.value) return /^\d{6}$/.test(moveCode.value.trim())
+  if (isMove.value) {
+    if (rejected.value) return false
+    if (awaiting.value || approved.value) return true
+    if (needsCode.value) return /^\d{6}$/.test(moveCode.value.trim())
+    return reasonValid.value
+  }
   return !!selected.value
 })
 
@@ -344,6 +396,20 @@ async function startCheckout () {
         needsCode.value = true
         return say(data.message || 'That code is not right.', true)
 
+      case 'MOVE_PENDING_APPROVAL':
+        needsCode.value = false
+        awaiting.value = true
+        startPolling()
+        return say(data.message || 'Your move request is with us. You will hear back shortly.', false)
+
+      case 'MOVE_REJECTED':
+        needsCode.value = false
+        awaiting.value = false
+        approved.value = false
+        rejected.value = true
+        stopPolling()
+        return say(data.message || 'Your move request was declined.', true)
+
       default:
         return say(data.message || 'That purchase could not be started right now.', true)
     }
@@ -358,17 +424,92 @@ async function startCheckout () {
   }
 }
 
+// ── Waiting for the admin ──────────────────────────────────────────────────
+// The app cannot be pushed to, so the answer is fetched. Quiet by design: it
+// asks the same question a tap on "Check status" would, but only ever updates
+// the screen. When the answer is yes it stops on "Approved" instead of
+// carrying the user to PayFast uninvited.
+const POLL_MS = 15000
+let pollTimer = null
+
+function startPolling () {
+  stopPolling()
+  pollTimer = setInterval(pollStatus, POLL_MS)
+}
+
+function stopPolling () {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+}
+
+async function pollStatus () {
+  if (!awaiting.value || busy.value || document.visibilityState !== 'visible') return
+  try {
+    const { data, error } = await supabase.functions.invoke('generate-payfast-checkout', {
+      body: {
+        email: email.value.trim().toLowerCase(),
+        deviceId: getDeviceId(),
+        product: 'REACTIVATE',
+        license_key: secStorage.getItem('LICENSE_KEY') || undefined,
+        platform: 'ios',
+      },
+    })
+    if (error || !data) return
+
+    if (data.checkout_url) {
+      awaiting.value = false
+      approved.value = true
+      stopPolling()
+      say('Approved. Tap continue to pay.', false)
+    } else if (data.route === 'MOVE_REJECTED') {
+      awaiting.value = false
+      rejected.value = true
+      stopPolling()
+      say(data.message || 'Your move request was declined.', true)
+    } else if (data.route === 'ACTIVE_SAME_DEVICE') {
+      stopPolling()
+      finishIfEntitled(null)
+    }
+  } catch (_) {
+    // A missed poll is not an event. The next one will ask again.
+  }
+}
+
 // ── The move code ──────────────────────────────────────────────────────────
 async function sendCode () {
   if (codeSending.value) return
   codeSending.value = true
   try {
     const { data, error } = await supabase.functions.invoke('request-device-move', {
-      body: { email: email.value, deviceId: getDeviceId() },
+      body: { email: email.value, deviceId: getDeviceId(), reason: reason.value.trim() },
     })
 
-    if (error || !data || data.success === false) {
-      return say((data && data.error) || 'Could not send the code. Try again.', true)
+    // 4xx bodies arrive as `error`; the function's own sentence is in the body.
+    let payload = data
+    if (!payload && error && error.context && typeof error.context.json === 'function') {
+      payload = await error.context.clone().json().catch(() => null)
+    }
+
+    if (payload && payload.code === 'MOVE_REJECTED') {
+      rejected.value = true
+      return say(payload.error, true)
+    }
+
+    if (!payload || payload.success === false) {
+      return say((payload && payload.error) || 'Could not send the code. Try again.', true)
+    }
+
+    // Already asked and verified on this handset: the request is the one in
+    // flight, so there is no code to type.
+    if (payload.already_requested) {
+      needsCode.value = false
+      if (payload.approval === 'approved') {
+        approved.value = true
+      } else {
+        awaiting.value = true
+        startPolling()
+      }
+      return say(payload.message, false)
     }
 
     codeSent.value = true
@@ -408,7 +549,11 @@ function onVisible () {
   // The ITN can lag the redirect by a few seconds, so a miss here is not
   // final — the gate will ask again. Nothing is said on failure to avoid
   // shouting "not paid" at someone whose payment is still settling.
-  if (document.visibilityState === 'visible' && !busy.value) finishIfEntitled(null)
+  if (document.visibilityState === 'visible' && !busy.value) {
+    finishIfEntitled(null)
+    // Coming back from the mail app is exactly when an approval email has landed.
+    if (awaiting.value) pollStatus()
+  }
 }
 
 onMounted(() => {
@@ -420,7 +565,10 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisible)
 })
 
-onUnmounted(() => document.removeEventListener('visibilitychange', onVisible))
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisible)
+  stopPolling()
+})
 </script>
 
 <style scoped>
@@ -727,6 +875,32 @@ onUnmounted(() => document.removeEventListener('visibilitychange', onVisible))
   cursor: pointer;
 }
 .pay-code-resend:disabled { opacity: 0.5; cursor: default; }
+
+.pay-reason-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(116, 134, 160, 0.13);
+  box-shadow: inset 0 2px 5px rgba(20, 22, 26, 0.07);
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  /* 16px floor, or iOS Safari zooms the viewport on focus. */
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--nv-ink);
+}
+.pay-reason-input::placeholder { color: var(--nv-ink-disabled); }
+.pay-reason-input:focus {
+  border-color: rgba(92, 156, 230, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 4px rgba(92, 156, 230, 0.15);
+}
+
+.pay-wait-body { margin: 0; font-size: 13.5px; line-height: 19px; color: var(--nv-ink-2); text-wrap: pretty; }
 
 .pay-code-help { margin: 9px 0 0; font-size: 12px; line-height: 17px; color: var(--nv-ink-3); text-wrap: pretty; }
 

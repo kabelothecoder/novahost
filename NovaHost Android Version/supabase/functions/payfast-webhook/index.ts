@@ -420,10 +420,14 @@ serve(async (req: Request) => {
       // makes the second one a no-op.
       const { data: ticket, error: ticketErr } = await novaHost
         .from("device_move_tickets")
-        .select("id")
+        .select("id, reason, decided_by")
         .eq("email", cleanEmail)
         .eq("target_device_id", deviceId)
         .not("verified_at", "is", null)
+        // An admin has to have said yes. generate-payfast-checkout will not
+        // price an unapproved move, but a checkout URL is just a URL -- this is
+        // the copy of the rule that runs while the money is in the room.
+        .eq("approval_status", "approved")
         .is("consumed_at", null)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -439,7 +443,7 @@ serve(async (req: Request) => {
         // a re-used checkout URL. Loud, because it is a refund, and silence
         // here is a customer who paid and got nothing with no trace of why.
         console.error(
-          "[REACTIVATION] REFUND REQUIRED -- no unconsumed verified move ticket for " +
+          "[REACTIVATION] REFUND REQUIRED -- no unconsumed, verified, ADMIN-APPROVED move ticket for " +
           cleanEmail + " -> device " + deviceId + ", pf_payment_id=" + (pfPaymentId ?? "?") +
           ", amount=" + paidAmount
         );
@@ -450,7 +454,7 @@ serve(async (req: Request) => {
           new_device_id: deviceId,
           amount: paidAmount,
           pf_payment_id: pfPaymentId ?? null,
-          note: "PAID BUT NOT GRANTED: no valid move ticket (likely duplicate payment). Refund required.",
+          note: "PAID BUT NOT GRANTED: no approved move ticket (duplicate payment, or paid without admin approval). Refund required.",
         });
         return new Response("OK", { status: 200 });
       }
@@ -504,7 +508,13 @@ serve(async (req: Request) => {
         new_device_id: deviceId,
         amount: paidAmount,
         pf_payment_id: pfPaymentId ?? null,
-        note: eligibility.eligible ? null : `Granted despite ${eligibility.reason}.`,
+        // The ledger is what support reads when a user says "my app stopped
+        // working", so the stated reason and who approved it live beside the move.
+        note: [
+          ticket.reason ? `Reason: ${ticket.reason}` : null,
+          ticket.decided_by ? `Approved by ${ticket.decided_by}.` : null,
+          eligibility.eligible ? null : `Granted despite ${eligibility.reason}.`,
+        ].filter(Boolean).join(" ") || null,
       });
 
       console.log("[REACTIVATION] Moved " + cleanEmail + " from " + existing.device_id + " to " + deviceId + ". Rows: " + JSON.stringify(result));

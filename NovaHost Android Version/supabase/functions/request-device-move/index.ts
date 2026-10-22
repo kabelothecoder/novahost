@@ -41,6 +41,17 @@ const TICKET_TTL_MINUTES = 15
 /** Tickets per email per hour. Stops this endpoint being a mail bomb. */
 const MAX_TICKETS_PER_HOUR = 5
 
+/**
+ * Every move is approved by an admin before it can be paid for, and the admin
+ * decides on the reason alone -- so it has to be an actual sentence.
+ */
+const REASON_MIN_CHARS = 15
+const REASON_MAX_CHARS = 500
+
+/** After a rejection, the same licence cannot re-ask straight away. */
+const REJECTION_LOCK_HOURS = 24
+
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return Array.from(new Uint8Array(digest))
@@ -112,7 +123,7 @@ function codeEmail(code: string, deviceLabel: string): string {
         <h1 style="font-size:24px;font-weight:700;color:#ffffff;margin-top:0;margin-bottom:10px;">Confirm your device move</h1>
         <p style="font-size:14px;color:#9ca3af;margin-bottom:30px;">
           Someone asked to move your NovaHost licence to a new phone (<strong style="color:#d1d5db;">${deviceLabel}</strong>).
-          Enter this code in the app to continue.
+          Enter this code in the app to continue. An admin will then review the request and reply shortly.
         </p>
 
         <div style="background:rgba(92,156,230,0.12);border:1px solid rgba(92,156,230,0.3);border-radius:16px;padding:18px;margin:20px 0;font-family:'Courier New',Courier,monospace;font-size:32px;font-weight:700;color:#ffffff;letter-spacing:8px;">${code}</div>
@@ -150,9 +161,25 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}))
     const email = String(body.email ?? '').trim().toLowerCase()
     const deviceId = String(body.android_id ?? body.deviceId ?? '').trim()
+    const reason = String(body.reason ?? '').trim().replace(/\s+/g, ' ')
 
     if (!email || !deviceId || deviceId === 'UNKNOWN_DEVICE') {
       return json({ success: false, error: 'Email and a valid device id are required.' }, 400)
+    }
+
+    if (reason.length < REASON_MIN_CHARS) {
+      return json({
+        success: false,
+        code: 'REASON_REQUIRED',
+        error: `Tell us why you are moving your licence (at least ${REASON_MIN_CHARS} characters). An admin reviews every move.`,
+      }, 400)
+    }
+    if (reason.length > REASON_MAX_CHARS) {
+      return json({
+        success: false,
+        code: 'REASON_REQUIRED',
+        error: `Keep the reason under ${REASON_MAX_CHARS} characters.`,
+      }, 400)
     }
 
     const novaHost = createClient(
@@ -191,6 +218,60 @@ Deno.serve(async (req: Request) => {
           : 'This licence has been moved the maximum number of times this year.',
         move: eligibility,
       }, 429)
+    }
+
+    // ---- A decision already exists ------------------------------------------
+    // A rejected licence cannot immediately ask again with a better story --
+    // that turns the admin queue into a negotiation. Support can lift it.
+    const lockSince = new Date(Date.now() - REJECTION_LOCK_HOURS * 60 * 60 * 1000).toISOString()
+    const { data: rejected, error: rejectedErr } = await novaHost
+      .from('device_move_tickets')
+      .select('decision_note, decided_at')
+      .eq('email', email)
+      .eq('approval_status', 'rejected')
+      .gte('decided_at', lockSince)
+      .order('decided_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (rejectedErr) throw rejectedErr
+
+    if (rejected) {
+      return json({
+        success: false,
+        code: 'MOVE_REJECTED',
+        error: rejected.decision_note
+          ? `Your move request was declined: ${rejected.decision_note}`
+          : 'Your move request was declined. Contact support if you think this is a mistake.',
+      }, 403)
+    }
+
+    // A verified request for this handset that is still waiting (or already
+    // approved) is the request. Another code and another reason would only put
+    // a duplicate in front of the admin.
+    const { data: live, error: liveErr } = await novaHost
+      .from('device_move_tickets')
+      .select('approval_status, decision_note')
+      .eq('email', email)
+      .eq('target_device_id', deviceId)
+      .not('verified_at', 'is', null)
+      .is('consumed_at', null)
+      .in('approval_status', ['pending', 'approved'])
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (liveErr) throw liveErr
+
+    if (live) {
+      return json({
+        success: true,
+        sent: false,
+        already_requested: true,
+        approval: live.approval_status,
+        message: live.approval_status === 'approved'
+          ? 'Your move is approved. Continue to payment.'
+          : 'Your move request is already with us. You will hear back shortly.',
+      })
     }
 
     // ---- Throttle -----------------------------------------------------------
@@ -279,6 +360,8 @@ Deno.serve(async (req: Request) => {
       email,
       code_hash: await sha256Hex(code),
       target_device_id: deviceId,
+      reason,
+      approval_status: 'pending',
       expires_at: expiresAt.toISOString(),
     })
 
