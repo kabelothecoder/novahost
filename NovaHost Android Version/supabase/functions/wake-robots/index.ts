@@ -14,6 +14,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
  *
  * One wake-up per robot every five minutes. The button is pressed in a hurry
  * and a double tap must not buzz every subscriber twice.
+ *
+ * `{ preview: true }` answers what a press would do right now (how many
+ * subscribers, how many phones, and when the cooldown ends) and sends nothing,
+ * so the portal can show "N phones will buzz" before the mentor presses.
  */
 
 const CORS_HEADERS = {
@@ -64,22 +68,53 @@ Deno.serve(async (req: Request) => {
     for (const r of recent ?? []) if (!cooling.has(r.ea_id)) cooling.set(r.ea_id, r.created_at)
 
     const due = targets.filter((id) => !cooling.has(id))
-    if (!due.length) {
-      const last = Math.max(...[...cooling.values()].map((t) => new Date(t).getTime()))
-      const wait = Math.max(1, Math.ceil((last + COOLDOWN_MS - Date.now()) / 60_000))
-      return json({
-        error: `You just woke ${targets.length > 1 ? 'these robots' : 'this robot'}. Try again in ${wait} min.`,
-        code: 'COOLDOWN',
-      }, 429)
-    }
+    /* When the button can be pressed again: the moment the first cooling
+       robot comes off cooldown. Null when nothing is cooling. */
+    const nextAt = cooling.size
+      ? new Date(Math.min(...[...cooling.values()].map((t) => new Date(t).getTime())) + COOLDOWN_MS).toISOString()
+      : null
 
     const { data: lics, error: licErr } = await db
       .from('licenses').select('id, ea_id, expires_at')
-      .in('ea_id', due).eq('status', 'active')
+      .in('ea_id', due.length ? due : ['00000000-0000-0000-0000-000000000000']).eq('status', 'active')
     if (licErr) throw licErr
     const live = (lics ?? []).filter((l) => !l.expires_at || new Date(l.expires_at) > new Date())
 
-    if (!live.length) return json({ success: true, queued: 0, onPush: 0, robots: due.length })
+    // How many will actually buzz a phone, so the portal can say so honestly.
+    // `phones` counts devices (one phone may hold several licences);
+    // `onPush` counts licences, as before.
+    const reach = async () => {
+      if (!live.length) return { onPush: 0, phones: 0 }
+      const { data: subs } = await db
+        .from('push_subscriptions').select('license_id, endpoint')
+        .in('license_id', live.map((l) => l.id)).is('disabled_at', null)
+      const rows = (subs ?? []) as Array<{ license_id: string; endpoint: string }>
+      return {
+        onPush: new Set(rows.map((s) => s.license_id)).size,
+        phones: new Set(rows.map((s) => s.endpoint)).size,
+      }
+    }
+
+    // ---- Preview: what a press would do right now. Sends nothing. ----------
+    if (body.preview === true) {
+      return json({
+        success: true, preview: true,
+        queued: live.length, ...(await reach()),
+        robots: due.length, cooling: cooling.size,
+        cooldownUntil: due.length ? null : nextAt,
+      })
+    }
+
+    if (!due.length) {
+      const wait = Math.max(1, Math.ceil((new Date(nextAt!).getTime() - Date.now()) / 60_000))
+      return json({
+        error: `You just woke ${targets.length > 1 ? 'these robots' : 'this robot'}. Try again in ${wait} min.`,
+        code: 'COOLDOWN',
+        cooldownUntil: nextAt,
+      }, 429)
+    }
+
+    if (!live.length) return json({ success: true, queued: 0, onPush: 0, phones: 0, robots: due.length })
 
     const stamp = Date.now()
     const { error: insErr } = await db.from('notifications').insert(
@@ -90,18 +125,13 @@ Deno.serve(async (req: Request) => {
     )
     if (insErr) throw insErr
 
-    // How many will actually buzz a phone, so the portal can say so honestly.
-    const { data: subs } = await db
-      .from('push_subscriptions').select('license_id')
-      .in('license_id', live.map((l) => l.id)).is('disabled_at', null)
-    const onPush = new Set((subs ?? []).map((s: { license_id: string }) => s.license_id)).size
-
     return json({
       success: true,
       queued: live.length,
-      onPush,
+      ...(await reach()),
       robots: due.length,
       skippedCooling: targets.length - due.length,
+      cooldownUntil: new Date(stamp + COOLDOWN_MS).toISOString(),
     })
   } catch (err) {
     console.error('[wake-robots] fatal:', err)
