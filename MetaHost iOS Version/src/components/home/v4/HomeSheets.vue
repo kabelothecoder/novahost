@@ -91,7 +91,7 @@
             </div>
           </div>
         </div>
-        <div class="hsh-cta" role="button" @click="$emit('go', '/pairs')">
+        <div class="hsh-cta" role="button" @click="$emit('go', '/symbols')">
           <span class="ms" style="font-size:21px">tune</span>
           <div>Open symbol wizard</div>
         </div>

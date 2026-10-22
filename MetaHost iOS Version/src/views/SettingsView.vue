@@ -23,6 +23,12 @@
     :data-name-color="theme.nameColor"
   >
     <header class="st-head">
+      <button class="st-back" aria-label="Back" @click="$router.push('/home')">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
       <h1 class="cc-title">Settings</h1>
       <p class="st-sub">Every look and layout for NovaHost, in one place.</p>
     </header>
@@ -465,6 +471,13 @@ const accentLabel = computed(() =>
   background: var(--cc-canvas);
 }
 
+/* No dock any more: the way back to Home is this arrow. */
+.st-back {
+  display: grid; place-items: center; width: 38px; height: 38px; margin: -6px 0 6px -10px;
+  border: none; background: none; border-radius: var(--cc-r-chip); color: var(--cc-ink-3); cursor: pointer;
+  transition: transform 180ms var(--cc-spring);
+}
+.st-back:active { transform: scale(0.92) }
 .st-head {
   padding: calc(var(--cc-safe-top) + 18px) 20px 4px;
   display: flex;

@@ -52,6 +52,17 @@ const routes = [
     component: () => import('../views/TerminalView.vue'),
   },
   {
+    /* Step two after linking: per-account symbol matching and risk. */
+    path: '/symbols',
+    name: 'symbols',
+    component: () => import('../views/SymbolsView.vue'),
+  },
+  {
+    path: '/accounts',
+    name: 'accounts',
+    component: () => import('../views/AccountsView.vue'),
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),

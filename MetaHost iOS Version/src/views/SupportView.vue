@@ -3,6 +3,12 @@
     <canvas ref="bgCanvas" class="support-bg" />
 
     <header class="support-header">
+      <button class="support-back" aria-label="Back" @click="$router.push('/home')">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
       <h2 class="screen-title">Support & Help</h2>
       <span class="screen-sub">Everything you need to know</span>
     </header>
@@ -145,6 +151,8 @@ const filteredCategories = computed(() => {
   z-index: 2;
   padding: calc(var(--safe-top) + 16px) 20px 0;
 }
+.support-back { display: grid; place-items: center; width: 38px; height: 38px; margin: 0 0 6px -10px; border: none; background: none; color: rgba(232,240,255,.6); cursor: pointer; }
+.support-back:active { transform: scale(0.92) }
 .screen-title { font-size: 1.4rem; font-weight: 700; color: #E8F0FF; letter-spacing: -0.02em; }
 .screen-sub { font-family: var(--font-mono); font-size: 0.68rem; color: rgba(var(--accent-rgb), 0.5); letter-spacing: 0.1em; display: block; margin-top: 2px; }
 

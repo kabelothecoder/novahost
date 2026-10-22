@@ -233,7 +233,7 @@
         <div class="rh-dot-core" :style="{ background: dotColor, boxShadow: `0 0 0 2.5px rgba(8,8,11,.7), 0 0 12px ${kind === 'stopped' ? 'transparent' : dotColor}` }"></div>
       </div>
 
-      <ScreensStrip v-if="strip" :top="stripTop" :style="{ '--a': accent }" @close="strip = false" @open="openScreen" />
+      <ScreensStrip v-if="strip" current="/home" :style="{ '--a': accent }" @close="strip = false" @open="openScreen" />
 
       <HomeSheets
         :sheet="sheet"
@@ -492,7 +492,6 @@ function openScreen(c) {
   if (c.action === 'look') emit('look')
   else emit('go', c.to)
 }
-const stripTop = computed(() => (L.value === 'focus' ? 430 : L.value === 'full' ? 458 : 404) + dy.value)
 
 /* ── Derived styles ──────────────────────────────────────────────── */
 const glassVal = computed(() => lite.value ? 'none' : 'blur(16px) saturate(1.3)')

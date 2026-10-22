@@ -49,7 +49,7 @@
          views the dock appears on are obsidian and dark-only, so a light
          dock would be the single pale object on a black screen. -->
     <div v-if="showDock" class="cmd dock-host" :data-scheme="dockScheme" :data-motion="theme.motion">
-      <FloatingDock />
+      <ScreensButton />
     </div>
 
     <!-- iOS Install Card — onboarding teaches this as its own step, so the
@@ -81,7 +81,7 @@
 <script setup>
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import FloatingDock from './components/FloatingDock.vue'
+import ScreensButton from './components/ScreensButton.vue'
 import iOSInstallCard from './components/iOSInstallCard.vue'
 import { accent } from './stores/accent.js'
 import { resolvedScheme, theme } from './stores/theme.js'
@@ -114,13 +114,11 @@ const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return'
 // Home v4 (2026-10-22): every layout is dockless. The Screens strip (swipe up
 // or the grid button) replaces the dock on Home, and Command Core's tune
 // button and the strip's Settings card both reach the hub.
-const DOCKLESS_LAYOUTS = ['classic', 'focus', 'bleed', 'core']
-
-const showDock = computed(() => {
-  if (HIDE_DOCK.includes(route.name)) return false
-  if (route.name === 'home' && DOCKLESS_LAYOUTS.includes(theme.layout)) return false
-  return true
-})
+//
+// Later the same day the four-tab dock went everywhere else too. Off Home a
+// single Screens button opens that same tray, and every screen carries its
+// own back arrow to Home. `showDock` now means "show the Screens button".
+const showDock = computed(() => !HIDE_DOCK.includes(route.name) && route.name !== 'home')
 
 // Routes on the light Nova system rather than obsidian glass. The shell's
 // black gradient and the bg video would otherwise sit behind — and blur
@@ -146,7 +144,7 @@ const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 // video ran behind it for nothing, and the page ground stayed --obsidian.
 // Those two darks meeting is the black band along the bottom of the MT5 screen.
 // `support` is NOT here and should not be: it is still on the glass system.
-const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal']
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal', 'accounts', 'symbols']
 const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
 
 const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))

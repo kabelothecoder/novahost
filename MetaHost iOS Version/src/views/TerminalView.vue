@@ -165,6 +165,16 @@
         </p>
       </div>
 
+      <!-- Step two lives on its own screen: symbols are set per account,
+           against this broker's own names, once the link exists. -->
+      <button v-if="link.linked === true" class="mtv-next" @click="$router.push('/symbols')">
+        <span>Next: set up trading symbols</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+
       <p v-else class="cc-caption mtv-foot">
         Your password is sent once, to your broker, to establish the link. It is
         never written to this device.
@@ -611,6 +621,16 @@ onMounted(() => {
 .mtv-msg.is-note  { color: var(--cc-accent-text) }
 
 /* ── Linked account ──────────────────────────────────────────────── */
+.mtv-next {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; height: 52px; margin-top: 12px; padding: 0 18px;
+  border: 1px solid rgba(var(--cc-accent-rgb), 0.35); border-radius: var(--cc-r-chip);
+  background: rgba(var(--cc-accent-rgb), 0.08); color: var(--cc-accent-text);
+  font-family: var(--cc-font); font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: transform 200ms var(--cc-spring);
+}
+.mtv-next:active { transform: scale(0.98) }
+
 .mtv-linked {
   margin-top: 22px;
   padding: 16px 18px 18px;
