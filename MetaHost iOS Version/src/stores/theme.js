@@ -26,29 +26,21 @@ import { accent } from './accent.js'
 /* ── Registries ──────────────────────────────────────────────────── */
 
 /**
- * The layouts, in the order the picker shows them.
- * `defaultArt` is the art mode each one is drawn around in the doc —
- * art mode is stored per layout, so switching layout restores the art
- * treatment that layout was designed for rather than carrying the last
- * one across.
+ * The layouts, in the order the picker shows them (Home v4, 2026-10-22).
  *
- * Command Deck is the one addition to the doc's five. It defaults to
- * `avatar` for the same reason Signal Feed does: it leads with figures,
- * and full-bleed art under a bento of glass cards is unreadable.
+ * Neon Frame, Signal Feed and Command Deck were removed. A stored id for
+ * one of them fails readEnum's check and falls back to Full-Bleed, so
+ * nobody lands on a blank Home. `bleed` keeps its id because it is a
+ * stored preference.
+ *
+ * `defaultArt` is vestigial for the v4 layouts, which own their art
+ * treatment, but the art map is still seeded from it.
  */
 export const LAYOUTS = [
-  { id: 'classic', name: 'Classic Core',  blurb: 'Reworked · text bottom nav', defaultArt: 'portrait' },
-  { id: 'focus',   name: 'Focus Engine',  blurb: 'Art forward · floating pill', defaultArt: 'bleed'  },
-  { id: 'bleed',   name: 'Full-Bleed Art', blurb: 'The marketing screen',       defaultArt: 'bleed'  },
-  /* Was `framed`. The circle put the mentor's art on screen at 132px in the
-     middle of an otherwise empty panel, so the layout's glowing border framed
-     a token rather than a subject. Portrait gives it the whole card. */
-  { id: 'neon',    name: 'Neon Frame',    blurb: 'Framed art · text nav',       defaultArt: 'portrait' },
-  /* The id stays 'feed' — it is a stored preference — but the section it
-     was named for now lists what the robot TRADED rather than what the
-     mentor broadcast, so the blurb had to follow it. */
-  { id: 'feed',    name: 'Signal Feed',   blurb: 'Stats · live robot trades', defaultArt: 'avatar' },
-  { id: 'deck',    name: 'Command Deck',  blurb: 'Bento · health, actions, activity', defaultArt: 'avatar' },
+  { id: 'classic', name: 'Classic Core', blurb: 'Hero card, neon name, slide to start', defaultArt: 'portrait' },
+  { id: 'focus',   name: 'Focus Engine', blurb: 'Controls orbit the robot',             defaultArt: 'bleed'    },
+  { id: 'bleed',   name: 'Full-Bleed',   blurb: 'Video edge to edge, slim control bar', defaultArt: 'bleed'    },
+  { id: 'core',    name: 'Command Core', blurb: 'Live HUD · auto Lite',                 defaultArt: 'portrait' },
 ]
 
 export const ART_MODES = [
@@ -305,18 +297,28 @@ const DEFAULT_HIDDEN = {
   classic: ['systemHealth', 'terminalLog'],
   focus:   ['systemHealth', 'robotList', 'fleetStatus', 'terminalLog'],
   bleed:   ['systemHealth', 'robotList', 'fleetStatus', 'chartScanner', 'terminalLog'],
-  neon:    ['systemHealth', 'terminalLog'],
-  /* Signal Feed draws its own fleet strip and terminal section as part
-     of the layout, so the widget versions of both would render the
-     same numbers twice on one screen. They remain available in Arrange
-     Widgets for anyone who wants the card treatment instead. */
-  feed:    ['systemHealth', 'fleetStatus', 'terminalLog'],
-  /* Command Deck draws the health ring, the four fleet tiles and the
-     activity stream as structure, so all three widget versions would
-     be duplicates. Robot List and Chart Scanner stack below the deck
-     as normal. */
-  deck:    ['systemHealth', 'fleetStatus', 'terminalLog'],
+  core:    ['systemHealth', 'robotList', 'fleetStatus', 'chartScanner', 'terminalLog'],
 }
+
+/**
+ * Falling FX — the calm particle layer over the robot's video (Home v4).
+ * `off` is a real choice, not an error state: the home then shows video,
+ * controls and the status dot only.
+ */
+export const FX_STYLES = [
+  { id: 'currency', name: 'Currency',      blurb: 'R, $, €, £ and ¥' },
+  { id: 'coins',    name: 'Coins & notes', blurb: 'Gold coins and notes' },
+  { id: 'gems',     name: 'Gold & gems',   blurb: 'Ingots and cut gems' },
+  { id: 'pairs',    name: 'Pair names',    blurb: 'Symbols falling like code' },
+  { id: 'mix',      name: 'Mix · all four', blurb: 'Every style, same calm density' },
+  { id: 'off',      name: 'Off',           blurb: 'Video and controls only' },
+]
+
+export const FX_INTENSITIES = [
+  { id: 'subtle', name: 'Subtle' },
+  { id: 'normal', name: 'Normal' },
+  { id: 'rich',   name: 'Rich'   },
+]
 
 /* ── Persistence ─────────────────────────────────────────────────── */
 
@@ -337,6 +339,8 @@ const KEY = {
   nameFont: 'CC_NAME_FONT',
   nameSize: 'CC_NAME_SCALE',
   nameInk:  'CC_NAME_COLOR',
+  fx:       'CC_FX',
+  fxLevel:  'CC_FX_INTENSITY',
 }
 
 function readEnum(key, options, fallback) {
@@ -413,6 +417,9 @@ export const theme = reactive({
   tone:       readEnum(KEY.tone,     TONES,        'obsidian'),
   nameFont:   readEnum(KEY.nameFont, NAME_FONTS,   'system'),
   nameColor:  readEnum(KEY.nameInk,  NAME_COLORS,  'default'),
+
+  fx:         readEnum(KEY.fx,      FX_STYLES,      'mix'),
+  fxIntensity: readEnum(KEY.fxLevel, FX_INTENSITIES, 'normal'),
 
   /* Clamped on read, not just on write: a stored value from a build
      with different bounds must not escape them, and Number('') is 0. */
@@ -634,6 +641,8 @@ watch(() => theme.tone,      v => secStorage.setItem(KEY.tone,     v))
 watch(() => theme.nameFont,  v => secStorage.setItem(KEY.nameFont, v))
 watch(() => theme.nameColor, v => secStorage.setItem(KEY.nameInk,  v))
 watch(() => theme.nameScale, v => secStorage.setItem(KEY.nameSize, String(v)))
+watch(() => theme.fx,          v => secStorage.setItem(KEY.fx,      v))
+watch(() => theme.fxIntensity, v => secStorage.setItem(KEY.fxLevel, v))
 watch(() => theme.accentOverridden, v => secStorage.setItem(KEY.override, String(v)))
 watch(() => theme.art,     v => secStorage.setItem(KEY.art,     v), { deep: true })
 watch(() => theme.widgets, v => secStorage.setItem(KEY.widgets, v), { deep: true })

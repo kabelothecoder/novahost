@@ -87,43 +87,43 @@
 
           <p class="cc-caption isheet-blurb">{{ activeLayout.blurb }}</p>
 
-          <!-- Art mode is contextual, not a top-level setting: it is
-               stored per layout, so this card always edits whichever
-               layout is selected above. Six per-layout settings stay
-               one control. -->
+          <!-- Falling FX (Home v4, design 2j–2o, 2r). Replaces the per-layout
+               art mode and widget arrangement, which the v4 layouts own. -->
           <div class="isheet-card cc-card">
             <div class="isheet-card-head">
-              <span class="cc-label">Robot Art</span>
-              <span class="cc-caption">{{ activeLayout.name }}</span>
+              <span class="cc-label">Falling FX</span>
+              <span class="cc-caption">{{ activeFx.name }}</span>
             </div>
-            <p class="cc-caption isheet-card-blurb">
-              How your mentor's art fills this layout. Saved per layout.
-            </p>
-            <!-- 2x2, not one row of four. Portrait made this a four-option
-                 group, and four across a 343pt sheet gives each button ~77pt
-                 — "Full bleed" does not fit on one line in that, and the row
-                 was wrapping into three-plus-one. -->
+            <p class="cc-caption isheet-card-blurb">Shapes drift down over your robot.</p>
             <div class="isheet-seg isheet-seg-2">
               <button
-                v-for="a in ART_MODES"
-                :key="a.id"
+                v-for="f in FX_STYLES"
+                :key="f.id"
                 class="isheet-seg-btn"
-                :class="{ 'is-on': activeArtMode === a.id }"
-                @click="setArt(a.id)"
-              >{{ a.name }}</button>
+                :class="{ 'is-on': theme.fx === f.id }"
+                @click="pickFx(f.id)"
+              >{{ f.name }}</button>
             </div>
           </div>
 
-          <button class="isheet-row cc-card" @click="goArrange">
-            <span class="isheet-row-copy">
-              <span class="isheet-row-title">Arrange Widgets</span>
-              <span class="cc-caption">{{ arrangeSummary }}</span>
-            </span>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="isheet-chev" aria-hidden="true">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
+          <div class="isheet-card cc-card" :class="{ 'is-muted': theme.fx === 'off' }">
+            <div class="isheet-card-head">
+              <span class="cc-label">Intensity</span>
+            </div>
+            <div class="isheet-seg">
+              <button
+                v-for="i in FX_INTENSITIES"
+                :key="i.id"
+                class="isheet-seg-btn"
+                :class="{ 'is-on': theme.fxIntensity === i.id }"
+                :disabled="theme.fx === 'off'"
+                @click="pickIntensity(i.id)"
+              >{{ i.name }}</button>
+            </div>
+            <p class="cc-caption isheet-card-blurb">
+              Lite mode shows fewer, flat shapes. If your phone asks for reduced motion, Falling FX starts off.
+            </p>
+          </div>
         </section>
 
         <!-- ── COLOURS ────────────────────────────────────────────── -->
@@ -513,7 +513,7 @@ import {
   GRADIENTS, TONES, NAME_FONTS, NAME_COLORS, NAME_SCALE,
   activeLayout, activeArtMode, activeNameFont, activeGradient, activeTone,
   toneApplies, setAccent, setCustomAccent, setNameScale, useMentorAccent,
-  isMentorAccent, resolvedScheme, REORDERABLE,
+  isMentorAccent, resolvedScheme, REORDERABLE, FX_STYLES, FX_INTENSITIES,
 } from '../../stores/theme.js'
 import { spectrumHex, spectrumPosition } from '../../stores/palette.js'
 import { robot } from '../../stores/robot.js'
@@ -567,6 +567,10 @@ function setArt(id) {
   activeArtMode.value = id
   haptic(20)
 }
+
+const activeFx = computed(() => FX_STYLES.find(f => f.id === theme.fx) || FX_STYLES[4])
+function pickFx(id) { theme.fx = id; haptic(20) }
+function pickIntensity(id) { theme.fxIntensity = id; haptic(20) }
 
 function pickAccent(sw) {
   setAccent(sw)
@@ -767,6 +771,7 @@ function goSettings() {
   margin-bottom: 6px;
 }
 .isheet-card-blurb { margin: 0 0 12px }
+.isheet-card.is-muted { opacity: 0.5 }
 .isheet-note { margin: 0; color: var(--cc-ink-4) }
 
 /* ── Segmented control ───────────────────────────────────────────── */

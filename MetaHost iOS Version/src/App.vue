@@ -110,7 +110,11 @@ const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return'
 // that also hides the dock, removing it without the sheet's route would have
 // left no way off the screen at all. This only applies on Home — the layout
 // preference says nothing about Scanner or Terminal.
-const DOCKLESS_LAYOUTS = ['bleed', 'focus']
+//
+// Home v4 (2026-10-22): every layout is dockless. The Screens strip (swipe up
+// or the grid button) replaces the dock on Home, and Command Core's tune
+// button and the strip's Settings card both reach the hub.
+const DOCKLESS_LAYOUTS = ['classic', 'focus', 'bleed', 'core']
 
 const showDock = computed(() => {
   if (HIDE_DOCK.includes(route.name)) return false

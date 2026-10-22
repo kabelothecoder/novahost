@@ -25,29 +25,29 @@
     :data-name-font="theme.nameFont"
     :data-name-color="theme.nameColor"
   >
-    <HomeBackdrop />
-
     <!--
-      Deliberately NOT wrapped in a <Transition>.
+      Home v4 (2026-10-22). Four layouts: Classic Core, Focus Engine and
+      Full-Bleed share RobotHome; Command Core is its own HUD. Each paints
+      its own full-screen ground, so the old HomeBackdrop is gone.
 
-      It was `mode="out-in"`, which mounts the incoming layout only once
-      the outgoing one's leave has finished. Vue drives that with
-      requestAnimationFrame, and rAF is throttled to nothing in a
-      backgrounded or occluded page — so a layout switch made at the
-      wrong moment leaves BOTH layouts unmounted and Home renders as an
-      empty screen over the backdrop. Observed exactly that.
-
-      A layout change is a deliberate action taken from the Interface
-      Style sheet, and swapping instantly cannot strand anyone. The
-      backdrop persists across the change, which carries the continuity
-      a cross-fade would have.
+      Deliberately NOT wrapped in a <Transition>: an out-in transition is
+      driven by rAF, which a backgrounded page throttles to nothing, and a
+      layout switch at the wrong moment left Home blank. Swapping instantly
+      cannot strand anyone.
     -->
-    <component
-      :is="LayoutComponent"
+    <CommandCore
+      v-if="theme.layout === 'core'"
+      key="core"
+      @look="openInterface"
+      @go="go"
+      @toast="showToast"
+    />
+    <RobotHome
+      v-else
       :key="theme.layout"
-      @interface="openInterface"
-      @robots="openRobots"
-      @assets="openAssets"
+      :layout="v4Layout"
+      @look="openInterface"
+      @go="go"
       @toast="showToast"
     />
 
@@ -61,14 +61,6 @@
          control in it changes what is on the screen behind it, so
          navigating away would hide the thing being adjusted. -->
     <InterfaceStyleSheet v-if="sheetOpen" @close="sheetOpen = false" />
-
-    <!-- Same reasoning: switching robot repaints the art, the name and
-         the accent of the screen underneath, so it happens over it. -->
-    <RobotSwitcherSheet
-      v-if="robotsOpen"
-      @close="robotsOpen = false"
-      @toast="showToast"
-    />
   </div>
 </template>
 
@@ -83,36 +75,18 @@ import { session, startSession, stopSession, pushEvent } from '../stores/session
 import { useSpeech } from '../composables/useSpeech.js'
 import { startFleetPolling, stopFleetPolling } from '../services/fleetService.js'
 
-import HomeBackdrop from '../components/home/HomeBackdrop.vue'
 import InterfaceStyleSheet from '../components/settings/InterfaceStyleSheet.vue'
-import RobotSwitcherSheet from '../components/home/RobotSwitcherSheet.vue'
-import ClassicCore from '../components/home/layouts/ClassicCore.vue'
-import FocusEngine from '../components/home/layouts/FocusEngine.vue'
-import FullBleedArt from '../components/home/layouts/FullBleedArt.vue'
-import NeonFrame from '../components/home/layouts/NeonFrame.vue'
-import SignalFeed from '../components/home/layouts/SignalFeed.vue'
-import CommandDeck from '../components/home/layouts/CommandDeck.vue'
+import RobotHome from '../components/home/v4/RobotHome.vue'
+import CommandCore from '../components/home/v4/CommandCore.vue'
+import { startPositionsPolling, stopPositionsPolling } from '../stores/trades.js'
 
 const router = useRouter()
 const { speak } = useSpeech()
 
-/* ── Layout registry ──────────────────────────────────────────────────
-   Statically imported, not async: the layout is chosen before first
-   paint from a stored preference, so lazy-loading it would show an
-   empty Home on every cold start. The widgets inside them ARE async —
-   that is where the weight is.
-
-   An unknown id falls back rather than rendering nothing; a blank Home
-   is indistinguishable from a crash. */
-const LAYOUTS = {
-  classic: ClassicCore,
-  focus:   FocusEngine,
-  bleed:   FullBleedArt,
-  neon:    NeonFrame,
-  feed:    SignalFeed,
-  deck:    CommandDeck,
-}
-const LayoutComponent = computed(() => LAYOUTS[theme.layout] || FullBleedArt)
+/* Statically imported: the layout is chosen before first paint from a
+   stored preference. `bleed` is the stored id for Full-Bleed. */
+const v4Layout = computed(() =>
+  theme.layout === 'focus' ? 'focus' : theme.layout === 'classic' ? 'classic' : 'full')
 
 /* ── Toast ───────────────────────────────────────────────────────── */
 const toast = reactive({ visible: false, text: '' })
@@ -126,18 +100,12 @@ function showToast(text, ms = 2600) {
 }
 
 /* ── Navigation out of the layouts ───────────────────────────────── */
+/* Home look opens over Home rather than routing away: every control in it
+   changes what is on the screen behind it. Robot switching and the symbol
+   status are sheets inside the layouts themselves. */
 const sheetOpen = ref(false)
-const robotsOpen = ref(false)
 function openInterface() { sheetOpen.value = true }
-/* Was a toast saying switching "arrives with the Robot List widget". The
-   list and the switcher are the same rows now (components/home/RobotRows.vue),
-   backed by `my-licenses` — so the chip opens them. */
-function openRobots()    { robotsOpen.value = true }
-// The real Asset Hub is a per-symbol sheet over `license_symbol_config`
-// and lands with the data wiring. /pairs is the honest destination for now.
-// (It used to say "TradingSymbols.vue is mock data, not a hub" — that
-// component has since been deleted for exactly that reason.)
-function openAssets()    { router.push('/pairs') }
+function go(path) { if (path) router.push(path) }
 
 /* ── Voice: removed ───────────────────────────────────────────────────
    `useVoiceCommands` opened a continuous SpeechRecognition session on
@@ -247,6 +215,9 @@ onMounted(() => {
   checkUserSession()
   setupRealtime()
   startFleetPolling()
+  /* Open-trade count feeds the status sheet and Command Core's last-action
+     panel. It was started by the Open Trades widget, which v4 no longer has. */
+  startPositionsPolling()
 
   const fresh = sessionStorage.getItem('MH_FRESH_ACTIVATION')
   if (fresh) {
@@ -256,17 +227,16 @@ onMounted(() => {
       showToast(`${robot.name.toUpperCase()} IS ONLINE`, 4000)
       speak(`Welcome ${displayName.value}. ${robot.name} is online.`)
     }, 600)
-  } else {
-    setTimeout(() => {
-      if (navigator.vibrate) navigator.vibrate(20)
-      showToast(`${robot.name.toUpperCase()} · ARMED`, 2800)
-    }, 500)
   }
+  /* No "ROBOT · ARMED" toast on ordinary visits any more: it showed even
+     while the robot was stopped, and the v4 status dot and power control
+     already say whether it is running. */
 })
 
 onUnmounted(() => {
   clearTimeout(toastTimer)
   stopFleetPolling()
+  stopPositionsPolling()
   if (tradeChannel)   supabase.removeChannel(tradeChannel)
   if (signalsChannel) supabase.removeChannel(signalsChannel)
 })

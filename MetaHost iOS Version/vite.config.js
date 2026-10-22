@@ -54,7 +54,15 @@ export default defineConfig(({ mode }) => ({
   },
   assetsInclude: ['**/*.mp4'],
   plugins: [
-    vue(),
+    vue({
+      template: {
+        compilerOptions: {
+          // The Home v4 effect layers are plain custom elements
+          // (src/components/home/fx), not Vue components.
+          isCustomElement: tag => ['falling-fx', 'voice-ring', 'voice-wave'].includes(tag),
+        },
+      },
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['app_logo.png', 'robot_avatar.png', 'bg_loop.mp4'],
