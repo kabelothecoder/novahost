@@ -58,6 +58,12 @@ const DAY_MS = 24 * 60 * 60 * 1000
  *
  * @returns {{within: boolean, daysLeft: number|null, since: Date|null}}
  */
+/** A playable media URL, or ''. A data URI or junk string must never reach
+ *  a <video> src: the column is mentor-written free text. */
+function httpUrl(v) {
+  return typeof v === 'string' && /^https:\/\//i.test(v.trim()) ? v.trim() : ''
+}
+
 function offlineGrace() {
   const stamp = secStorage.getItem('CHECKED_AT')
   if (!stamp) return { within: false, daysLeft: null, since: null }
@@ -470,6 +476,7 @@ export async function activateLicenseKey(rawKey) {
     accent.current = swatchByName(liveName)
     accent.robotName = robotName
     accent.avatarUrl = data.avatar_url || ''
+    accent.videoUrl = httpUrl(data.background_video_url)
     accent.allowedSymbols = allowedSymbols
 
     // A validated key is the entry gate, not entitlement — Home still needs a

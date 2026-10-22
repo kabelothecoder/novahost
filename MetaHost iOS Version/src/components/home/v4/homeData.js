@@ -6,6 +6,7 @@
 
 import { computed, ref } from 'vue'
 import { robot, artFor, selectRobot, FALLBACK_AVATAR } from '../../../stores/robot.js'
+import { accent } from '../../../stores/accent.js'
 import { session, startSession, stopSession, pushEvent } from '../../../stores/session.js'
 import { theme } from '../../../stores/theme.js'
 import { loadPlan, normaliseSymbol } from '../../../services/symbolPlanService.js'
@@ -32,6 +33,9 @@ export const robots = computed(() => {
       accent: isActive ? theme.accent.hex : (ea.accent || theme.accent.hex),
       /* Another robot's art must never fall back to the active robot's. */
       art: isActive ? artFor(null) : (ea.avatar || FALLBACK_AVATAR),
+      /* The active robot's video comes from the last validation (fresher
+         than the fleet list); another robot's from its own row only. */
+      video: (isActive ? accent.videoUrl : '') || ea.video || '',
       busy: robot.busyId === ea.id,
     }
   })

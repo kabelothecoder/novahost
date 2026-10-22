@@ -16,8 +16,11 @@
 
       <!-- ══ CLASSIC CORE ════════════════════════════════════════════ -->
       <template v-if="L === 'classic'">
-        <div v-if="!lite" class="rh-wash" :style="{ ...washBox, backgroundImage: artUrl, backgroundPosition: '50% 36%', filter: 'blur(40px) brightness(.4) saturate(.9)', opacity: .6 }"></div>
-        <div class="rh-fill" style="background:linear-gradient(180deg, rgba(8,8,11,.6) 0%, rgba(8,8,11,.35) 40%, rgba(8,8,11,.86) 74%, #08080B 100%)"></div>
+        <!-- The robot art fills the screen behind the card, blurred, rather
+             than a near-black wash. The gradient only darkens toward the
+             bottom, where the name and controls need contrast. -->
+        <div v-if="!lite" class="rh-wash" :style="{ ...washBox, backgroundImage: artUrl, backgroundPosition: '50% 36%', filter: 'blur(26px) brightness(.78) saturate(1.1)' }"></div>
+        <div class="rh-fill" style="background:linear-gradient(180deg, rgba(8,8,11,.22) 0%, rgba(8,8,11,.08) 40%, rgba(8,8,11,.55) 74%, rgba(8,8,11,.82) 100%)"></div>
         <div class="rh-fill rh-glow" :style="{ opacity: glowOp, background: `radial-gradient(62% 36% at 50% ${((354 + dy / 2) / H * 100).toFixed(1)}%, color-mix(in srgb, var(--a) 26%, transparent), transparent 72%)` }"></div>
 
         <div class="rh-col" :style="colStyle">
@@ -34,7 +37,7 @@
             :style="{ top: y(96, 'mid'), boxShadow: cardShadow }"
             @pointerdown="swDown" @pointermove="swMove" @pointerup="swUp" @pointercancel="swUp"
           >
-            <div class="rh-hero-in" :style="heroStyle"><img class="rh-media" :src="art" alt="" draggable="false" :style="mediaStyle"></div>
+            <div class="rh-hero-in" :style="heroStyle"><RobotMedia :art="art" :video="video" :play="videoPlay" :allowed="videoAllowed" :media-style="mediaStyle" /></div>
             <div class="rh-hero-edge"></div>
           </div>
           <div v-if="!lite" class="rh-refl" :style="{ top: y(502, 'mid') }">
@@ -88,7 +91,9 @@
       <!-- ══ FOCUS ENGINE ════════════════════════════════════════════ -->
       <template v-else-if="L === 'focus'">
         <div class="rh-fill" style="background:#050508"></div>
-        <div v-if="!lite" class="rh-wash" :style="{ ...washBox, backgroundImage: artUrl, backgroundPosition: '50% 38%', filter: 'blur(48px) brightness(.35)', opacity: .42 }"></div>
+        <!-- Same idea as Classic: the art, blurred, behind the whole screen. -->
+        <div v-if="!lite" class="rh-wash" :style="{ ...washBox, backgroundImage: artUrl, backgroundPosition: '50% 38%', filter: 'blur(26px) brightness(.72) saturate(1.1)' }"></div>
+        <div v-if="!lite" class="rh-fill" style="background:linear-gradient(180deg, rgba(5,5,8,.55) 0%, rgba(5,5,8,.4) 14%, rgba(5,5,8,.1) 40%, rgba(5,5,8,.6) 80%, rgba(5,5,8,.85) 100%)"></div>
 
         <div class="rh-col" :style="colStyle">
           <div class="rh-abs" :style="{ left: '-125px', top: y(72, 'mid'), width: '640px', height: '640px', borderRadius: '50%', opacity: glowOp, transition: 'opacity .6s ease', background: 'radial-gradient(circle, color-mix(in srgb, var(--a) 36%, transparent) 0%, color-mix(in srgb, var(--a) 11%, transparent) 36%, transparent 62%)' }"></div>
@@ -116,7 +121,7 @@
             :style="{ top: y(268, 'mid'), boxShadow: focusShadow }"
             @pointerdown="swDown" @pointermove="swMove" @pointerup="swUp" @pointercancel="swUp"
           >
-            <div class="rh-hero-in" :style="heroStyle"><img class="rh-media" :src="art" alt="" draggable="false" :style="mediaStyle"></div>
+            <div class="rh-hero-in" :style="heroStyle"><RobotMedia :art="art" :video="video" :play="videoPlay" :allowed="videoAllowed" :media-style="mediaStyle" /></div>
             <div class="rh-hero-edge-f"></div>
           </div>
 
@@ -160,7 +165,7 @@
       <!-- ══ FULL-BLEED ══════════════════════════════════════════════ -->
       <template v-else>
         <div class="rh-fill rh-full-media" @pointerdown="swDown" @pointermove="swMove" @pointerup="swUp" @pointercancel="swUp">
-          <div class="rh-hero-in" :style="heroStyle"><img class="rh-media" :src="art" alt="" draggable="false" :style="mediaStyle"></div>
+          <div class="rh-hero-in" :style="heroStyle"><RobotMedia :art="art" :video="video" :play="videoPlay" :allowed="videoAllowed" :media-style="mediaStyle" /></div>
         </div>
         <div class="rh-abs rh-nopt" style="left:0;right:0;top:0;height:140px;z-index:2;background:linear-gradient(180deg, rgba(0,0,0,.5), transparent)"></div>
         <div class="rh-abs rh-nopt" style="left:0;right:0;bottom:0;height:380px;z-index:2;background:linear-gradient(180deg, rgba(6,6,9,0) 0%, rgba(6,6,9,.55) 40%, rgba(6,6,9,.88) 100%)"></div>
@@ -260,6 +265,7 @@ import { useSpeech, haptic } from '../../../composables/useSpeech.js'
 import { useStage } from './useStage.js'
 import HomeSheets from './HomeSheets.vue'
 import ScreensStrip from './ScreensStrip.vue'
+import RobotMedia from './RobotMedia.vue'
 import {
   robots, activeIndex, statusKind, symbolRows, symbolIssues, refreshPlan,
   startRobot, stopRobot, switchRobot, darkOnAccent, fitName, effectMode,
@@ -294,6 +300,13 @@ const idx = activeIndex
 const rb = computed(() => list.value[idx.value] || { name: 'NovaHost AI', raw: 'NovaHost AI', accent: theme.accent.hex, art: '' })
 const accent = computed(() => rb.value.accent || '#E0313F')
 const art = computed(() => rb.value.art)
+/* The mentor's loop video, played in place of the art. Never in Lite, Reduce
+   Motion or a miniature (layout previews); paused to the still image while
+   the robot is stopped. The blurred wash behind stays the still image, so
+   only one video ever decodes. */
+const video = computed(() => rb.value.video || '')
+const videoAllowed = computed(() => anim.value && live.value)
+const videoPlay = computed(() => running.value && videoAllowed.value)
 const artUrl = computed(() => `url(${art.value})`)
 const running = computed(() => session.isRunning)
 const kind = computed(() => statusKind.value)

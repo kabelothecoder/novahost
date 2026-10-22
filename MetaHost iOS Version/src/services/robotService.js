@@ -90,6 +90,7 @@ function normalise(row) {
     name: ea.display_name || ea.name || 'NovaHost AI',
     avatar: ea.avatar_url || null,
     hasArt: ea.has_art === true || Boolean(ea.avatar_url),
+    video: typeof ea.background_video_url === 'string' && /^https:\/\//i.test(ea.background_video_url) ? ea.background_video_url : null,
     accent: ea.accent_color || null,
     symbols: row.allowed_symbols || ea.symbols || [],
     expiresAt: row.expires_at || null,

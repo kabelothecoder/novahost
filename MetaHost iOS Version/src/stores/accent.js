@@ -26,6 +26,7 @@ const initialAccent    = swatchByName(savedRobotAccent || DEFAULT_ACCENT)
 // Robot identity from license
 const savedRobotName   = secStorage.getItem('ROBOT_NAME')  || 'MetaBot'
 const savedAvatarUrl   = secStorage.getItem('AVATAR_URL')  || ''
+const savedVideoUrl    = secStorage.getItem('VIDEO_URL')   || ''
 
 // Allowed trading symbols from license
 const initialAllowedSymbols = secStorage.getItem('ALLOWED_SYMBOLS', true) || []
@@ -37,6 +38,8 @@ export const accent = reactive({
   // ── Robot identity (synced from license) ──────────────────
   robotName:   savedRobotName,
   avatarUrl:   savedAvatarUrl,
+  // The mentor's loop video (https URL), played over the art on Home.
+  videoUrl:    savedVideoUrl,
   isHighProb:  false,
   allowedSymbols: initialAllowedSymbols,
   // ── Broker Connection (Cloud Bridge) ─────────────
@@ -84,6 +87,11 @@ watch(
 watch(
   () => accent.avatarUrl,
   (url) => { secStorage.setItem('AVATAR_URL', url) }
+)
+
+watch(
+  () => accent.videoUrl,
+  (url) => { secStorage.setItem('VIDEO_URL', url) }
 )
 
 watch(

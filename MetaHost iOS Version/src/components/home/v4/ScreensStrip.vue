@@ -93,6 +93,12 @@ const CANDLES = [
   background: radial-gradient(ellipse at 50% 50%, rgba(4,4,6,.55), rgba(4,4,6,.25) 75%);
   animation: ssFade .25s ease;
 }
+/* On Home the robot art stays in view, softened by a blur instead of a dark
+   wash, so the tray reads as part of the scene rather than a curtain. */
+.ss-layer:not(.is-fixed) {
+  background: rgba(8,8,11,.12);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
+}
 .ss-layer.is-fixed { position: fixed; z-index: 9000; }
 @keyframes ssFade { from { opacity: 0 } to { opacity: 1 } }
 

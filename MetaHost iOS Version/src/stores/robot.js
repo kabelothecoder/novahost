@@ -137,6 +137,7 @@ export function ensureSeeded() {
     key,
     name: robot.name,
     avatar: robot.avatarUrl || null,
+    video: accent.videoUrl || null,
     hasArt: Boolean(robot.avatarUrl),
     accent: null,
     symbols: robot.allowedSymbols,
@@ -240,6 +241,7 @@ export async function selectRobot(id) {
        rather than at the next fleet fetch. */
     ea.name = accent.robotName || ea.name
     if (accent.avatarUrl) ea.avatar = accent.avatarUrl
+    ea.video = accent.videoUrl || null
     ea.symbols = accent.allowedSymbols || ea.symbols
     return { ok: true }
   } finally {
@@ -305,6 +307,7 @@ function ensureSeededFrom(key) {
       key,
       name: accent.robotName || 'NovaHost AI',
       avatar: accent.avatarUrl || null,
+      video: accent.videoUrl || null,
       hasArt: Boolean(accent.avatarUrl),
       accent: null,
       symbols: accent.allowedSymbols || [],
