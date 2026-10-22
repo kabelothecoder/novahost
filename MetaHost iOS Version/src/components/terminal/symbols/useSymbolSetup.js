@@ -243,6 +243,11 @@ export function useSymbolSetup() {
     st.screen = 'wizard'
     st.saveError = ''
   }
+  /** Switch, copy, the all-accounts overview and "add another" only make sense
+   *  with several accounts. Production has one (the linked licence) until the
+   *  multi-account backend exists, so they are mock-only for now. */
+  const multi = computed(() => st.mode === 'mock')
+
   const nextUnready = computed(() =>
     st.order.find((o) => o !== st.acc && !st.cfg[o]?.ready && st.accounts[o]?.connected) || null)
 
@@ -259,7 +264,7 @@ export function useSymbolSetup() {
 
   return {
     st, A, C, R, presetOf, isCustom, nameFor, usable, tradesFor, lotFor, lotMoney, comb,
-    activeRows, total, sumTrades, readyCount, statusOf, pickNeeded, riskTotals, nextUnready,
+    activeRows, total, sumTrades, readyCount, statusOf, pickNeeded, riskTotals, nextUnready, multi,
     toggle, pick, setPreset, setLot, setTrades, lowerIt,
     boot, retryLoad, reconnect, save, runTest, switchTo, copy,
     WARN, BLOCK, MAX_TRADES,

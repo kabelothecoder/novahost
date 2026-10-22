@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <button v-if="done" class="ts-all" @click="$emit('overview')">View all accounts</button>
+    <button v-if="done && ctl.multi.value" class="ts-all" @click="$emit('overview')">View all accounts</button>
   </div>
 </template>
 

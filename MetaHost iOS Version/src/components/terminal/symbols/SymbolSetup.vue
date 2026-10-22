@@ -69,14 +69,17 @@
         <p v-if="st.saveError" class="sxs-err" role="alert">{{ st.saveError }}</p>
 
         <!-- ── Which account this is for ───────────────────────────── -->
-        <button class="sxs-bar" :class="{ 'is-good': C.ready && A.connected }" @click="onBar">
+        <component
+          :is="multi ? 'button' : 'div'" class="sxs-bar"
+          :class="{ 'is-good': C.ready && A.connected, 'is-static': !multi }" @click="multi && onBar()"
+        >
           <span class="sx-id">
             <span class="sxs-bar-k">This configuration is for</span>
             <span class="sxs-bar-v">{{ A.broker }} <i>·</i> <span class="sx-mono">{{ tag }}</span> <i>·</i> {{ money(A, A.balance) }}</span>
           </span>
           <span class="sx-pill" :class="barStatus.tone">{{ barStatus.text }}</span>
-          <span class="sxs-bar-go">{{ single ? 'Add' : 'Switch' }}</span>
-        </button>
+          <span v-if="multi" class="sxs-bar-go">{{ single ? 'Add' : 'Switch' }}</span>
+        </component>
       </template>
     </template>
 
@@ -120,6 +123,7 @@ const C = ctl.C
 
 const tag = computed(() => accountTag(A.value))
 const single = computed(() => st.order.length === 1)
+const multi = ctl.multi
 const loadMsg = computed(() => st.loadError[st.acc] || '')
 
 const state = computed(() => {
@@ -136,7 +140,8 @@ const barStatus = computed(() => {
 
 function goBack() {
   if (st.step > 1 && state.value === 'normal') st.step--
-  else st.screen = 'overview'
+  else if (multi.value) st.screen = 'overview'
+  else router.push('/home')
 }
 
 function openOverview() { st.sheet = null; st.screen = 'overview' }
@@ -174,6 +179,7 @@ const cta = computed(() => {
   }
   if (c.phase === 'checking') return { label: `Checking with ${a.broker}…`, disabled: true, spin: true, go: () => {} }
   if (c.phase === 'done' && c.ready) {
+    if (!multi.value) return { label: 'Done', accent: true, go: () => router.push('/home') }
     const next = ctl.nextUnready.value
     return next
       ? { label: 'Set up your next account', accent: true, go: () => ctl.switchTo(next) }
@@ -220,6 +226,7 @@ onMounted(() => ctl.boot({ mock: props.mock }))
   text-align: left; font: inherit; background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.1);
 }
 .sxs-bar.is-good { border-color: rgba(48, 209, 88, 0.3); }
+.sxs-bar.is-static { cursor: default; }
 .sxs-bar-k { font-size: 11px; color: var(--cc-ink-4); }
 .sxs-bar-v { font-size: 13.5px; font-weight: 600; color: var(--cc-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sxs-bar-v i { font-style: normal; color: var(--cc-ink-4); }
