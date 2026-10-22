@@ -56,6 +56,9 @@
          floating card would be a duplicate prompt over the top of it. -->
     <iOSInstallCard v-if="showInstall && !isLightRoute" @dismiss="showInstall = false" />
 
+    <!-- Alerts while the app is open, grown out of the status bar. -->
+    <DynamicIsland />
+
     <!-- SVG Filters for Gooey & Glitch -->
     <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
       <defs>
@@ -79,10 +82,16 @@
 </template>
 
 <script setup>
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watchEffect, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ScreensButton from './components/ScreensButton.vue'
 import iOSInstallCard from './components/iOSInstallCard.vue'
+import DynamicIsland from './components/DynamicIsland.vue'
+import { syncPush } from './services/pushService.js'
+
+// Re-register on every launch: iOS can rotate the endpoint while the app is
+// closed, and the robot's name or licences may have changed since.
+onMounted(() => { setTimeout(syncPush, 3000) })
 import { accent } from './stores/accent.js'
 import { resolvedScheme, theme } from './stores/theme.js'
 

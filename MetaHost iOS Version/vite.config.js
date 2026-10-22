@@ -117,6 +117,9 @@ export default defineConfig(({ mode }) => ({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,mp4,woff2}'],
+        // Web Push handlers (public/push-sw.js). Imported rather than moving
+        // to injectManifest, so the generated precache is untouched.
+        importScripts: ['push-sw.js'],
         runtimeCaching: [
           {
             urlPattern: /\.mp4$/,

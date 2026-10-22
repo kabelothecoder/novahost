@@ -186,12 +186,9 @@ function setupRealtime() {
     .channel('signals_push')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, (payload) => {
       const s = payload.new
-      if (Notification.permission === 'granted') {
-        new Notification(`Signal · ${s.pair}`, {
-          body: `${s.side || s.type} @ ${s.price ?? 'market'} | SL ${s.sl} | TP ${s.tp}`,
-          icon: robot.avatarUrl || '/robot_avatar.png',
-        })
-      }
+      /* No `new Notification()` here: it is an illegal constructor in an
+         installed iOS web app. Alerts arrive as Web Push (pushService.js)
+         and the open app shows them in the island (DynamicIsland.vue). */
       pushEvent(`Signal in · ${s.side || s.type} ${s.pair}`, 'ok')
       onTrade()
       speak(`New signal on ${s.pair}.`)
