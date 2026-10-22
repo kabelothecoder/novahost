@@ -64,7 +64,10 @@ watch(item, (it) => {
   phase.value = 'pill'
   haptic([12, 40, 18])
   later(reduced ? 0 : 60, () => { phase.value = 'open' })
-  later(it.kind === 'wake' ? 7000 : 5200, collapse)
+  /* iOS lays its own banner over the top of an open web app for about five
+     seconds, right where this sits, so the island holds well past it. A
+     wake-up stays until tapped, up to 20s: it is asking for an action. */
+  later(it.kind === 'wake' ? 20000 : 11000, collapse)
 }, { immediate: true })
 
 function collapse() {
@@ -88,14 +91,25 @@ function onMessage(e) {
   else if (m.type === 'novahost-open' && m.url) router.push(m.url).catch(() => {})
 }
 
+let channel = null
+
 onMounted(() => {
   navigator.serviceWorker?.addEventListener('message', onMessage)
+  // addEventListener alone leaves the client message queue closed in Safari;
+  // only `onmessage` or startMessages() opens it. Without this every message
+  // from push-sw.js waits forever.
+  navigator.serviceWorker?.startMessages?.()
+  try {
+    channel = new BroadcastChannel('novahost-push')
+    channel.onmessage = onMessage
+  } catch { /* the postMessage route still works */ }
   // A preview hook for design review on a desktop browser, where push cannot run.
   window.__novaIsland = showIsland
 })
 onBeforeUnmount(() => {
   clear()
   navigator.serviceWorker?.removeEventListener('message', onMessage)
+  channel?.close()
 })
 </script>
 

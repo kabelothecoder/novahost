@@ -26,8 +26,13 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil((async () => {
     await self.registration.showNotification(title, options)
+    const note = { type: 'novahost-push', id: msg.id || options.tag + ':' + Date.now(), title, body: options.body, kind: msg.kind, url: options.data.url }
+    /* Two routes to the open app, because Safari is unreliable about each:
+       postMessage to window clients, and a BroadcastChannel. The page drops
+       whichever arrives second (same id). */
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    for (const w of wins) w.postMessage({ type: 'novahost-push', title, body: options.body, kind: msg.kind, url: options.data.url })
+    for (const w of wins) w.postMessage(note)
+    try { const bc = new BroadcastChannel('novahost-push'); bc.postMessage(note); bc.close() } catch (e) { /* not supported */ }
   })())
 })
 

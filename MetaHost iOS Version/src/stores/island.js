@@ -17,8 +17,17 @@ export const island = reactive({
   queue: [],
 })
 
+/* The service worker sends each alert twice (postMessage and a
+   BroadcastChannel); the second copy is dropped here. */
+const seen = new Set()
+
 export function showIsland(msg) {
   if (!msg || !msg.title) return
+  if (msg.id) {
+    if (seen.has(msg.id)) return
+    seen.add(msg.id)
+    if (seen.size > 50) seen.delete(seen.values().next().value)
+  }
   const side = /\bSELL\b/i.test(msg.title) ? 'sell' : /\bBUY\b/i.test(msg.title) ? 'buy' : null
   const item = { id: Date.now() + Math.random(), side, kind: msg.kind || 'info', url: msg.url || '/home', title: msg.title, body: msg.body || '' }
   if (island.current) island.queue.push(item)
