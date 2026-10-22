@@ -1,7 +1,6 @@
 <template>
   <!-- A paused account in the list layout: one compact row, tap to switch to it. -->
-  <button class="row cc-card" :style="{ '--tint': account.tint }">
-    <span class="row-tile" aria-hidden="true">{{ account.broker.charAt(0) }}</span>
+  <button class="row cc-card">
     <span class="row-id">
       <span class="row-name">{{ account.broker }}</span>
       <span class="row-sub">
@@ -30,6 +29,7 @@ const extraText = `+${ACCOUNT_ADDON.currencySymbol}${ACCOUNT_ADDON.priceMonthly}
 
 <style scoped>
 .row {
+  --tint: #8E8E99;
   width: 100%; height: 66px; padding: 0 16px;
   display: flex; align-items: center; gap: 12px;
   border-radius: 20px; text-align: left; cursor: pointer; font: inherit; color: var(--cc-ink);
@@ -38,10 +38,6 @@ const extraText = `+${ACCOUNT_ADDON.currencySymbol}${ACCOUNT_ADDON.priceMonthly}
   transition: transform 180ms var(--cc-spring);
 }
 .row:active { transform: scale(0.985); }
-.row-tile {
-  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px;
-  background: var(--tint); color: #0B0B0D; font-size: 16px; font-weight: 800;
-}
 .row-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .row-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-sub { display: flex; align-items: center; gap: 7px; }

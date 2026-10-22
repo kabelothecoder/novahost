@@ -4,17 +4,14 @@
     shows until it is pulled out, so everything that must read while stacked
     (broker, masked login, tag, balance) sits in the header row above the rule.
 
-    The broker tile is a letter on the broker's own tint, not a logo: logos are
-    data the backend will supply, and CLAUDE.md forbids hardcoding broker
-    marks in the UI.
+    No broker logo, letter badge or brand colour (design rule, 2026-10-22):
+    a broker reads as text, "Exness · ···4471".
   -->
   <div
     class="acc-card cc-card"
     :class="{ 'is-active': active }"
-    :style="{ '--tint': account.tint }"
   >
     <div class="acc-head">
-      <span class="acc-tile" aria-hidden="true">{{ account.broker.charAt(0) }}</span>
       <div class="acc-id">
         <div class="acc-name-row">
           <span class="acc-name">{{ account.broker }}</span>
@@ -79,6 +76,8 @@ const robotLine = computed(() => {
 
 <style scoped>
 .acc-card {
+  /* One neutral tint for every broker: no brand colours. */
+  --tint: #8E8E99;
   position: relative;
   width: 100%;
   height: 100%;
@@ -103,16 +102,6 @@ const robotLine = computed(() => {
   left: 18px; right: 18px; top: 12px;
   height: 44px;
   display: flex; align-items: center; gap: 12px;
-}
-.acc-tile {
-  flex: none;
-  display: grid; place-items: center;
-  width: 42px; height: 42px;
-  border-radius: 12px;
-  background: var(--tint);
-  color: #0B0B0D;
-  font-size: 19px; font-weight: 800;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 .acc-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .acc-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }

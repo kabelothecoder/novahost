@@ -7,7 +7,6 @@
 
     <div class="cs-flow">
       <div class="cs-row is-from">
-        <span class="cs-tile" :style="{ background: from.tint }">{{ from.broker.charAt(0) }}</span>
         <span class="cs-t"><b>{{ from.broker }} {{ maskLogin(from) }}</b><i>{{ robotName }} stops trading here</i></span>
         <span class="cs-tag">PAUSES</span>
       </div>
@@ -15,7 +14,6 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
       </div>
       <div class="cs-row">
-        <span class="cs-tile is-to" :style="{ background: to.tint }">{{ to.broker.charAt(0) }}</span>
         <span class="cs-t"><b>{{ to.broker }} {{ maskLogin(to) }}</b><i>{{ robotName }} starts here, same strategy</i></span>
         <span class="cs-tag is-on">ACTIVE</span>
       </div>
@@ -47,8 +45,6 @@ defineEmits(['close', 'confirm'])
 .cs-flow { border-radius: 20px; background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.09); padding: 6px 14px; }
 .cs-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
 .cs-row.is-from { opacity: 0.75; }
-.cs-tile { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; color: #0B0B0D; font-weight: 800; }
-.cs-tile.is-to { box-shadow: 0 0 0 1.5px var(--cc-accent); }
 .cs-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cs-t b { font-size: 15px; font-weight: 600; color: var(--cc-ink); }
 .cs-t i { font-style: normal; font-size: 12.5px; color: var(--cc-ink-3); }
