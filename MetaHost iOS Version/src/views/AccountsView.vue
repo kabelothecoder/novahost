@@ -27,19 +27,6 @@
       <h1 class="acv-title">My accounts</h1>
       <p class="acv-sub">{{ subtitle }}</p>
 
-      <div class="acv-seg" role="tablist" aria-label="Accounts layout">
-        <button
-          v-for="l in ACCOUNT_LAYOUTS"
-          :key="l.id"
-          class="acv-seg-btn"
-          :class="{ 'is-on': accountPrefs.layout === l.id }"
-          role="tab"
-          :aria-selected="accountPrefs.layout === l.id"
-          :title="l.blurb"
-          @click="pickLayout(l.id)"
-        >{{ l.name }}</button>
-      </div>
-
       <div v-if="!accounts.loaded" class="acv-skel" aria-busy="true">
         <span v-for="n in 3" :key="n" class="acv-skel-bar"></span>
       </div>
@@ -91,13 +78,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { theme, resolvedScheme } from '../stores/theme.js'
 import { session } from '../stores/session.js'
 import { robot } from '../stores/robot.js'
 import {
   accounts, accountList, activeAccount, extraCount, includedAccountId, loadAccounts, makeActive, delink,
-  buySlot, recheckSlot, ACCOUNT_LAYOUTS, accountPrefs, setAccountLayout,
+  buySlot, recheckSlot, accountPrefs,
 } from '../stores/accounts.js'
 import { ACCOUNT_ADDON, maskLogin } from '../services/accountsService.js'
 import { haptic } from '../composables/useSpeech.js'
@@ -112,13 +99,9 @@ import DelinkSheet from '../components/accounts/sheets/DelinkSheet.vue'
 
 const SWITCHERS = { stack: StackSwitcher, carousel: CarouselSwitcher, list: ListSwitcher }
 
-function pickLayout(id) {
-  if (accountPrefs.layout === id) return
-  haptic(10)
-  setAccountLayout(id)
-}
 
 const route = useRoute()
+const router = useRouter()
 const toast = ref('')
 let toastTimer = null
 
@@ -231,11 +214,11 @@ async function onPay() {
 
 function onLinkSlot() { startLink() }
 
-/* The connect flow is the next phase. Until it lands this is the one honest
-   dead end: the slot stays paid and READY, nothing is lost. */
+/* Linking runs on the connect screen (Broker → Server → Login → Connected).
+   A paid slot stays READY if the user backs out, so nothing is lost. */
 function startLink() {
   sheet.value = null
-  flash('Linking an account arrives in the next step.')
+  router.push('/terminal')
 }
 
 onMounted(() => {
@@ -279,19 +262,7 @@ onUnmounted(() => clearTimeout(toastTimer))
 }
 
 .acv-title { margin: 18px 0 0; font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.02em; color: var(--cc-ink); }
-.acv-sub { margin: 4px 0 16px; font-size: 13px; line-height: 18px; color: var(--cc-ink-3); }
-
-.acv-seg {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
-  margin-bottom: 20px; padding: 3px; border-radius: var(--cc-r-chip);
-  background: var(--cc-track);
-}
-.acv-seg-btn {
-  height: 32px; border: 0; border-radius: var(--cc-r-chip); background: none; cursor: pointer;
-  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--cc-ink-3);
-  transition: background 220ms var(--cc-ease), color 220ms var(--cc-ease);
-}
-.acv-seg-btn.is-on { background: var(--cc-accent-fill); color: var(--cc-accent-fill-ink); }
+.acv-sub { margin: 4px 0 22px; font-size: 13px; line-height: 18px; color: var(--cc-ink-3); }
 
 .acv-skel { display: flex; flex-direction: column; gap: 12px; }
 .acv-skel-bar { height: 84px; border-radius: 26px; background: var(--cc-card); animation: acv-pulse 1.4s ease-in-out infinite; }

@@ -121,12 +121,12 @@ export async function linkBroker({ accountNumber, password, server, platform, ac
 
     if (error) {
       const body = await bodyOf(error)
-      if (body) return { ok: false, code: body.code, message: describe(body, 'Connection failed.') }
+      if (body) return { ok: false, code: body.code, message: describe(body, 'Connection failed.'), suggestions: body.suggestions || [] }
       throw error
     }
 
     if (!data?.success) {
-      return { ok: false, code: data?.code, message: describe(data, 'Connection failed.') }
+      return { ok: false, code: data?.code, message: describe(data, 'Connection failed.'), suggestions: data?.suggestions || [] }
     }
 
     return {
@@ -138,6 +138,33 @@ export async function linkBroker({ accountNumber, password, server, platform, ac
     }
   } catch (err) {
     return { ok: false, message: err?.message || 'Could not reach the connection service.' }
+  }
+}
+
+/**
+ * Server names MetaCopier can dial, matching `query` (case, spacing and
+ * punctuation ignored), at most 50. Read-only: `metacopier-connect` with
+ * `action: 'servers'` never creates or touches an account.
+ *
+ * `ok: false` means the list could not be read. That is "unknown", never "no
+ * servers": the connect screen falls back to typing the server by hand.
+ */
+export async function listServers({ query = '', platform = 'MT5' } = {}) {
+  let licenseKey
+  try { licenseKey = requireKey() } catch (e) { return { ok: false, code: e.code, message: e.message, servers: [] } }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('metacopier-connect', {
+      body: { license_key: licenseKey, action: 'servers', query: String(query).trim(), platform },
+    })
+    if (error) {
+      const body = await bodyOf(error)
+      return { ok: false, code: body?.code, message: describe(body, 'Could not load the server list.'), servers: [] }
+    }
+    if (!data?.success) return { ok: false, code: data?.code, message: describe(data, 'Could not load the server list.'), servers: [] }
+    return { ok: true, servers: Array.isArray(data.servers) ? data.servers : [], total: data.total ?? 0 }
+  } catch (err) {
+    return { ok: false, message: err?.message || 'Could not load the server list.', servers: [] }
   }
 }
 

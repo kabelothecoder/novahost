@@ -49,7 +49,7 @@ const routes = [
   {
     path: '/terminal',
     name: 'terminal',
-    component: () => import('../views/TerminalView.vue'),
+    component: () => import('../views/ConnectView.vue'),
   },
   {
     /* Step two after linking: per-account symbol matching and risk. */

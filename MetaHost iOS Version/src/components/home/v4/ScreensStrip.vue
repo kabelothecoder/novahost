@@ -70,7 +70,7 @@ defineEmits(['close', 'open'])
 
 /* Home look lives in Settings; the tray is only these three. */
 const CARDS = [
-  { id: 'terminal', name: 'MT5',           to: '/terminal' },
+  { id: 'terminal', name: 'MT5',           to: '/accounts' },
   { id: 'scanner',  name: 'Chart Scanner', to: '/scanner' },
   { id: 'settings', name: 'Settings',      to: '/settings' },
 ]
