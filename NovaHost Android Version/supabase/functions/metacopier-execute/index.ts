@@ -148,9 +148,8 @@ const MAX_REQUEST_ID = 999
  * Stable request id derived from the signal id, inside MetaCopier's range.
  *
  * The same signal must always produce the same number: that is what stops a
- * network hiccup turning one mentor call into two positions, and it keeps the
- * id fixed across the candidate-name walk so the broker sees one request rather
- * than five.
+ * network hiccup turning one mentor call into two positions. (A later name in
+ * the candidate walk is seeded with the name as well -- see `requestIdFor`.)
  *
  * The modulo is not a detail -- it is the whole bug this function once had. The
  * hash below is 32-bit and was returned raw, producing ids like 2105094537
@@ -298,7 +297,7 @@ const SYMBOL_ALIASES: Record<string, string[]> = {
   JP225:  ['JPN225', 'JP225', 'NIKKEI'],
   USOIL:  ['WTI', 'XTIUSD', 'USOIL', 'CRUDE', 'OIL'],
   UKOIL:  ['BRENT', 'XBRUSD', 'UKOIL'],
-  BTCUSD: ['BTCUSD', 'BITCOIN', 'BTC'],
+  BTCUSD: ['BTCUSD', 'BITCOIN', 'BTC', 'XBTUSD'],
   ETHUSD: ['ETHUSD', 'ETHEREUM', 'ETH'],
   VIX:    ['VIX', 'VOLATILITY', 'VIXX'],
 }
@@ -370,6 +369,29 @@ function coversSymbol(reported: string, allowedCanonical: string): boolean {
 function safeSuffix(metadata: Record<string, unknown> | null): string {
   return String(metadata?.symbol_suffix ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '')
 }
+
+/**
+ * A refusal that says, in words, that the broker does not know the name.
+ *
+ * MetaCopier does not always bracket this. An IFX account answered an order for
+ * `US30` with `{"errors":["Symbol not found"]}` -- no `[SYMBOL_...]` token -- so
+ * the walk read it as a refusal of the ORDER, stopped after one name and never
+ * asked the broker, which lists the Dow as `WS30.ifx_m`.
+ */
+const UNKNOWN_SYMBOL_PROSE =
+  /symbol\s+(is\s+)?(not\s+found|unknown|does\s+not\s+exist)|unknown\s+symbol|invalid\s+symbol|no\s+such\s+symbol/i
+
+/**
+ * "Autotrading disabled by server", and the other ways a broker says it.
+ *
+ * Read in two places, for two jobs. Below, it names the refusal to the user. In
+ * the walk, it is a reason to check the NAME first: every time this has been
+ * seen live, the order had gone out under a name the broker does not list --
+ * `Gold` on two RCG accounts, bare `XAUUSD` on an IFX book whose gold is
+ * `XAUUSD.ifx` -- while the exact listed name filled on the same broker.
+ */
+const AUTOTRADING_REFUSAL =
+  /auto\s*-?\s*trading\s+(is\s+)?disabled|trading\s+(is\s+)?disabled\s+by\s+server|algo(rithmic)?\s+trading\s+(is\s+)?(disabled|not\s+allowed)/i
 
 /**
  * Every name this order could legitimately go out under, best guess first.
@@ -1072,10 +1094,20 @@ Deno.serve(async (req: Request) => {
     // second position on an account that had already accepted the first.
     const candidates = symbolCandidates(cleanPair, metadata, userSymbol)
 
-    // Stable across attempts. The same trade keeps the same id no matter how
-    // many names it took to find the instrument, so a retry can never be
-    // mistaken by MetaCopier for a second order.
-    const requestId = requestIdFrom(String(signal_id ?? `${license.id}:${Date.now()}`))
+    // Stable per name. The first name carries the signal's own id, exactly as
+    // it always has, so a network retry of the same order is still recognised
+    // by MetaCopier as one order.
+    //
+    // A LATER name gets an id of its own. It is only ever tried after the broker
+    // refused the previous one outright, so nothing was opened under it -- and
+    // MetaCopier documents the id as a duplicate guard without saying what it
+    // does with one it has already refused. Reusing it risks the retry being
+    // answered from that guard: dropped, or acknowledged without executing,
+    // which would be reported here as a filled trade that never happened.
+    const requestSeed = String(signal_id ?? `${license.id}:${Date.now()}`)
+    const requestId = requestIdFrom(requestSeed)
+    const requestIdFor = (forSymbol: string) =>
+      forSymbol === candidates[0] ? requestId : requestIdFrom(`${requestSeed}|${forSymbol}`)
 
     // ---- Pending entry -------------------------------------------------------
     // 0 is MetaCopier's "fill at market" flag. A pending orderType sent with 0
@@ -1132,7 +1164,7 @@ Deno.serve(async (req: Request) => {
       ...(pending && expirySeconds > 0 ? { pendingExpirySeconds: expirySeconds } : {}),
       stopLoss: stops.sl,                 // 0 => no stop loss
       takeProfit: stops.tp,               // 0 => no take profit
-      requestId,
+      requestId: requestIdFor(forSymbol),
       comment: tradeComment(license),
       // The clean half of the trade's identity. The comment arrives in the
       // terminal wearing MetaCopier's `API|<requestId>|` prefix and nothing we
@@ -1283,7 +1315,9 @@ Deno.serve(async (req: Request) => {
       )
 
       const faults = (lastDetail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
-      return faults.some((c) => c.includes('SYMBOL')) ? 'wrong-name' : 'stop'
+      return faults.some((c) => c.includes('SYMBOL')) || UNKNOWN_SYMBOL_PROSE.test(lastDetail)
+        ? 'wrong-name'
+        : 'stop'
     }
 
     let outcome: 'placed' | 'wrong-name' | 'stop' = 'wrong-name'
@@ -1300,7 +1334,15 @@ Deno.serve(async (req: Request) => {
     // forever. One request converts that from a permanent failure into a
     // one-time cost: the answer is written back to the licence below, so the
     // next signal on this instrument goes out as a single order to a known name.
-    if (!placed && outcome === 'wrong-name') {
+    //
+    // "Autotrading disabled" also earns one look at the list. It reads as an
+    // account-wide verdict, but on every live occurrence it was a name the
+    // broker does not list (see AUTOTRADING_REFUSAL). If the list names exactly
+    // what was sent, nothing is retried and the refusal stands as written.
+    // Safe either way: the broker refused, so nothing is open under that name.
+    const autotradingRefused = !placed && outcome === 'stop' && AUTOTRADING_REFUSAL.test(lastDetail)
+
+    if (!placed && (outcome === 'wrong-name' || autotradingRefused)) {
       const discovered = await resolveFromBrokerList(
         account_id, cleanPair, safeSuffix(metadata), METACOPIER_API_KEY
       )
@@ -1372,7 +1414,7 @@ Deno.serve(async (req: Request) => {
       // here describes something the subscriber can change from their phone.
       // This one they cannot -- only the broker can lift it -- so sending them to
       // Trading Symbols or Broker Setup wastes their evening.
-      if (says(/auto\s*-?\s*trading\s+(is\s+)?disabled|trading\s+(is\s+)?disabled\s+by\s+server|algo(rithmic)?\s+trading\s+(is\s+)?(disabled|not\s+allowed)/i)) {
+      if (says(AUTOTRADING_REFUSAL)) {
         code = 'AUTOTRADING_DISABLED'
         message =
           `Your broker has automated trading switched off on this account, so no order ` +
@@ -1410,7 +1452,11 @@ Deno.serve(async (req: Request) => {
       // immediately, so the user has a reason to open Broker Setup, and the
       // next signal fails fast on NO_ACCOUNT_LINKED instead of spending a
       // broker round trip rediscovering the same corpse.
-      else if (hit('DELETED') || hit('NOT_FOUND')) {
+      //
+      // NOT_FOUND only when it is not the SYMBOL that was not found:
+      // `[SYMBOL_NOT_FOUND]` contains the same substring, and matching it here
+      // would unlink a healthy account over an unknown instrument name.
+      else if (hit('DELETED') || codes.some((c) => c.includes('NOT_FOUND') && !c.includes('SYMBOL'))) {
         code = 'ACCOUNT_DISCONNECTED'
         message = "Your trading account's connection to the broker was lost. Reconnect it in Broker Setup to keep trading."
 
@@ -1434,7 +1480,7 @@ Deno.serve(async (req: Request) => {
         } else {
           console.warn(`[metacopier-execute] licence ${license.id}'s account ${account_id} was deleted at the provider -- link cleared, will now show NOT LINKED`)
         }
-      } else if (hit('SYMBOL')) {
+      } else if (hit('SYMBOL') || says(UNKNOWN_SYMBOL_PROSE)) {
         code = 'UNKNOWN_SYMBOL'
         // By this point the account's own symbol list has been read and searched,
         // so this is no longer "we ran out of guesses" -- it is "your broker does
@@ -1546,7 +1592,7 @@ Deno.serve(async (req: Request) => {
       // effectiveLots, not lots: reporting the requested size when a cap reduced
       // it tells the user they hold a position they do not hold.
       message: `${orderType} ${filledAs} ${effectiveLots} lots sent.`,
-      requestId,
+      requestId: requestIdFor(filledAs),
       // `cap_exempt` is recorded, not merely acted on: this order may sit above
       // the user's own max_trades, and a position nobody can explain later is
       // worse than one the audit trail accounts for.
