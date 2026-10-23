@@ -40,7 +40,14 @@ Deno.serve(async (req: Request) => {
     // nothing else -- no credentials, and it never creates or touches an account.
     const serversOnly = body?.action === 'servers'
 
-    if (!license_key || (!serversOnly && (!account_number || !password || !server))) {
+    // Multi-account actions. `add_account` links ANOTHER account under the same
+    // key without touching the primary; `list_accounts` and `remove_account`
+    // need no credentials. The primary link (no action) behaves exactly as before.
+    const action = String(body?.action ?? '')
+    const addAccount = action === 'add_account'
+    const noCredentials = serversOnly || action === 'list_accounts' || action === 'remove_account'
+
+    if (!license_key || (!noCredentials && (!account_number || !password || !server))) {
       return json({
         success: false,
         error: 'Account number, password and server are all required.',
@@ -51,7 +58,7 @@ Deno.serve(async (req: Request) => {
     const key = String(license_key).trim().toUpperCase()
     const { data: license, error: licErr } = await novaHost
       .from('licenses')
-      .select('id, ea_id, status, expires_at, metadata')
+      .select('id, ea_id, status, expires_at, metadata, max_broker_accounts')
       .eq('license_key', key)
       .maybeSingle()
 
@@ -82,6 +89,67 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, error: 'Server misconfiguration.' }, 500)
     }
 
+    // ---- Accounts under this key ---------------------------------------------
+    const liveAccounts = async () => {
+      const { data } = await novaHost
+        .from('license_broker_accounts')
+        .select('id, provider, bridge_account_id, platform, login, server, label, is_primary, auto_execute, lot_multiplier, status, created_at')
+        .eq('license_id', license.id)
+        .is('disconnected_at', null)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true })
+      return data ?? []
+    }
+    const maxAccounts = Number(license.max_broker_accounts) || 1
+
+    if (action === 'list_accounts') {
+      const accounts = await liveAccounts()
+      return json({
+        success: true,
+        max_accounts: maxAccounts,
+        accounts: accounts.map((a) => ({
+          account_id: a.bridge_account_id, provider: a.provider, platform: a.platform,
+          login: a.login, server: a.server, label: a.label, primary: a.is_primary,
+          auto_execute: a.auto_execute, lot_multiplier: Number(a.lot_multiplier), status: a.status,
+        })),
+      })
+    }
+
+    if (action === 'remove_account') {
+      const target = String(body?.account_id ?? '')
+      const row = (await liveAccounts()).find((a) => a.bridge_account_id === target)
+      if (!row) return json({ success: false, code: 'ACCOUNT_NOT_ON_LICENCE', error: 'That account is not linked to this licence.' }, 404)
+      // The primary is unlinked through the normal broker setup, which also
+      // clears the licence's own link; removing it here would leave that dangling.
+      if (row.is_primary) return json({ success: false, code: 'PRIMARY_ACCOUNT', error: 'Change your main account from Broker Setup.' }, 409)
+      // Stops the provider billing. A failure here still unlinks: a terminal we
+      // no longer trade on is a cost to chase, not a reason to keep trading it.
+      const stopped = await bridgeFor(row.provider, row.bridge_account_id, novaHost)?.disconnect().catch(() => false)
+      await novaHost.from('license_broker_accounts')
+        .update({ disconnected_at: new Date().toISOString(), status: 'disconnected' })
+        .eq('id', row.id)
+      if (!stopped) console.warn(`[metacopier-connect] ${row.provider} account ${row.bridge_account_id} unlinked but not stopped at the provider`)
+      return json({ success: true, code: 'REMOVED', account_id: target })
+    }
+
+    if (addAccount) {
+      const accounts = await liveAccounts()
+      if (accounts.length === 0) {
+        return json({ success: false, code: 'NO_PRIMARY_ACCOUNT', error: 'Connect your main account first.' }, 409)
+      }
+      if (accounts.length >= maxAccounts) {
+        return json({
+          success: false, code: 'ACCOUNT_LIMIT_REACHED',
+          error: `This licence can trade ${maxAccounts} account${maxAccounts === 1 ? '' : 's'}. Remove one or add more accounts to your plan.`,
+          max_accounts: maxAccounts,
+        }, 403)
+      }
+      const login = String(account_number ?? '').replace(/\s+/g, '')
+      if (accounts.some((a) => a.login === login && a.server.toLowerCase() === String(server).trim().toLowerCase())) {
+        return json({ success: false, code: 'ACCOUNT_ALREADY_LINKED', error: 'That account is already linked to this licence.' }, 409)
+      }
+    }
+
     if (serversOnly) {
       const list = await bridge.servers(wantPlatform)
       if (!list) return json({ success: false, code: 'SERVER_LIST_UNAVAILABLE', error: 'Could not load the server list.' }, 502)
@@ -103,7 +171,9 @@ Deno.serve(async (req: Request) => {
       server: String(server ?? ''),
       platform: wantPlatform,
       region: region_name ?? null,
-      priorAccountId: resolveLink(priorMetadata)?.accountId ?? null,
+      // An added account replaces nothing, so it must not be handed the
+      // primary's id to tear down.
+      priorAccountId: addAccount ? null : resolveLink(priorMetadata)?.accountId ?? null,
     })
 
     if (!result.ok) {
@@ -183,6 +253,39 @@ Deno.serve(async (req: Request) => {
     // standard account must be able to clear a stale ".m", and leaving the old
     // key in place would silently keep decorating symbols the new book does not
     // have.
+    // ---- An added account is a row of its own ---------------------------------
+    // The licence metadata stays the primary's. Nothing written above has been
+    // saved; for an added account it is simply not used.
+    if (addAccount) {
+      const { error: addErr } = await novaHost.from('license_broker_accounts').insert({
+        license_id: license.id,
+        provider,
+        bridge_account_id: accountId,
+        platform: result.platform === 'MT4' ? 'MT4' : 'MT5',
+        login: String(account_number ?? '').replace(/\s+/g, ''),
+        server: result.server,
+        label: body?.label ? String(body.label).slice(0, 40) : null,
+        is_primary: false,
+        symbol_suffix: suffix,
+        status: linkState,
+      })
+      if (addErr) {
+        // Linked at the provider but not recorded: stop it so it does not bill unseen.
+        console.error(`[metacopier-connect] add_account write failed for licence ${license.id}: ${addErr.message}`)
+        await bridgeFor(provider, accountId, novaHost)?.disconnect().catch(() => false)
+        return json({ success: false, code: 'LINK_NOT_SAVED', error: 'Your broker accepted the login but we could not save the connection. Please try again.' }, 500)
+      }
+      return json({
+        success: true,
+        code: linkState === 'connected' ? 'CONNECTED' : 'CONNECTING',
+        status: linkState,
+        account_id: accountId,
+        platform: result.platform,
+        primary: false,
+        message: 'Additional trading account connected.',
+      })
+    }
+
     metadata.symbol_suffix = suffix
     if (account_type) metadata.account_type = String(account_type).trim()
 
@@ -210,6 +313,34 @@ Deno.serve(async (req: Request) => {
         error: 'Your broker accepted the login but we could not save the connection. Please try again.',
         details: linkErr.message,
       }, 500)
+    }
+
+    // ---- Keep the primary row in step with the licence -----------------------
+    // Best-effort: the licence metadata is still the record for the primary,
+    // so a failure here costs only the multi-account view, not trading.
+    {
+      const login = String(account_number ?? '').replace(/\s+/g, '')
+      const now = new Date().toISOString()
+      // The old primary, and any added account that is this same login, retire.
+      await novaHost.from('license_broker_accounts')
+        .update({ is_primary: false, disconnected_at: now, status: 'replaced' })
+        .eq('license_id', license.id).eq('is_primary', true)
+      await novaHost.from('license_broker_accounts')
+        .update({ disconnected_at: now, status: 'replaced' })
+        .eq('license_id', license.id).eq('login', login).ilike('server', result.server).is('disconnected_at', null)
+      const { error: rowErr } = await novaHost.from('license_broker_accounts').upsert({
+        license_id: license.id,
+        provider,
+        bridge_account_id: accountId,
+        platform: result.platform === 'MT4' ? 'MT4' : 'MT5',
+        login,
+        server: result.server,
+        is_primary: true,
+        symbol_suffix: suffix,
+        status: linkState,
+        disconnected_at: null,
+      }, { onConflict: 'provider,bridge_account_id' })
+      if (rowErr) console.error(`[metacopier-connect] primary row sync failed for licence ${license.id}: ${rowErr.message}`)
     }
 
     const connected = linkState === 'connected'

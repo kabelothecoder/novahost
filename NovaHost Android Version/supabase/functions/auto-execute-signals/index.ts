@@ -216,6 +216,36 @@ Deno.serve(async (req: Request) => {
       return cfg.smart_lot && smart > 0 ? smart : Number(cfg.lot) || 0
     }
 
+    // ---- Accounts per licence (multi-account) ---------------------------------
+    //
+    // A licence can trade several broker accounts. Each live row with
+    // auto_execute on gets the signal, scaled by its own lot_multiplier. A
+    // licence with no rows yet (linked before the table existed and not
+    // backfilled) trades its one linked account exactly as before.
+    const { data: accountRows, error: acctErr } = await novaHost
+      .from('license_broker_accounts')
+      .select('license_id, bridge_account_id, auto_execute, lot_multiplier')
+      .in('license_id', eligible.map((l) => l.id))
+      .is('disconnected_at', null)
+    if (acctErr) throw acctErr
+
+    type Target = { accountId: string | null; multiplier: number }
+    const accountsFor = new Map<string, { all: number; active: Target[] }>()
+    for (const r of accountRows ?? []) {
+      const e = accountsFor.get(r.license_id) ?? { all: 0, active: [] }
+      e.all++
+      if (r.auto_execute) e.active.push({ accountId: r.bridge_account_id, multiplier: Number(r.lot_multiplier) || 1 })
+      accountsFor.set(r.license_id, e)
+    }
+    const targetsOf = (licenceId: string): Target[] => {
+      const e = accountsFor.get(licenceId)
+      return e ? e.active : [{ accountId: null, multiplier: 1 }]
+    }
+
+    /** Scaled size, on the 0.01 grid every broker we serve accepts, never below it. */
+    const scaled = (volume: number, multiplier: number) =>
+      Math.max(0.01, Math.round(volume * multiplier * 100) / 100)
+
     // ---- Work ----------------------------------------------------------------
     const freshFrom = now - FRESH_SECONDS * 1000
     let placed = 0, refused = 0, missed = 0, skipped = 0, considered = 0
@@ -229,7 +259,13 @@ Deno.serve(async (req: Request) => {
 
       for (const licence of targets) {
         if (alreadyTaken.has(`${signal.id}:${licence.id}`)) { skipped++; continue }
-        if (placed + refused >= MAX_EXECUTIONS) { truncated = true; break outer }
+        // Checked BEFORE the claim, with room for every account: a licence is
+        // claimed once, so stopping halfway through its accounts would lose
+        // the rest of them for good.
+        const targetAccounts = targetsOf(licence.id)
+        if (placed + refused + Math.max(1, targetAccounts.length) > MAX_EXECUTIONS && placed + refused > 0) {
+          truncated = true; break outer
+        }
 
         considered++
 
@@ -285,71 +321,88 @@ Deno.serve(async (req: Request) => {
           continue
         }
 
-        // ---- Place ---------------------------------------------------------
-        const body: Record<string, unknown> = {
-          license_key: licence.license_key,
-          pair: signal.pair,
-          side: String(signal.side ?? signal.type ?? 'BUY').toUpperCase(),
-          volume,
-          sl: signal.sl,
-          tp: signal.tp,
-          signal_id: signal.signal_id ?? signal.id,
-        }
-        /* Only for pending kinds. A MARKET order carrying an open_price is what
-           produces MISSING_ENTRY_PRICE / ENTRY_OUTSIDE_BRACKET confusion. */
-        if (signal.order_type && signal.order_type !== 'MARKET') {
-          body.order_type = signal.order_type
-          body.open_price = signal.price
-          if (signal.pending_expiry_seconds) {
-            body.pending_expiry_seconds = signal.pending_expiry_seconds
-          }
-        }
-
-        try {
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/metacopier-execute`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              apikey: SERVICE_ROLE_KEY,
-              Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-            },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(25_000),
-          })
-
-          const out = await res.json().catch(() => null)
-
-          if (out?.success === true) {
-            placed++
-            executions.push({
-              signal_id: signal.id, license_id: licence.id,
-              status: 'placed', code: out.code ?? null,
-              detail: null,
-              pair: signal.pair, side: body.side, volume, sl: signal.sl, tp: signal.tp,
-            })
-          } else {
-            refused++
-            /* The executor's own words where it sent any. MetaCopier returns
-               plain-English broker refusals ("market closed", "not enough
-               money"), and replacing one with a generic is how a user ends up
-               unable to tell a closed market from a rejected licence. */
-            executions.push({
-              signal_id: signal.id, license_id: licence.id,
-              status: 'refused',
-              code: out?.code ?? `HTTP_${res.status}`,
-              detail: out?.error ? String(out.error).slice(0, 500) : null,
-              pair: signal.pair, side: body.side, volume, sl: signal.sl, tp: signal.tp,
-            })
-          }
-        } catch (e) {
-          refused++
+        if (targetAccounts.length === 0) {
+          // Every account on the licence is paused. Claimed, so the handset
+          // does not fire it either: the user switched these accounts off.
+          skipped++
           executions.push({
             signal_id: signal.id, license_id: licence.id,
-            status: 'error', code: 'EXECUTOR_UNREACHABLE',
-            detail: (e as Error).message.slice(0, 500),
-            pair: signal.pair, side: body.side, volume, sl: signal.sl, tp: signal.tp,
+            status: 'refused', code: 'ALL_ACCOUNTS_PAUSED',
+            detail: 'Auto-trading is switched off on every account linked to this licence.',
+            pair: signal.pair, side: signal.side ?? signal.type,
           })
+          continue
         }
+
+        // ---- Place, on every account ---------------------------------------
+        const side = String(signal.side ?? signal.type ?? 'BUY').toUpperCase()
+        const placeOn = async (target: Target) => {
+          const lots = scaled(volume, target.multiplier)
+          const body: Record<string, unknown> = {
+            license_key: licence.license_key,
+            pair: signal.pair,
+            side,
+            volume: lots,
+            sl: signal.sl,
+            tp: signal.tp,
+            signal_id: signal.signal_id ?? signal.id,
+            ...(target.accountId ? { account_id: target.accountId } : {}),
+          }
+          /* Only for pending kinds. A MARKET order carrying an open_price is what
+             produces MISSING_ENTRY_PRICE / ENTRY_OUTSIDE_BRACKET confusion. */
+          if (signal.order_type && signal.order_type !== 'MARKET') {
+            body.order_type = signal.order_type
+            body.open_price = signal.price
+            if (signal.pending_expiry_seconds) {
+              body.pending_expiry_seconds = signal.pending_expiry_seconds
+            }
+          }
+          const base = {
+            signal_id: signal.id, license_id: licence.id, broker_account_id: target.accountId,
+            pair: signal.pair, side, volume: lots, sl: signal.sl, tp: signal.tp,
+          }
+
+          try {
+            const res = await fetch(`${SUPABASE_URL}/functions/v1/metacopier-execute`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: SERVICE_ROLE_KEY,
+                Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+              },
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(25_000),
+            })
+
+            const out = await res.json().catch(() => null)
+
+            if (out?.success === true) {
+              placed++
+              executions.push({ ...base, status: 'placed', code: out.code ?? null, detail: null })
+            } else {
+              refused++
+              /* The executor's own words where it sent any. Brokers return
+                 plain-English refusals ("market closed", "not enough money"),
+                 and replacing one with a generic is how a user ends up unable
+                 to tell a closed market from a rejected licence. */
+              executions.push({
+                ...base, status: 'refused',
+                code: out?.code ?? `HTTP_${res.status}`,
+                detail: out?.error ? String(out.error).slice(0, 500) : null,
+              })
+            }
+          } catch (e) {
+            refused++
+            executions.push({
+              ...base, status: 'error', code: 'EXECUTOR_UNREACHABLE',
+              detail: (e as Error).message.slice(0, 500),
+            })
+          }
+        }
+
+        // In parallel: each account is its own terminal, and one slow broker
+        // must not make the others late or push the run past its wall clock.
+        await Promise.all(targetAccounts.map(placeOn))
       }
     }
 

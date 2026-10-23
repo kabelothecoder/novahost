@@ -734,6 +734,8 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json().catch(() => ({}))
     const { license_key, pair, side, volume, sl, tp, signal_id, dry_run, order_type, open_price, pending_expiry_seconds } = body
+    // One of this licence's linked accounts (multi-account). Absent = the primary.
+    const targetAccount = body?.account_id ? String(body.account_id) : null
 
     const key = license_key ? String(license_key).trim().toUpperCase() : null
     const dryRun = dry_run === true
@@ -867,8 +869,44 @@ Deno.serve(async (req: Request) => {
       }, { expires_at: license.expires_at })
     }
 
-    const metadata = (license.metadata ?? null) as Record<string, unknown> | null
-    const link = resolveLink(metadata)
+    let metadata = (license.metadata ?? null) as Record<string, unknown> | null
+    let link = resolveLink(metadata)
+
+    // ---- A named account, when the licence has several -----------------------
+    //
+    // Still never trusted from the request on its own: the id must be a live
+    // row on THIS licence, so a caller can only ever pick among its own
+    // accounts. A secondary account reads its own symbol map and suffix, since
+    // the licence's are learnt from the primary's broker and an IFX spelling
+    // sent to Exness is a guaranteed refusal.
+    let secondaryRowId: string | null = null
+    if (targetAccount && targetAccount !== link?.accountId) {
+      const { data: row } = await novaHost
+        .from('license_broker_accounts')
+        .select('id, provider, bridge_account_id, is_primary, symbol_map, symbol_suffix, created_at, status, platform')
+        .eq('license_id', license.id)
+        .eq('bridge_account_id', targetAccount)
+        .is('disconnected_at', null)
+        .maybeSingle()
+      if (!row) {
+        return await finish('rejected', 404, {
+          success: false, code: 'ACCOUNT_NOT_ON_LICENCE',
+          error: 'That trading account is not linked to this licence.',
+        }, { account_id: targetAccount })
+      }
+      if (!row.is_primary) {
+        secondaryRowId = row.id
+        link = { provider: row.provider, accountId: row.bridge_account_id }
+        metadata = {
+          ...(metadata ?? {}),
+          symbol_map: row.symbol_map ?? {},
+          symbol_suffix: row.symbol_suffix ?? '',
+          connected_at: row.created_at,
+          bridge_status: row.status,
+          platform: row.platform,
+        }
+      }
+    }
 
     if (!link) {
       return await finish('rejected', 409, {
@@ -1382,10 +1420,15 @@ Deno.serve(async (req: Request) => {
           refusal.providerCode ?? 'ACCOUNT_WAS_DELETED',
         )
 
-        const { error: clearErr } = await novaHost
-          .from('licenses')
-          .update({ metadata: clearedMetadata })
-          .eq('id', license.id)
+        // A dead secondary retires its own row; the licence's link is the primary's.
+        const { error: clearErr } = secondaryRowId
+          ? await novaHost.from('license_broker_accounts')
+              .update({ disconnected_at: new Date().toISOString(), status: 'disconnected' })
+              .eq('id', secondaryRowId)
+          : await novaHost
+              .from('licenses')
+              .update({ metadata: clearedMetadata })
+              .eq('id', license.id)
 
         if (clearErr) {
           // Best-effort, like every other write in this file: a failed
@@ -1470,10 +1513,13 @@ Deno.serve(async (req: Request) => {
     const filledAs: string = placed
     const knownMap = (metadata?.symbol_map ?? {}) as Record<string, string>
     if (knownMap[cleanPair] !== filledAs) {
-      const { error: mapErr } = await novaHost
-        .from('licenses')
-        .update({ metadata: { ...(metadata ?? {}), symbol_map: { ...knownMap, [cleanPair]: filledAs } } })
-        .eq('id', license.id)
+      const learnt = { ...knownMap, [cleanPair]: filledAs }
+      const { error: mapErr } = secondaryRowId
+        ? await novaHost.from('license_broker_accounts').update({ symbol_map: learnt }).eq('id', secondaryRowId)
+        : await novaHost
+            .from('licenses')
+            .update({ metadata: { ...(license.metadata ?? {}), symbol_map: learnt } })
+            .eq('id', license.id)
 
       if (mapErr) {
         console.warn(
