@@ -225,7 +225,7 @@
         <falling-fx :fx="fx" :intensity="theme.fxIntensity" :accent="accent" :mode="fxMode" :clear="fxClear" :res="mini ? .35 : 1" :seed="seed"></falling-fx>
       </div>
 
-      <!-- Placeholder answer while voice is being built (Fish Audio, Phase 4). -->
+      <!-- What the robot is saying (voice-turn). -->
       <Transition name="rh-cap">
         <div v-if="caption" class="rh-caption" :style="{ left: (dx + 20) + 'px', top: y(capTop, 'bot') }">
           <div class="rh-cap-who">{{ rb.name.toUpperCase() }}</div>
@@ -239,6 +239,8 @@
       </div>
 
       <ScreensStrip v-if="strip" current="/home" :style="{ '--a': accent }" @close="strip = false" @open="openScreen" />
+
+      <VoiceActionCard :pending="vt.pending.value" :busy="vt.busy.value" :accent="accent" @confirm="voiceConfirm" @dismiss="vt.dismiss" />
 
       <HomeSheets
         :sheet="sheet"
@@ -262,6 +264,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { theme } from '../../../stores/theme.js'
 import { session } from '../../../stores/session.js'
 import { useSpeech, haptic } from '../../../composables/useSpeech.js'
+import { useVoiceTurn } from '../../../composables/useVoiceTurn.js'
+import VoiceActionCard from '../../VoiceActionCard.vue'
 import { useStage } from './useStage.js'
 import HomeSheets from './HomeSheets.vue'
 import ScreensStrip from './ScreensStrip.vue'
@@ -454,39 +458,38 @@ async function pickRobot(id, dir = 0) {
   if (!res.ok) emit('toast', res.message || 'Could not switch robot.')
 }
 
-/* ── Push-to-talk (design 2w–2y) ─────────────────────────────────── */
-const voiceState = ref('idle')
+/* ── Push-to-talk (design 2w–2y), live on Fish Audio via voice-turn ── */
+const vt = useVoiceTurn('robot', { screen: 'home', onNavigate: (p) => go(p) })
+const slide = ref(false)
+const voiceState = computed(() => slide.value && vt.state.value === 'listen' ? 'cancel'
+  : vt.state.value === 'think' ? 'answer' : vt.state.value)
 const voice = computed(() => voiceState.value)
 const talking = computed(() => voice.value === 'listen' || voice.value === 'cancel')
-const caption = ref('')
+const caption = computed(() => vt.state.value === 'think' ? 'Thinking…' : vt.caption.value)
 let pv = null
-let vT = 0
 function pttDown(e) {
   if (!live.value) return
   try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* not capturable */ }
-  clearTimeout(vT)
-  caption.value = ''
   const [x] = local(e)
   pv = { x }
-  voiceState.value = 'listen'
+  slide.value = false
+  vt.start()
   haptic(20)
 }
 function pttMove(e) {
   if (!pv) return
   const [x] = local(e)
-  const v = x - pv.x < -80 ? 'cancel' : 'listen'
-  if (voiceState.value !== v) voiceState.value = v
+  slide.value = x - pv.x < -80
 }
 function pttUp() {
   if (!pv) return
   pv = null
-  if (voiceState.value === 'cancel') { voiceState.value = 'idle'; return }
-  voiceState.value = 'answer'
-  const line = `Voice chat is almost ready. Soon you can ask me about your trades, your account, or how to set anything up.`
-  caption.value = line
-  speak(line)
-  clearTimeout(vT)
-  vT = setTimeout(() => { voiceState.value = 'idle'; caption.value = '' }, 5200)
+  vt.stop(slide.value)
+  slide.value = false
+}
+async function voiceConfirm() {
+  const res = await vt.confirm()
+  if (res) emit('toast', res.success ? (res.message || 'Sent to your broker.') : (res.error || 'That did not go through.'))
 }
 const capTop = computed(() => L.value === 'focus' ? 560 : L.value === 'full' ? 470 : 560)
 
@@ -636,7 +639,7 @@ onMounted(() => { refreshPlan(); document.addEventListener('visibilitychange', o
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisible)
   cancelAnimationFrame(raf)
-  clearTimeout(holdT); clearTimeout(vT)
+  clearTimeout(holdT)
   timers.forEach(clearTimeout)
 })
 </script>

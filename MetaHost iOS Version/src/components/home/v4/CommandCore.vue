@@ -120,6 +120,8 @@
         </div>
       </Transition>
 
+      <VoiceActionCard :pending="vt.pending.value" :busy="vt.busy.value" :accent="accent" @confirm="voiceConfirm" @dismiss="vt.dismiss" />
+
       <HomeSheets
         :sheet="sheet"
         :kind="kind"
@@ -144,6 +146,8 @@ import { theme } from '../../../stores/theme.js'
 import { trades, money, refreshPositions } from '../../../stores/trades.js'
 import { loadQuote, loadAccount } from '../../../services/brokerService.js'
 import { useSpeech } from '../../../composables/useSpeech.js'
+import { useVoiceTurn } from '../../../composables/useVoiceTurn.js'
+import VoiceActionCard from '../../VoiceActionCard.vue'
 import { useStage } from './useStage.js'
 import HomeSheets from './HomeSheets.vue'
 import {
@@ -316,24 +320,21 @@ function togglePower() {
   sheet.value = null
 }
 
-/* ── Push-to-talk (placeholder answer until Fish Audio lands) ────── */
-const listening = ref(false)
-const answering = ref(false)
-const caption = ref('')
-let vT = 0
+/* ── Push-to-talk, live on Fish Audio via voice-turn ─────────────── */
+const vt = useVoiceTurn('robot', { screen: 'home', onNavigate: (p) => emit('go', p) })
+const listening = computed(() => vt.state.value === 'listen')
+const answering = computed(() => vt.state.value === 'think' || vt.state.value === 'answer')
+const caption = computed(() => vt.state.value === 'think' ? 'Thinking…' : vt.caption.value)
 function pttDown() {
   if (!live.value || state.value !== 'running') return
-  clearTimeout(vT); caption.value = ''; answering.value = false
-  listening.value = true
+  vt.start()
 }
 function pttUp() {
-  if (!listening.value) return
-  listening.value = false
-  answering.value = true
-  const line = 'Voice chat is almost ready. Soon you can ask me about your trades, your account, or how to set anything up.'
-  caption.value = line
-  speak(line)
-  vT = setTimeout(() => { answering.value = false; caption.value = '' }, 5200)
+  if (vt.state.value === 'listen') vt.stop()
+}
+async function voiceConfirm() {
+  const res = await vt.confirm()
+  if (res) emit('toast', res.success ? (res.message || 'Sent to your broker.') : (res.error || 'That did not go through.'))
 }
 const micShadow = computed(() => lite.value ? 'none' : listening.value
   ? '0 0 44px -2px color-mix(in srgb, var(--a) 75%, transparent), inset 0 0 22px -4px color-mix(in srgb, var(--a) 45%, transparent)'
@@ -535,7 +536,7 @@ watch(ready, async v => { if (v) { await nextTick(); setupCanvas() } })
 watch(linked, v => { if (v) pull() })
 onUnmounted(() => {
   cancelAnimationFrame(raf)
-  clearInterval(poll); clearTimeout(vT)
+  clearInterval(poll)
   timers.forEach(clearTimeout)
 })
 </script>
