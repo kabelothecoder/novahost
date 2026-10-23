@@ -153,7 +153,7 @@ const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 // video ran behind it for nothing, and the page ground stayed --obsidian.
 // Those two darks meeting is the black band along the bottom of the MT5 screen.
 // `support` is NOT here and should not be: it is still on the glass system.
-const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal', 'accounts', 'symbols']
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal', 'accounts', 'symbols', 'support']
 const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
 
 const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))
