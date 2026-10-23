@@ -145,7 +145,7 @@ Deno.serve(async (req: Request) => {
     }
 
     /* An expired licence is still `status: 'active'` until something sweeps
-       it, and `metacopier-execute` would refuse it anyway -- but refusing it
+       it, and `broker-execute` would refuse it anyway -- but refusing it
        here costs no round trip and leaves no claimed-then-rejected signal. */
     const eligible = licences.filter((l) => {
       if (l.expires_at && new Date(l.expires_at) < new Date()) return false
@@ -201,7 +201,7 @@ Deno.serve(async (req: Request) => {
     }
 
     /* The size the subscriber chose for this instrument. Mirrors the ceiling
-       `metacopier-execute` computes, because on this platform the configured
+       `broker-execute` computes, because on this platform the configured
        size IS the ceiling -- there is no second field. Sending it means the
        executor's cap compares the number against itself and changes nothing. */
     function plannedLot(license: Record<string, unknown>, pair: unknown): number {
@@ -363,7 +363,7 @@ Deno.serve(async (req: Request) => {
           }
 
           try {
-            const res = await fetch(`${SUPABASE_URL}/functions/v1/metacopier-execute`, {
+            const res = await fetch(`${SUPABASE_URL}/functions/v1/broker-execute`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

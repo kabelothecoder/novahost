@@ -125,7 +125,7 @@ function go(path) { if (path) router.push(path) }
    mount, reading `METAAPI_TOKEN` / `METAAPI_ACCOUNT_ID` out of localStorage.
 
    MetaAPI is not this product's broker bridge and has not been since the
-   MetaCopier migration — `test-broker-connection`, the endpoint that
+   The broker bridge migration — `test-broker-connection`, the endpoint that
    accompanied it, is a deployed tombstone whose own note reads "it depended
    on METAAPI_TOKEN, an integration this product no longer uses". Nothing
    wrote those two keys either, so the function returned at its own guard on

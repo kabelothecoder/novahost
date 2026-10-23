@@ -15,7 +15,7 @@ const CORS_HEADERS = {
  *
  * It has no licence scoping -- unlike every other function in this project,
  * it acted on the WHOLE MetaCopier project rather than one caller's own
- * account -- so it does not stay live the way metacopier-connect and
+ * account -- so it does not stay live the way broker-connect and
  * broker-diagnostics safely do. Same tombstone pattern brokerService.js
  * documents for test-broker-connection: the slug stays, every call refused.
  */

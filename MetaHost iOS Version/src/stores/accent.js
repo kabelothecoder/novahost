@@ -44,6 +44,8 @@ export const accent = reactive({
   allowedSymbols: initialAllowedSymbols,
   // ── Broker Connection (Cloud Bridge) ─────────────
   brokerConnected: false,
+  /** Linked on the retired bridge; one reconnect moves it (license-status). */
+  relinkRequired: false,
   brokerBalance:   0,
 })
 

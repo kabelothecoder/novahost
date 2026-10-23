@@ -251,7 +251,7 @@ Deno.serve(async (req: Request) => {
         lot: s.lot,
         sl: s.sl,
         tp: s.tp,
-        // Named as metacopier-execute expects them, so the handset can forward
+        // Named as broker-execute expects them, so the handset can forward
         // the claim payload straight through. Rows written before pending
         // orders existed carry MARKET by column default, so no backfill is
         // needed and no client needs to special-case a missing value.

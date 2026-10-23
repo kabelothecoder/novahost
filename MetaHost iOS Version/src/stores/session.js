@@ -34,6 +34,8 @@ export const session = reactive({
   /* ── Façade over accent.js ─────────────────────────────────────── */
   get brokerConnected()  { return accent.brokerConnected },
   set brokerConnected(v) { accent.brokerConnected = v },
+  get relinkRequired()   { return accent.relinkRequired },
+  set relinkRequired(v)  { accent.relinkRequired = v },
 
   get brokerBalance()  { return accent.brokerBalance },
   set brokerBalance(v) { accent.brokerBalance = v },

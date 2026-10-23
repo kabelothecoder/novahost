@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
     // Until it is, this function no longer makes it worse: `avatar_url` and
     // `background_image_url` were the entire cause of `licenses.metadata`
     // ballooning to 178MB of a 207MB table (100% of rows affected), which is
-    // what made metacopier-connect's own orphan reclaim time out reading
+    // what made broker-connect's own orphan reclaim time out reading
     // licences during the 2026-09-18 incident -- extracting even one small
     // jsonb key still forces Postgres to detoast the whole value first.
     //

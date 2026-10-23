@@ -12,7 +12,7 @@ const CORS_HEADERS = {
  * The Trading Symbols screen is where a user decides which of their robot's
  * permitted symbols they actually want, at what size, and how many at once.
  * That decision has to exist somewhere the executor can read it:
- * metacopier-execute applies it as a ceiling before placing any order, because
+ * broker-execute applies it as a ceiling before placing any order, because
  * a cap kept only on the handset is a cap that a stale, rolled-back or modified
  * client silently ignores.
  *

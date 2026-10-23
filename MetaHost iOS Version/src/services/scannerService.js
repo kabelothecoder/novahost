@@ -14,14 +14,14 @@
  *   2. The pair was hardcoded to XAUUSD with a "defaulting for demo" note.
  *      Scan a EUR/USD chart, press execute, trade gold.
  *   3. It posted the broker `password` from the client. Credentials are not
- *      the app's to hold or forward; `metacopier-execute` does not even
+ *      the app's to hold or forward; `broker-execute` does not even
  *      accept the field.
  *   4. It called `dispatch-signal`, the old MetaAPI path, rather than
- *      `metacopier-execute`.
+ *      `broker-execute`.
  *
  * ## Dispatch shape
  *
- * `metacopier-execute` takes `{ license_key, pair, side, volume, sl, tp,
+ * `broker-execute` takes `{ license_key, pair, side, volume, sl, tp,
  * order_type, open_price, dry_run }` and enforces the symbol plan written by
  * `sync-symbol-config` — it can refuse with SYMBOL_NOT_LICENSED,
  * SYMBOL_DISABLED or POSITION_CAP. One call opens ONE position.
@@ -115,7 +115,7 @@ export async function scanChart(imageBase64, mode, strategy) {
 
 /* ── Dispatch ────────────────────────────────────────────────────────
    Codes come back from the executor; the message beside them is the
-   server's own where it sent one. MetaCopier returns plain-English broker
+   server's own where it sent one. The broker bridge returns plain-English broker
    refusals ("market closed", "not enough money") and overwriting those with
    a generic is how a user ends up unable to tell a closed market from a
    rejected licence. */
@@ -170,7 +170,7 @@ export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType,
   }
 
   try {
-    let { data, error } = await supabase.functions.invoke('metacopier-execute', { body })
+    let { data, error } = await supabase.functions.invoke('broker-execute', { body })
 
     /* supabase-js v2 hands a non-2xx back as a FunctionsHttpError with `data`
        null and the body on `error.context` — the same unwrap robotService does.

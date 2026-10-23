@@ -9,7 +9,7 @@
 
     Text only, no broker logos or lettered badges (the 2026-10-22 rule that
     overrides the brief's logo lines). Every broker and server shown comes from
-    MetaCopier's own catalogue through `listServers`; nothing is hardcoded but
+    the bridge's own catalogue through `listServers`; nothing is hardcoded but
     the five popular shortcuts, which are search terms, not a list of support.
 
     The backend still holds ONE account per licence, so connecting replaces the
@@ -222,7 +222,7 @@ const router = useRouter()
 const PLATFORMS = ['MT5', 'MT4']
 const STEPS = ['Broker', 'Server', 'Login', 'Connected']
 /* Search shortcuts, from the design's "popular" row. Tapping one only fills
-   the search box: whether the broker exists comes from MetaCopier, not here. */
+   the search box: whether the broker exists comes from the broker bridge, not here. */
 const POPULAR = ['Exness', 'XM', 'Trade245', 'JustMarkets', 'Razor']
 
 const step = ref(1)
@@ -230,7 +230,7 @@ const platform = ref(secStorage.getItem('CONNECT_PLATFORM') || 'MT5')
 const otherPlatform = computed(() => platform.value === 'MT5' ? 'MT4' : 'MT5')
 
 /* "Exness-MT5Real8" → "Exness". The broker is the server name's first part,
-   which is also how metacopier-connect groups its "did you mean" list. */
+   which is also how broker-connect groups its "did you mean" list. */
 function brokerOf(s) {
   return String(s || '').split('-')[0].trim() || String(s || '')
 }

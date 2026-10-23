@@ -102,7 +102,7 @@ serve(async (req: Request) => {
 
     // ---- 3b. ORDER KIND -----------------------------------------------------
     // MARKET unless the mentor asked for a level. Mirrors toOrderType() in
-    // metacopier-execute, which rejects anything outside this set rather than
+    // broker-execute, which rejects anything outside this set rather than
     // guessing — so an unrecognised value must fail here, loudly, instead of
     // being stored and silently dropped at execution.
     const orderKind = String(order_type ?? 'MARKET').trim().toUpperCase()
@@ -210,7 +210,7 @@ serve(async (req: Request) => {
           lot: row.lot,
           sl: row.sl,
           tp: row.tp,
-          // Named as metacopier-execute expects them, so the realtime payload
+          // Named as broker-execute expects them, so the realtime payload
           // and the claim-signals payload stay interchangeable on the handset.
           order_type: row.order_type,
           open_price: row.price,

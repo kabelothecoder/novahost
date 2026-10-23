@@ -55,7 +55,7 @@ function canon(s: unknown): string {
 }
 
 /**
- * Kept in step with the tables in `metacopier-execute` and `broker-symbols`.
+ * Kept in step with the tables in `broker-execute` and `broker-symbols`.
  * A quote fetched under one name and an order sent under another would put a
  * price on the plan screen that belongs to a different instrument.
  */

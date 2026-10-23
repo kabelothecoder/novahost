@@ -52,7 +52,7 @@ function baseSymbol(s: unknown): string {
   return String(s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
 }
 
-/** Kept in step with `broker-positions`, `broker-quote` and `metacopier-execute`. */
+/** Kept in step with `broker-positions`, `broker-quote` and `broker-execute`. */
 const SYMBOL_ALIASES: Record<string, string[]> = {
   XAUUSD: ['XAUUSD', 'GOLDUSD', 'GOLD'],
   XAGUSD: ['XAGUSD', 'SILVERUSD', 'SILVER'],
@@ -93,7 +93,7 @@ function canonicalSymbol(raw: unknown): string {
   return s
 }
 
-/** Kept byte-identical to `magicFor` in metacopier-execute and broker-positions. */
+/** Kept byte-identical to `magicFor` in broker-execute and broker-positions. */
 function magicFor(eaId: unknown): string {
   const src = String(eaId ?? '')
   let h = 0x811c9dc5
@@ -101,7 +101,7 @@ function magicFor(eaId: unknown): string {
     h ^= src.charCodeAt(i)
     h = Math.imul(h, 0x01000193)
   }
-  // Must match metacopier-execute's magicFor exactly: Math.abs of the signed
+  // Must match broker-execute's magicFor exactly: Math.abs of the signed
   // hash, not the unsigned one. The two differ whenever the hash is negative,
   // which left about half of all robots never recognising their own trades.
   return '77' + String(Math.abs(h | 0) % 1_000_000).padStart(6, '0')

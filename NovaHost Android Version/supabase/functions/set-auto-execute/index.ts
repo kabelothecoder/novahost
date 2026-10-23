@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { linkStatusOf, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,7 +24,7 @@ const CORS_HEADERS = {
  * ## Why a licence key is the whole credential
  *
  * The same reason it is for `license-status`, `claim-signals` and
- * `metacopier-execute`: app users have no `auth.users` row, and the key is what
+ * `broker-execute`: app users have no `auth.users` row, and the key is what
  * they hold. This is consistent with the rest of the surface rather than a new
  * trust model.
  *
@@ -94,8 +95,7 @@ Deno.serve(async (req: Request) => {
          a licence. Refusing here means the user is told now, on the switch they
          just touched, instead of discovering by absence that nothing ever
          traded. */
-      const accountId = (license.metadata as Record<string, unknown> | null)?.metacopier_account_id
-      const linked = typeof accountId === 'string' && accountId.trim().length > 0
+      const linked = resolveLink(license.metadata as Record<string, unknown> | null) !== null
       if (!linked) {
         return json({
           success: false,

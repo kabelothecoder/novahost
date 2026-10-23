@@ -5,7 +5,7 @@
     The screen that answers "did my trade actually happen, and what is it
     doing". Everything on it comes from the broker, because the broker is the
     only place that knows: `trade_logs` has no writer and no rows, and
-    `metacopier-execute` forgets an order the moment it is accepted.
+    `broker-execute` forgets an order the moment it is accepted.
   -->
   <div
     class="cmd trd"

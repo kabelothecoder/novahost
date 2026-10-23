@@ -13,7 +13,7 @@ const CORS_HEADERS = {
  *
  * ## Why this exists
  *
- * `metacopier-execute` reports what MetaCopier hands back, and for a refused
+ * `broker-execute` reports what MetaCopier hands back, and for a refused
  * order that is frequently the single token `[BROKER_REJECTION]` -- no reason,
  * no field, no number. That is enough to know a trade failed and useless for
  * knowing why, which left "the robot does not trade" and "your account cannot

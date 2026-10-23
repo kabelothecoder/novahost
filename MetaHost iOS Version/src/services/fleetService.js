@@ -98,11 +98,12 @@ function applyStatus(data) {
   const wasLinked = session.brokerConnected
 
   /* `linked` means a trading account is attached to the licence.
-     `metacopier_status` refines it to whether the broker session is
+     `link_status` refines it to whether the broker session is
      actually up — absent on licences linked before that was recorded, and
      the documented reading of absent is "assume connected". */
   const linked = Boolean(data.linked)
-  const status = data.metacopier_status
+  const status = data.link_status
+  session.relinkRequired = data.relink_required === true
   session.brokerConnected = linked && status !== 'connecting'
   session.brokerServer = data.broker_server || null
 

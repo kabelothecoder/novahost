@@ -24,7 +24,7 @@ const CORS_HEADERS = {
  *
  * A `trade_idea` is written to `voice_trade_ideas` with a 30 s expiry and
  * returned for the screen to show. Only a tap, through `voice-action`, places
- * it -- and that goes through `metacopier-execute`'s guardrails like any
+ * it -- and that goes through `broker-execute`'s guardrails like any
  * other order. `kill_switch` likewise only asks the screen for a confirm.
  *
  * ## Positioning

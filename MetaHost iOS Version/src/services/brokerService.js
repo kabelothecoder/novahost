@@ -5,7 +5,7 @@
  *
  * `TerminalView.doConnect()` posted to `test-broker-connection`. That endpoint
  * is a tombstone — it returns 410 with "test-broker-connection has been
- * retired. Broker linking runs through metacopier-connect." — so **every
+ * retired. Broker linking runs through broker-connect." — so **every
  * connect attempt from this app failed**, and had done since the MetaAPI
  * bridge was removed. The screen was not half-built; it was pointed at a
  * corpse.
@@ -14,15 +14,15 @@
  * is not obvious from the call site:
  *
  *   1. It sent no `license_key`. The link is recorded on the LICENCE
- *      (`licenses.metadata.metacopier_account_id`) because app users
+ *      (`licenses.metadata.bridge_account_id`) because app users
  *      authenticate by key and have no `auth.users` row. A connect request
  *      without a key has nothing to bind to, so even a working endpoint could
  *      not have completed the link.
  *   2. On success it wrote the broker **password** into device storage as
  *      `MH_TERMINAL_CONFIG`. Nothing ever read it back. A trading password
  *      sitting in localStorage is a liability with no compensating feature,
- *      and `metacopier-connect` does not accept the field on any later call —
- *      it forwards credentials to MetaCopier once, at link time, and never
+ *      and `broker-connect` does not accept the field on any later call —
+ *      it forwards credentials to the broker bridge once, at link time, and never
  *      needs them again.
  *   3. The session list was seeded with a hardcoded row
  *      (`Exness-MT5Real / 84912347`). A user who had never connected anything
@@ -34,7 +34,7 @@
  * The old screen kept its own `sessions` array in device storage, so the UI's
  * idea of "connected" was whatever this handset last did. The truth lives on
  * the licence and `license-status` reports it: whether an account is attached,
- * which server, and whether MetaCopier's session to the broker is actually up.
+ * which server, and whether the bridge's session to the broker is actually up.
  * A phone that was reinstalled, or a licence linked from the Android handset,
  * both show correctly — neither could before.
  */
@@ -44,7 +44,7 @@ import { secStorage } from '../utils/secStorage.js'
 import { getDeviceId } from '../utils/deviceId.js'
 
 /* ── Error copy ──────────────────────────────────────────────────────
-   `metacopier-connect` sends real prose for the failures a user can act on
+   `broker-connect` sends real prose for the failures a user can act on
    — a rejected login names the password type and the server spelling — so
    the server's message wins wherever it sent one. These cover the codes
    that arrive bare. */
@@ -91,16 +91,16 @@ function requireKey() {
 /**
  * Link an MT4/MT5 account to this licence.
  *
- * `accountType` matters more than it looks: `metacopier-connect` derives the
+ * `accountType` matters more than it looks: `broker-connect` derives the
  * broker's symbol suffix from it (a micro book lists XAUUSD.m, not XAUUSD),
  * and an order naming a symbol the broker does not list is rejected outright.
  * Sending it is what stops a micro-account user having a robot that places
  * orders and fills none of them.
  *
  * Returns `{ ok, connecting, message, code }`. `connecting` is a real and
- * distinct outcome, not a soft failure: MetaCopier registers the account
+ * distinct outcome, not a soft failure: the broker bridge registers the account
  * immediately but the broker session can take up to a minute to come up, and
- * during it `metacopier-execute` holds orders rather than losing them. The UI
+ * during it `broker-execute` holds orders rather than losing them. The UI
  * must show that as a wait, never as a green light.
  */
 export async function linkBroker({ accountNumber, password, server, platform, accountType }) {
@@ -108,7 +108,7 @@ export async function linkBroker({ accountNumber, password, server, platform, ac
   try { licenseKey = requireKey() } catch (e) { return { ok: false, code: e.code, message: e.message } }
 
   try {
-    const { data, error } = await supabase.functions.invoke('metacopier-connect', {
+    const { data, error } = await supabase.functions.invoke('broker-connect', {
       body: {
         license_key: licenseKey,
         account_number: String(accountNumber || '').trim(),
@@ -142,8 +142,8 @@ export async function linkBroker({ accountNumber, password, server, platform, ac
 }
 
 /**
- * Server names MetaCopier can dial, matching `query` (case, spacing and
- * punctuation ignored), at most 50. Read-only: `metacopier-connect` with
+ * Server names the broker bridge can dial, matching `query` (case, spacing and
+ * punctuation ignored), at most 50. Read-only: `broker-connect` with
  * `action: 'servers'` never creates or touches an account.
  *
  * `ok: false` means the list could not be read. That is "unknown", never "no
@@ -154,7 +154,7 @@ export async function listServers({ query = '', platform = 'MT5' } = {}) {
   try { licenseKey = requireKey() } catch (e) { return { ok: false, code: e.code, message: e.message, servers: [] } }
 
   try {
-    const { data, error } = await supabase.functions.invoke('metacopier-connect', {
+    const { data, error } = await supabase.functions.invoke('broker-connect', {
       body: { license_key: licenseKey, action: 'servers', query: String(query).trim(), platform },
     })
     if (error) {
@@ -173,7 +173,7 @@ export async function listServers({ query = '', platform = 'MT5' } = {}) {
 /**
  * What the licence says about its broker link.
  *
- * Deliberately never returns the MetaCopier account id — `license-status`
+ * Deliberately never returns the broker account id — `license-status`
  * does not send it, and the client has no use for it. Orders resolve the
  * account server-side from the licence, which is what stops a request being
  * pointed at somebody else's account.
@@ -199,7 +199,9 @@ export async function loadLinkState() {
       /* Absent on licences linked before this was recorded; the documented
          reading of absent is "assume connected". Only an explicit
          'connecting' is a wait. */
-      connecting: data.metacopier_status === 'connecting',
+      connecting: data.link_status === 'connecting',
+      /* Linked on the retired provider: one re-link moves it to the new one. */
+      relinkRequired: data.relink_required === true,
       server: data.broker_server || null,
       platform: data.platform || null,
       connectedAt: data.connected_at || null,
@@ -300,7 +302,7 @@ export async function loadQuote(symbol) {
  *
  * This is the answer to "did my trade actually happen". Nothing else in the
  * product could say so: `trade_logs` has no writer anywhere in the codebase
- * and zero rows, and `metacopier-execute` returns a ticket at the moment it
+ * and zero rows, and `broker-execute` returns a ticket at the moment it
  * places an order and then never mentions it again. The broker's own open
  * position list is the only record that exists.
  */

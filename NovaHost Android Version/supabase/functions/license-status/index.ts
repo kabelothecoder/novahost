@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { linkStatusOf, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -90,14 +91,21 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id
-    const linked = typeof accountId === 'string' && accountId.trim().length > 0
+    // Linked on any provider. resolveLink reads the neutral bridge fields and
+    // falls back to the MetaCopier-era key for links made before the bridge.
+    const link = resolveLink(metadata)
+    const linked = link !== null
 
-    // What metacopier-connect's verify step last saw: 'connected' once the
-    // broker session is up, 'connecting' while it is still coming up. Absent on
+    // What the connect step's verify last saw: 'connected' once the broker
+    // session is up, 'connecting' while it is still coming up. Absent on
     // licences linked before this was recorded -- the app treats absent as
     // "assume connected", the pre-existing behaviour.
-    const metacopierStatus = (metadata.metacopier_status as string) ?? null
+    const linkStatus = linkStatusOf(metadata)
+
+    // MetaCopier is being retired. A licence still linked there keeps trading
+    // until the cut-off, but the app should ask for one re-link, which moves
+    // it to MetaRPC (we never stored passwords, so it cannot move silently).
+    const relinkRequired = link?.provider === 'metacopier'
 
     return json({
       success: true,
@@ -109,7 +117,10 @@ Deno.serve(async (req: Request) => {
       broker_server: (metadata.broker_server as string) ?? null,
       platform: (metadata.platform as string) ?? null,
       connected_at: (metadata.connected_at as string) ?? null,
-      metacopier_status: metacopierStatus,
+      link_status: linkStatus,
+      // Same value under the old name, for Android builds that read it.
+      metacopier_status: linkStatus,
+      relink_required: relinkRequired,
       // Whether the server places this licence's signals while the handset is
       // asleep. Written by `set-auto-execute`, read here so the Settings switch
       // renders the state the executor will actually act on rather than one the

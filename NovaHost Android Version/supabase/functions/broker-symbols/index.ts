@@ -19,7 +19,7 @@ const CORS_HEADERS = {
  * raw-spread one and `GOLD` at a fifth. An order naming a symbol the broker has
  * never heard of is rejected outright.
  *
- * Until now the only way that name was ever found was inside `metacopier-execute`:
+ * Until now the only way that name was ever found was inside `broker-execute`:
  * send an order, take the rejection, try the next alias. That costs a signal per
  * instrument, and it only ever works for the twelve instruments in the hardcoded
  * alias table -- a broker calling gold `XAUUSD_i` was undiscoverable at any price.
@@ -30,7 +30,7 @@ const CORS_HEADERS = {
  *
  * This function only READS and SUGGESTS. Nothing here decides what trades -- the
  * user's confirmed choice is written by `sync-symbol-config` and enforced by
- * `metacopier-execute`.
+ * `broker-execute`.
  */
 
 /** The canonical NovaHost name for an instrument: letters and digits, upper case. */
@@ -41,7 +41,7 @@ function canon(s: unknown): string {
 /**
  * What else the same instrument trades under.
  *
- * Kept in step with the table in `metacopier-execute`, which is the authority at
+ * Kept in step with the table in `broker-execute`, which is the authority at
  * execution time. This copy exists so that a suggestion made here and an order
  * sent there agree about what counts as the same instrument.
  */
@@ -70,7 +70,7 @@ const SYMBOL_ALIASES: Record<string, string[]> = {
  * is undefined. Flattening the table makes the lookup symmetric, so which
  * member of a family the mentor happened to type stops mattering.
  *
- * Kept in step with the identical table in `metacopier-execute`.
+ * Kept in step with the identical table in `broker-execute`.
  */
 const ALIAS_FAMILY: Record<string, string[]> = (() => {
   const out: Record<string, string[]> = {}

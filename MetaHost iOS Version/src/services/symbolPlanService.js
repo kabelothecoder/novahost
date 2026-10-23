@@ -5,7 +5,7 @@
  * ## Why this exists at all
  *
  * `sync-symbol-config`'s own docstring says the plan "has to exist somewhere
- * the executor can read it: metacopier-execute applies it as a ceiling before
+ * the executor can read it: broker-execute applies it as a ceiling before
  * placing any order, because a cap kept only on the handset is a cap that a
  * stale, rolled-back or modified client silently ignores."
  *

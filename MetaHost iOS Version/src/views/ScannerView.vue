@@ -705,7 +705,7 @@ watch(symbol, s => {
 const lotSourceNote = computed(() => (lotFromPlan.value ? 'Lot from your Trading Symbols setup.' : ''))
 
 /* ── Symbols and quotes ──────────────────────────────────────────────
-   The robot's own allowance, not a list of majors. metacopier-execute refuses
+   The robot's own allowance, not a list of majors. broker-execute refuses
    anything outside it, so offering it here would be offering a refusal. */
 const symbols = computed(() =>
   [...new Set((robot.allowedSymbols || []).map(x => normaliseSymbol(String(x))).filter(Boolean))].slice(0, 8),

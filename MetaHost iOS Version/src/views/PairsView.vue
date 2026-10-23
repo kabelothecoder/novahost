@@ -563,7 +563,7 @@ function bumpLot(d) {
  *
  * 20, not 5. The database has always allowed it —
  * `license_symbol_config_trades_range check (max_trades between 1 and 20)` —
- * and `metacopier-execute` enforces whatever is stored. The 5 here was a
+ * and `broker-execute` enforces whatever is stored. The 5 here was a
  * client-only limit, narrower than the schema and than the executor, so a
  * user who wanted eight positions on gold simply could not ask for it and
  * nothing on screen explained why.

@@ -281,6 +281,9 @@ const sl = computed(() => {
   if (listening.value) return { dot: 'var(--a)', text: 'Listening…' }
   if (state.value === 'error') return { dot: RED, text: `${n} paused · no internet connection`, sub: 'Open trades stay at your broker with their stop-loss.' }
   if (state.value === 'empty') return { dot: '#6F6F7A', text: `${n} is ready · no broker account linked` }
+  /* Still linked through the old bridge, which closes at the cut-off: one
+     reconnect moves it. Amber, not red: it is trading fine until then. */
+  if (session.relinkRequired && !brokerDown.value) return { dot: AMBER, text: 'Reconnect your broker to keep trading', sub: 'We moved to a faster connection. Enter your MT5 login once more.' }
   if (brokerDown.value) return { dot: RED, text: 'Trades on hold · broker disconnected', sub: `Your ${trades.openCount} open trades stay at your broker with their stop-loss.` }
   if (!running.value) return { dot: '#8E8E99', text: `${n} is stopped · tap to start` }
   return { dot: GREEN, text: `Running · ${ready} symbol${ready === 1 ? '' : 's'} ready · ${trades.openCount} open` }
@@ -289,7 +292,7 @@ const sl = computed(() => {
 const act = computed(() => {
   if (state.value === 'empty') return { icon: 'add_link', label: 'Connect broker account', onClick: () => open('/terminal') }
   if (state.value === 'error') return { icon: 'refresh', label: 'Retry', onClick: () => pull() }
-  if (brokerDown.value) return { icon: 'link', label: 'Reconnect broker', onClick: () => open('/terminal') }
+  if (brokerDown.value || session.relinkRequired) return { icon: 'link', label: 'Reconnect broker', onClick: () => open('/terminal') }
   return { mic: true }
 })
 

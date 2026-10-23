@@ -13,7 +13,7 @@ const CORS_HEADERS = {
  *
  * - `confirm_trade` { idea_id }: places a `voice_trade_ideas` row if it is this
  *   licence's, unexpired (30 s) and unused. It is forwarded to
- *   `metacopier-execute` with no `signal_id`, i.e. as a manual order, so the
+ *   `broker-execute` with no `signal_id`, i.e. as a manual order, so the
  *   budget, margin, symbol-plan and halt checks are exactly the ones the
  *   scanner's Execute button gets. The row is claimed first so a double tap
  *   cannot place it twice.
@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
       if (claimErr) throw claimErr
       if (!idea) return json({ success: false, code: 'IDEA_EXPIRED', error: 'That idea has expired. Ask again for a fresh one.' }, 410)
 
-      const r = await fetch(`${url}/functions/v1/metacopier-execute`, {
+      const r = await fetch(`${url}/functions/v1/broker-execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${service}`, apikey: service },
         body: JSON.stringify({

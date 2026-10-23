@@ -732,7 +732,7 @@ export class MetaCopierBridge implements BrokerBridge {
         // our request, and a failure here must never change the response.
         try {
           await this.ctx.db.from('provider_refusals').insert({
-            source: 'metacopier-connect',
+            source: 'broker-connect',
             http_status: createRes.status,
             code: codes[0] ?? null,
             detail: detail.slice(0, 2000),

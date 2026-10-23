@@ -16,7 +16,7 @@
  *
  * ## Why the lot is sent explicitly
  *
- * `metacopier-execute` treats a symbol's `lot` as a hard per-order CEILING,
+ * `broker-execute` treats a symbol's `lot` as a hard per-order CEILING,
  * except when `smart_lot` is on, when it uses one global `smart_lot_size` for
  * every symbol. A per-account, per-symbol size can only be expressed the first
  * way, so this saves `smart_lot: false` with the exact lot the screen showed.

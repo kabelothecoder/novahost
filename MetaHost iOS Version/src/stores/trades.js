@@ -6,7 +6,7 @@
  * Nothing in NovaHost knew what positions existed. `trade_logs` has zero rows
  * and no writer anywhere in the codebase; `signal_deliveries` records that a
  * signal was handed out, which is a claim about DELIVERY and not about a
- * position; `metacopier-execute` returns the moment the broker accepts an
+ * position; `broker-execute` returns the moment the broker accepts an
  * order and never mentions it again.
  *
  * So this store is fed entirely by the broker, through `broker-positions` and
@@ -14,13 +14,13 @@
  *
  * ## Polling, not realtime
  *
- * There is no push channel for broker state — MetaCopier does not offer one
+ * There is no push channel for broker state — the broker bridge does not offer one
  * and Postgres has nothing to notify on. Open positions are polled while the
  * screen is visible and stopped when it is not, because a phone in a pocket
  * hitting the broker every few seconds costs battery for a screen nobody is
  * reading.
  *
- * History is NOT polled. MetaCopier documents it as lagging live trading by
+ * History is NOT polled. The broker bridge documents it as lagging live trading by
  * up to three minutes, so a fast poll cannot make it fresher — it is loaded
  * on open and on pull-to-refresh.
  */

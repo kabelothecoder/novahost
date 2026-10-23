@@ -57,7 +57,7 @@
  *
  * ## Why the candles are not ours
  *
- * MetaCopier has no candle, bar or OHLC endpoint. `broker-quote`'s own
+ * The broker bridge has no candle, bar or OHLC endpoint. `broker-quote`'s own
  * docstring settles it: "the whole v1 surface is accounts, positions, symbols
  * and a single live quote." There is no price history anywhere in this
  * product's own infrastructure, so a chart has to come from outside it.

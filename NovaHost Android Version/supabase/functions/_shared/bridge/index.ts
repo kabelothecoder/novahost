@@ -27,11 +27,21 @@ export interface BridgeLink {
 
 const PROVIDERS: BridgeProvider[] = ['metacopier', 'metarpc']
 
-/** The provider a licence uses, whether or not it is linked yet. */
+/**
+ * The provider a licence's CURRENT link is on.
+ *
+ * MetaRPC is the default since 2026-10-23. A licence with no provider named
+ * but an old `metacopier_account_id` is a MetaCopier link from before the
+ * bridge, and stays readable as one until it re-links.
+ */
 export function providerOf(metadata: Record<string, unknown> | null | undefined): BridgeProvider {
   const named = String(metadata?.bridge_provider ?? '').trim().toLowerCase()
-  return (PROVIDERS as string[]).includes(named) ? named as BridgeProvider : 'metacopier'
+  if ((PROVIDERS as string[]).includes(named)) return named as BridgeProvider
+  return String(metadata?.metacopier_account_id ?? '').trim() ? 'metacopier' : 'metarpc'
 }
+
+/** Where every NEW link goes. MetaCopier takes no new accounts. */
+export const NEW_LINK_PROVIDER: BridgeProvider = 'metarpc'
 
 /** The licence's linked account, or null when it has none. */
 export function resolveLink(metadata: Record<string, unknown> | null | undefined): BridgeLink | null {

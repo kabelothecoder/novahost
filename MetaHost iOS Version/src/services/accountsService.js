@@ -4,7 +4,7 @@
  * ## This is a MOCK, on purpose
  *
  * The backend holds exactly one broker account per licence
- * (`licenses.metadata.metacopier_account_id`) and every `broker-*` function
+ * (`licenses.metadata.bridge_account_id`) and every `broker-*` function
  * resolves it from that field. Several accounts need a new table and new edge
  * functions, which are waiting on sign-off (design-briefs/connection-area-plan.md,
  * section 3). Until then this module answers from memory so the screen can be

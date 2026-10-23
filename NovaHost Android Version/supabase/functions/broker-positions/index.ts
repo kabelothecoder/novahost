@@ -19,7 +19,7 @@ const CORS_HEADERS = {
  *    Nothing inserts into it, yet the iOS home screen subscribes to realtime
  *    INSERTs on it and shows a "TRADE EXECUTED" toast from that handler. The
  *    toast has never fired and could not.
- *  - `metacopier-execute` returns at the moment the broker accepts an order
+ *  - `broker-execute` returns at the moment the broker accepts an order
  *    and never mentions it again. A 204 from MetaCopier is the last anything
  *    in this system hears about a position.
  *  - `signal_deliveries` records that a signal was HANDED OUT, which is a
@@ -46,7 +46,7 @@ const CORS_HEADERS = {
  *
  * All of them. Positions opened by hand in MetaTrader sit in the same account
  * as the ones this product placed, and the broker does not distinguish. The
- * `magicNumber` does: `metacopier-execute` stamps every order it places with a
+ * `magicNumber` does: `broker-execute` stamps every order it places with a
  * per-robot magic (77 + 6 digits of an ea_id hash), so `ours` marks the ones
  * NovaHost opened. Reported rather than filtered -- a user's open risk
  * includes their own manual trades, and hiding them would understate exposure
@@ -63,7 +63,7 @@ function baseSymbol(s: unknown): string {
 /**
  * Every name a broker might use for one NovaHost instrument.
  *
- * Kept in step with the tables in `broker-quote` and `metacopier-execute`. A
+ * Kept in step with the tables in `broker-quote` and `broker-execute`. A
  * position resolved under one name and a symbol plan written under another do
  * not match, and the app then believes the user holds nothing.
  */
@@ -116,7 +116,7 @@ function canonicalSymbol(raw: unknown): string {
 }
 
 /**
- * The magic number `metacopier-execute` stamps on this robot's orders.
+ * The magic number `broker-execute` stamps on this robot's orders.
  *
  * Kept byte-identical to `magicFor` in that function. If the two ever drift,
  * this screen starts calling the robot's own trades manual, so the algorithm
@@ -130,7 +130,7 @@ function magicFor(eaId: unknown): string {
     h ^= src.charCodeAt(i)
     h = Math.imul(h, 0x01000193)
   }
-  // Must match metacopier-execute's magicFor exactly: Math.abs of the signed
+  // Must match broker-execute's magicFor exactly: Math.abs of the signed
   // hash, not the unsigned one. The two differ whenever the hash is negative,
   // which left about half of all robots never recognising their own trades.
   return '77' + String(Math.abs(h | 0) % 1_000_000).padStart(6, '0')
@@ -195,7 +195,7 @@ Deno.serve(async (req: Request) => {
      * Positions and the account's currency, together.
      *
      * The currency is NOT on a position and is not recorded on the licence
-     * -- `metacopier-connect` never writes one -- so the only place it exists
+     * -- `broker-connect` never writes one -- so the only place it exists
      * is the account summary. Fetching it here rather than making the client
      * call `broker-account` as well is the difference between one round trip
      * and two on a screen that opens constantly.

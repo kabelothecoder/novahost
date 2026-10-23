@@ -82,7 +82,7 @@ export const ALLOCATIONS = [
 ]
 
 /** Smallest volume any broker on this platform accepts. Mirrors the floor
- *  metacopier-execute applies, so the UI cannot promise a lot the executor
+ *  broker-execute applies, so the UI cannot promise a lot the executor
  *  would round away. */
 export const MIN_LOT = 0.01
 
