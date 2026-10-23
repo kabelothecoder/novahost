@@ -103,6 +103,7 @@ export function buildPages(c) {
       title: 'Chart scanner', parent: 'hub', sections: [
         { h: 'DEFAULTS', rows: [
           pk('Default trading style', 'scanStyle', ['Scalp', 'Day trade', 'Swing', 'Breakout', 'Ask every time']),
+          pk('Explanations', 'scanExplain', ['Normal', 'Pro']),
           pk('Default chart source', 'scanSource', ['Live chart', 'Upload screenshot']),
           tg('Show news card in results', 'scanNews'),
         ] },
@@ -181,7 +182,10 @@ export function buildPages(c) {
           { t: 'line', label: 'From – to', value: p.qFrom + ' – ' + p.qTo, chev: true, dis: !p.quietOn, tap: () => c.sheet({ type: 'quiet', title: 'Quiet hours' }) },
           tg('Still allow urgent alerts', 'quietAllow', 'Trade refused, broker disconnected', !p.quietOn),
         ], foot: 'The speaker icon turns sound on or off for each alert.' },
-        { rows: [act('Send a test notification', 'send', c.testNotif, 'accent')] },
+        { rows: [
+          act('Send a test notification', 'send', c.testNotif, 'accent'),
+          act('Preview the island', 'smart_toy', c.previewIsland, 'accent'),
+        ], foot: 'The island shows alerts at the top of the screen while NovaHost is open, and when you open it from a notification.' },
       ],
     },
     look: {

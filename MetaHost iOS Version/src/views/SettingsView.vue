@@ -255,6 +255,7 @@ import { session } from '../stores/session.js'
 import { accounts, accountList, extraCount, loadAccounts } from '../stores/accounts.js'
 import { prefs, RENEWS, NOTIF_CATS } from '../stores/settingsPrefs.js'
 import { push, refreshPushState, enablePush, disablePush, syncPush, testPush } from '../services/pushService.js'
+import { showIsland } from '../stores/island.js'
 import { secStorage } from '../utils/secStorage.js'
 import { haptic } from '../composables/useSpeech.js'
 import { buildPages, hubGroups } from '../components/settings/v3/pages.js'
@@ -554,6 +555,11 @@ const ctx = computed(() => ({
   micLabel: mic.value,
   permLabel: perm.value === 'granted' ? 'Allowed' : perm.value === 'unsupported' ? 'Not supported' : 'Not asked yet',
   testNotif, switchRobot,
+  previewIsland: () => showIsland({
+    id: 'preview:' + Date.now(), kind: 'signal', url: '/settings',
+    title: R.value + ' just spotted a BUY on XAUUSD',
+    body: 'Entry market · TP 2390 · SL 2378',
+  }),
   pushOn: push.state === 'on', pushBusy: push.busy, togglePush,
   pushSub: push.busy ? 'Connecting…' : push.state === 'on' ? 'Alerts reach this iPhone, even when the app is closed' : null,
   email, licenceKey, maskedKey, copyKey, deviceLine, deviceShort,

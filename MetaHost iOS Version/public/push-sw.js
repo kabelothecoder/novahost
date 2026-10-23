@@ -10,6 +10,9 @@
  * additionally gets the alert by postMessage, which is what draws the in-app
  * island.
  */
+const ALERT_CACHE = 'novahost-alerts'
+const ALERT_KEY = '/__novahost/last-alert'
+
 self.addEventListener('push', (event) => {
   let msg = {}
   try { msg = event.data ? event.data.json() : {} } catch (e) { msg = { title: 'NovaHost', body: event.data && event.data.text() } }
@@ -26,7 +29,15 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil((async () => {
     await self.registration.showNotification(title, options)
-    const note = { type: 'novahost-push', id: msg.id || options.tag + ':' + Date.now(), title, body: options.body, kind: msg.kind, url: options.data.url }
+    const note = { type: 'novahost-push', id: msg.id || options.tag + ':' + Date.now(), title, body: options.body, kind: msg.kind, url: options.data.url, at: Date.now() }
+    /* Third route, and the one that does not need the page to be listening:
+       the latest alert is left in Cache Storage. The app reads it whenever it
+       comes to the front, so tapping the banner opens the app straight into
+       the island. */
+    try {
+      const c = await caches.open(ALERT_CACHE)
+      await c.put(ALERT_KEY, new Response(JSON.stringify(note), { headers: { 'Content-Type': 'application/json' } }))
+    } catch (e) { /* storage full or unavailable */ }
     /* Two routes to the open app, because Safari is unreliable about each:
        postMessage to window clients, and a BroadcastChannel. The page drops
        whichever arrives second (same id). */

@@ -87,13 +87,42 @@ function open() {
 function onMessage(e) {
   const m = e.data
   if (!m || typeof m !== 'object') return
-  if (m.type === 'novahost-push') showIsland(m)
+  if (m.type === 'novahost-push') {
+    showIsland(m)
+    // Shown live, so the saved copy must not replay it on the next focus.
+    caches?.open(ALERT_CACHE).then(c => c.delete(ALERT_KEY)).catch(() => {})
+  }
   else if (m.type === 'novahost-open' && m.url) router.push(m.url).catch(() => {})
 }
 
 let channel = null
 
+/* The alert push-sw.js left in Cache Storage. Read on launch and every time
+   the app comes back to the front, which is what happens when the user taps
+   the iOS banner: the app opens into the island instead of relying on a
+   message that had to arrive while the page was listening. */
+const ALERT_CACHE = 'novahost-alerts'
+const ALERT_KEY = '/__novahost/last-alert'
+const FRESH_MS = 2 * 60_000
+
+async function pickUpSaved() {
+  try {
+    if (!('caches' in window)) return
+    const c = await caches.open(ALERT_CACHE)
+    const res = await c.match(ALERT_KEY)
+    if (!res) return
+    const note = await res.json()
+    await c.delete(ALERT_KEY)
+    if (note?.at && Date.now() - note.at < FRESH_MS) showIsland(note)
+  } catch { /* nothing saved */ }
+}
+const onVisible = () => { if (document.visibilityState === 'visible') pickUpSaved() }
+
 onMounted(() => {
+  pickUpSaved()
+  document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('focus', pickUpSaved)
+  window.addEventListener('pageshow', pickUpSaved)
   navigator.serviceWorker?.addEventListener('message', onMessage)
   // addEventListener alone leaves the client message queue closed in Safari;
   // only `onmessage` or startMessages() opens it. Without this every message
@@ -110,6 +139,9 @@ onBeforeUnmount(() => {
   clear()
   navigator.serviceWorker?.removeEventListener('message', onMessage)
   channel?.close()
+  document.removeEventListener('visibilitychange', onVisible)
+  window.removeEventListener('focus', pickUpSaved)
+  window.removeEventListener('pageshow', pickUpSaved)
 })
 </script>
 
