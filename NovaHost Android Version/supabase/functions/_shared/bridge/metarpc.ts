@@ -120,7 +120,7 @@ const MT4_ERRCODE: Record<number, BridgeErrorCode> = {
   4106: 'UNKNOWN_SYMBOL',
 }
 
-const UNKNOWN_SYMBOL = /SYMBOL.*(NOT_FOUND|NOT_EXIST|UNKNOWN|INVALID)|UNKNOWN_SYMBOL|symbol\s+(is\s+)?(not\s+found|unknown|does\s+not\s+exist)/i
+const UNKNOWN_SYMBOL = /SYMBOL.*(NOT_FOUND|NOT_EXIST|UNKNOWN|INVALID)|UNKNOWN_SYMBOL|unknown\s*symbol|symbol\s+(is\s+)?(not\s+found|unknown|does\s+not\s+exist)/i
 
 /** A read failure, in our vocabulary. */
 function readFailure(c: { error: MrpcError; status: number; detail: string }): BridgeFailure {
@@ -189,7 +189,7 @@ export class MetaRpcBridge implements BrokerBridge {
   private async call<T = Record<string, unknown>>(
     path: string,
     params: Record<string, string | number | boolean | undefined | null> = {},
-    opts: { timeoutMs?: number; terminal?: string | null; secret?: boolean; platform?: Platform } = {},
+    opts: { timeoutMs?: number; terminal?: string | null; secret?: boolean; platform?: Platform; retried?: boolean } = {},
   ): Promise<Call<T>> {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(params)) if (v != null && v !== '') qs.set(k, String(v))
@@ -212,6 +212,16 @@ export class MetaRpcBridge implements BrokerBridge {
 
     if (body?.error || !res.ok || !body || body.data === undefined) {
       const error: MrpcError = body?.error ?? { errorCode: res.status === 401 ? 'API_KEY_INVALID' : `HTTP_${res.status}` }
+      // MT5 4301 / MT4 4106: the broker lists the symbol but it is not in this
+      // terminal's Market Watch yet, so ticks and orders call it "unknown".
+      // Seen live on RCGMarkets-Demo: XAUUSD in SymbolList, 4301 on the tick.
+      // Select it and try once more; a name the broker truly lacks fails again.
+      const unselected = error.mqlErrorIntCode === 4301 || error.mqlErrorIntCode === 4106
+      const symbol = params.symbol ?? params.symbolName
+      if (unselected && symbol && path !== 'SymbolSelect' && !opts.retried) {
+        const sel = await this.call('SymbolSelect', { symbol, select: true }, { timeoutMs: 15_000 })
+        if (sel.ok) return this.call<T>(path, params, { ...opts, retried: true })
+      }
       if (error.errorCode === 'API_KEY_INVALID' || error.errorCode === 'API_KEY_EXPIRED') {
         console.error(`[MetaRPC] ${error.errorCode} -- METARPC_API_KEY is wrong or expired`)
       }
@@ -300,7 +310,7 @@ export class MetaRpcBridge implements BrokerBridge {
   async symbolSpec(symbol: string, timeoutMs?: number): Promise<BridgeResult<SymbolSpec>> {
     const r = await this.read<SymbolSpec, { symbolInfos?: Record<string, unknown>[] }>(
       'SymbolParamsMany',
-      { symbolName: symbol, ...(this.platform === 'MT5' ? { itemsPerPage: 5 } : {}) },
+      { symbolName: symbol },
       (d) => {
         const list = Array.isArray(d.symbolInfos) ? d.symbolInfos : null
         if (!list) return null

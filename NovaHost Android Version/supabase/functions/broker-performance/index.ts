@@ -101,7 +101,10 @@ function magicFor(eaId: unknown): string {
     h ^= src.charCodeAt(i)
     h = Math.imul(h, 0x01000193)
   }
-  return '77' + String((h >>> 0) % 1_000_000).padStart(6, '0')
+  // Must match metacopier-execute's magicFor exactly: Math.abs of the signed
+  // hash, not the unsigned one. The two differ whenever the hash is negative,
+  // which left about half of all robots never recognising their own trades.
+  return '77' + String(Math.abs(h | 0) % 1_000_000).padStart(6, '0')
 }
 
 /**
