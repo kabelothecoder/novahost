@@ -120,6 +120,7 @@ Deno.serve(async (req: Request) => {
     // ---- Hear -----------------------------------------------------------------
     let transcript = String(fields.text ?? '').trim().slice(0, 600)
     let asrSeconds = 0
+    let geminiAudio: { mime_type: string; data: string } | null = null
     if (!transcript && audio) {
       if (audio.size > MAX_AUDIO_BYTES) return json({ success: false, code: 'TOO_LONG', error: 'That recording is too long. Keep it under a minute.' }, 413)
       const fd = new FormData()
@@ -131,15 +132,23 @@ Deno.serve(async (req: Request) => {
         headers: { Authorization: `Bearer ${fishKey()}`, model: 'transcribe-1-pro' },
         body: fd,
       })
-      if (!r.ok) {
-        console.error('[voice-turn] ASR', r.status, (await r.text()).slice(0, 300))
-        return json({ success: false, code: 'ASR_FAILED', error: "I couldn't hear that. Try again." }, 502)
+      if (r.ok) {
+        const a = await r.json()
+        transcript = String(a.text ?? '').replace(/<\|[^|]*\|>/g, '').trim()
+        asrSeconds = Number(a.duration ?? 0)
+      } else {
+        // Fish ASR is billed from API credit even when TTS runs on the free
+        // model; a 402 there must not take voice down. Gemini listens to the
+        // clip itself and returns the transcript alongside the reply.
+        console.error('[voice-turn] ASR', r.status, (await r.text()).slice(0, 300), '-> Gemini hears it')
+        const buf = new Uint8Array(await audio.arrayBuffer())
+        let bin = ''
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+        const mime = (audio.type || 'audio/mp4').split(';')[0]
+        geminiAudio = { mime_type: mime === 'audio/x-m4a' ? 'audio/mp4' : mime, data: btoa(bin) }
       }
-      const a = await r.json()
-      transcript = String(a.text ?? '').replace(/<\|[^|]*\|>/g, '').trim()
-      asrSeconds = Number(a.duration ?? 0)
     }
-    if (!transcript) return json({ success: false, code: 'NOTHING_HEARD', error: "I didn't catch anything. Hold the mic and speak." }, 422)
+    if (!transcript && !geminiAudio) return json({ success: false, code: 'NOTHING_HEARD', error: "I didn't catch anything. Hold the mic and speak." }, 422)
 
     // ---- Context ----------------------------------------------------------------
     const ea = (lic as any).expert_advisors ?? {}
@@ -183,13 +192,14 @@ ${APP_GUIDE}
 
 Live state: ${account} ${positions} Robot is ${lic.status}. User is on the "${screen || 'unknown'}" screen. UTC time ${new Date().toISOString().slice(0, 16)}.
 
-Reply in JSON only: {"reply": string, "action": ...}
+Reply in JSON only: {"transcript": string, "reply": string, "action": ...}
+"transcript" is exactly what the user said (when they sent audio, write down their words; empty if you heard no speech, and then ask them to try again in reply).
 "reply" is what you say out loud: 1 to 3 short spoken sentences, no markdown, no lists, no emoji, numbers written so they read well aloud.
 ${actions}`
 
     const contents = [
       ...history.map((h) => ({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: String(h.text).slice(0, 500) }] })),
-      { role: 'user', parts: [{ text: transcript }] },
+      { role: 'user', parts: geminiAudio ? [{ inline_data: geminiAudio }] : [{ text: transcript }] },
     ]
 
     const g = await fetch(`${GEMINI_BASE}/${MODEL}:generateContent`, {
@@ -212,9 +222,10 @@ ${actions}`
       }, 503)
     }
     const gj = await g.json()
-    let out: { reply?: string; action?: any } = {}
+    let out: { transcript?: string; reply?: string; action?: any } = {}
     const raw = (gj?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? '').join('')
     try { out = JSON.parse(raw.replace(/^```(json)?|```$/g, '').trim()) } catch { console.error('[voice-turn] unparsed', gj?.candidates?.[0]?.finishReason, raw.slice(0, 300)) }
+    if (geminiAudio) transcript = String(out.transcript ?? '').trim().slice(0, 600)
     let reply = String(out.reply ?? '').trim() || "Sorry, I didn't get that. Say it again?"
     let action: any = null
 
