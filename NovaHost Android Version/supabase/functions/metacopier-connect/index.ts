@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { bridgeFor, providerOf, resolveLink, withLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -6,15 +7,14 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const METACOPIER_BASE = 'https://api.metacopier.io'
-
 /**
- * Registers a user's MT4/MT5 account with MetaCopier and returns the MetaCopier
- * account id, which is what metacopier-execute places orders against.
+ * Links a user's MT4/MT5 account through the licence's broker bridge and
+ * records the provider account id, which is what metacopier-execute places
+ * orders against.
  *
- * Replaces the MetaAPI broker bridge. Region and account-type ids are looked up
- * from MetaCopier at runtime rather than hardcoded, because those ids are
- * project/environment specific.
+ * The name is historical: the work is done by whichever adapter
+ * `_shared/bridge` picks for the licence. The slug stays because every app
+ * build in the field calls it.
  */
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -30,19 +30,12 @@ Deno.serve(async (req: Request) => {
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-
-    if (!METACOPIER_API_KEY) {
-      console.error('METACOPIER_API_KEY is not configured')
-      return json({ success: false, error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
     const { license_key, account_number, password, server, platform, region_name, symbol_suffix, account_type } = body
 
-    // `action: 'servers'` is a read-only lookup of the server names MetaCopier
+    // `action: 'servers'` is a read-only lookup of the server names the bridge
     // can dial, for autocomplete and "did you mean". It needs a licence and
     // nothing else -- no credentials, and it never creates or touches an account.
     const serversOnly = body?.action === 'servers'
@@ -77,68 +70,20 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, code: 'LICENCE_EXPIRED', error: 'Licence has expired.' }, 403)
     }
 
-    const mcHeaders = {
-      'X-API-KEY': METACOPIER_API_KEY,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    }
-
     const wantPlatform = String(platform ?? 'MT5').toUpperCase().replace(/[^A-Z0-9]/g, '')
-    const typedServer = String(server ?? '').trim()
-    const wantLogin = String(account_number ?? '').replace(/\s+/g, '')
     const normalize = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
-    /**
-     * Every server name MetaCopier knows for this platform, or null when the
-     * list cannot be read. Callers must treat null as "unknown", never as
-     * "no servers": a lookup failure must not block a connect that would work.
-     */
-    const fetchServerList = async (): Promise<string[] | null> => {
-      try {
-        const r = await fetch(
-          `${METACOPIER_BASE}/rest/api/v1/brokers/${wantPlatform === 'MT4' ? 'mt4' : 'mt5'}/all`,
-          { headers: mcHeaders },
-        )
-        if (!r.ok) {
-          console.warn(`[MetaCopier] server list ${r.status}: ${await r.text()}`)
-          return null
-        }
-        const raw = await r.json()
-        return Array.isArray(raw) ? raw.map((s) => String(s)) : null
-      } catch (e) {
-        console.warn(`[MetaCopier] server list failed: ${(e as Error).message}`)
-        return null
-      }
-    }
-
-    /**
-     * The closest known servers to what the user typed, best first.
-     *
-     * Restricted to the same broker -- the text before the first "-", so
-     * "XMGlobal" for "XMGlobal-MT5 20" -- because a suggestion from a different
-     * broker is worse than none. Ranked by how long a prefix they share once
-     * spacing and case are ignored. Only used for names that fit no family the
-     * broker has; a missing server NUMBER is handled separately, because the
-     * neighbouring number is a different server, not a correction.
-     */
-    const suggestServers = (list: string[], typed: string, max = 6): string[] => {
-      const t = normalize(typed)
-      const brand = normalize(typed.split('-')[0])
-      if (brand.length < 2) return []
-      const shared = (s: string) => {
-        const n = normalize(s)
-        let i = 0
-        while (i < n.length && i < t.length && n[i] === t[i]) i++
-        return i * 100 - Math.abs(n.length - t.length)
-      }
-      return list
-        .filter((s) => normalize(s).startsWith(brand))
-        .sort((a, b) => shared(b) - shared(a) || a.localeCompare(b))
-        .slice(0, max)
+    // The provider is the licence's, not the caller's. Today every licence is
+    // on MetaCopier; once MetaRPC is live, a licence moved there links there.
+    const priorMetadata = (license.metadata ?? {}) as Record<string, unknown>
+    const provider = providerOf(priorMetadata)
+    const bridge = bridgeFor(provider, null, novaHost)
+    if (!bridge) {
+      return json({ success: false, error: 'Server misconfiguration.' }, 500)
     }
 
     if (serversOnly) {
-      const list = await fetchServerList()
+      const list = await bridge.servers(wantPlatform)
       if (!list) return json({ success: false, code: 'SERVER_LIST_UNAVAILABLE', error: 'Could not load the server list.' }, 502)
       const q = String(body?.query ?? '').trim()
       const servers = q
@@ -147,659 +92,66 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, platform: wantPlatform, total: list.length, servers })
     }
 
-    // MetaCopier matches loginServer by its exact spelling, but users copy it
-    // from a phone screen: "XMGlobal-MT520" for "XMGlobal-MT5 20", or the wrong
-    // case. When exactly one known server is the same name once spacing, case
-    // and punctuation are ignored, that IS the server they meant -- send its
-    // real spelling. Anything less certain is left as typed, so a lookup that
-    // fails or a list that does not cover the broker changes nothing.
-    let finalServer = typedServer
-    const knownServers = await fetchServerList()
-    if (knownServers && !knownServers.includes(typedServer)) {
-      const same = knownServers.filter((s) => normalize(s) === normalize(typedServer))
-      if (same.length === 1) {
-        console.log(`[MetaCopier] server "${typedServer}" resolved to known spelling "${same[0]}"`)
-        finalServer = same[0]
-      }
-    }
+    // ---- Link the account ----------------------------------------------------
+    // De-duplication, slot reclaim, server-name repair and the wait for the
+    // session to come up are all the adapter's: they are how ONE provider
+    // behaves, not what linking means.
+    const result = await bridge.connect({
+      licenseKey: key,
+      login: String(account_number ?? ''),
+      password: String(password ?? ''),
+      server: String(server ?? ''),
+      platform: wantPlatform,
+      region: region_name ?? null,
+      priorAccountId: resolveLink(priorMetadata)?.accountId ?? null,
+    })
 
-    /**
-     * MetaCopier reports faults as bracketed codes, and many of them carry
-     * parameters: `[ACCOUNT_LIMIT_PER_PROJECT_REACHED_TRIAL|allowed=10|needed=160]`.
-     *
-     * The first version of this matched `/\[([A-Z0-9_]+)\]/g`, which requires the
-     * WHOLE bracket to be a bare code -- so every parameterised fault parsed to
-     * an empty code list and fell through to the generic "check the login,
-     * password and server". That is how a project sitting at its trial account
-     * cap told users their credentials were wrong: four different brokers, ten
-     * attempts, all correct, all blamed on the password.
-     *
-     * Stopping at the first `|` keeps the code and discards the parameters.
-     */
-    const codesIn = (detail: string) =>
-      [...detail.matchAll(/\[([A-Z0-9_]+)(?:\|[^\]]*)?\]/g)].map((m) => m[1])
-
-    /** Stops an account, so a DELETE is not refused for one still running. */
-    const stopAccount = async (id: string) => {
-      try {
-        await fetch(
-          `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/actions/stop`,
-          { method: 'POST', headers: mcHeaders },
-        )
-      } catch { /* best effort -- the delete below is what matters */ }
-    }
-
-    /**
-     * Deletes a MetaCopier account. Best-effort -- a failed cleanup is logged,
-     * not fatal.
-     *
-     * Stops it first. A bare DELETE on a running account was answering 400, and
-     * because the failure is non-fatal every orphan it was meant to clear stayed
-     * in the project and kept consuming a slot against the plan's account cap.
-     */
-    const deleteAccount = async (id: string) => {
-      try {
-        await stopAccount(id)
-        const r = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}`, {
-          method: 'DELETE', headers: mcHeaders,
-        })
-        if (!r.ok) {
-          console.warn(`[MetaCopier] delete ${id} refused ${r.status}: ${await r.text()}`)
-          return false
-        }
-        console.log(`[MetaCopier] deleted account ${id}`)
-        return true
-      } catch (e) {
-        console.warn(`[MetaCopier] delete ${id} failed: ${(e as Error).message}`)
-        return false
-      }
-    }
-
-    /**
-     * Every account in the project, following pagination.
-     *
-     * The list call used to be a bare `GET /accounts`, which returns one
-     * default-sized page. With ~160 accounts in the project that meant the
-     * de-duplication step below could not see most of them: a duplicate past the
-     * first page was invisible, so a "no existing account" conclusion was drawn
-     * from a partial list and yet another duplicate was created.
-     */
-    const listAllAccounts = async (): Promise<Record<string, unknown>[]> => {
-      const out: Record<string, unknown>[] = []
-      const PAGE = 200
-      for (let offset = 0; offset < 5000; offset += PAGE) {
-        const r = await fetch(
-          `${METACOPIER_BASE}/rest/api/v1/accounts?limit=${PAGE}&offset=${offset}`,
-          { headers: mcHeaders },
-        )
-        if (!r.ok) break
-        const raw = await r.json()
-        // Bare array from the accounts endpoint today; unwrap the common
-        // pagination envelopes too so a shape change does not silently turn the
-        // de-dup off and let a duplicate through.
-        const page: unknown[] = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.content) ? raw.content
-          : Array.isArray(raw?.data) ? raw.data
-          : Array.isArray(raw?.accounts) ? raw.accounts
-          : []
-        out.push(...(page as Record<string, unknown>[]))
-        if (page.length < PAGE) break
-      }
-      return out
-    }
-
-    /**
-     * Frees account slots by deleting MetaCopier accounts that no licence claims.
-     *
-     * ## The safety rule
-     *
-     * An account is deleted only when NOTHING in our own database points at it.
-     * The keep-set is built from two independent signals, and an account matching
-     * either one survives:
-     *
-     *   1. `licenses.metadata->>metacopier_account_id` for every licence that is
-     *      not revoked -- this is the binding `metacopier-execute` resolves
-     *      orders against, so an id in here is a live trading link by definition.
-     *   2. the alias `NovaHost <LICENCE KEY>` that `resolveAndCreate` stamps on
-     *      every account it makes. This is the backstop for the window where an
-     *      account was created but the write-back to the licence had not landed
-     *      yet -- without it, a connect interrupted at the wrong moment would
-     *      leave an account that looks orphaned and is not.
-     *
-     * Anything the keep-set does not name was made by a licence that has since
-     * been deleted, or by a create whose write-back never happened and whose
-     * licence has since linked elsewhere. Those are the ~150 records sitting on
-     * this project's cap.
-     *
-     * ## Why the DB read cannot fail open
-     *
-     * If the licence query errors, the keep-set would be empty and every account
-     * in the project would look like an orphan -- the reclaim would delete live
-     * trading links for all users. It returns 0 on any error instead, so the
-     * failure mode is "the cap stays full", never "everyone is disconnected".
-     */
-    const reclaimOrphanAccounts = async (): Promise<number> => {
-      // Pulls only the one metadata key this needs, not the whole jsonb
-      // column. `licenses.metadata` carries a multi-megabyte base64 avatar
-      // on ~all 200+ rows (~180MB total) -- selecting the full column here
-      // forced PostgREST to detoast and serialize every one of those blobs
-      // just to read a 36-character account id, which is what was timing
-      // out (Postgres error 57014) on every single reclaim attempt.
-      const { data: live, error: liveErr } = await novaHost
-        .from('licenses')
-        .select('license_key, status, metacopier_account_id:metadata->>metacopier_account_id')
-        .neq('status', 'revoked')
-
-      if (liveErr || !Array.isArray(live)) {
-        console.error('[MetaCopier] reclaim aborted: could not read licences', liveErr)
-        return 0
-      }
-
-      const keepIds = new Set<string>()
-      const keepAliases = new Set<string>()
-      for (const l of live as { license_key?: string; metacopier_account_id?: string }[]) {
-        const id = String(l.metacopier_account_id ?? '').trim()
-        if (id) keepIds.add(id)
-        const k = String(l.license_key ?? '').trim().toUpperCase()
-        if (k) keepAliases.add(`NOVAHOST ${k}`)
-      }
-
-      // A project with no recorded links at all is not a project full of
-      // orphans -- it is a read that told us nothing useful. Refuse to treat
-      // every account in it as disposable.
-      if (keepIds.size === 0 && keepAliases.size === 0) {
-        console.error('[MetaCopier] reclaim aborted: no live licence references found')
-        return 0
-      }
-
-      let all: Record<string, unknown>[]
-      try {
-        all = await listAllAccounts()
-      } catch (e) {
-        console.error(`[MetaCopier] reclaim aborted: account list failed: ${(e as Error).message}`)
-        return 0
-      }
-      if (!all.length) return 0
-
-      const orphans = all.filter((a) => {
-        if (isDead(a)) return false          // already gone; a second DELETE answers 400
-        const id = String(a.id ?? '')
-        if (!id || keepIds.has(id)) return false
-        const alias = String(a.alias ?? '').trim().toUpperCase()
-        return !keepAliases.has(alias)
-      })
-
-      console.log(
-        `[MetaCopier] reclaim: ${all.length} accounts in project, ` +
-        `${keepIds.size} bound to a licence, ${orphans.length} orphaned`
-      )
-
-      let freed = 0
-      for (const a of orphans) {
-        if (await deleteAccount(String(a.id))) freed++
-        // One free slot is all this connect needs. Stopping early keeps the
-        // request inside its wall-clock budget on a project holding hundreds of
-        // orphans; the next connect reclaims the next one.
-        if (freed >= 5) break
-      }
-      return freed
-    }
-
-    /**
-     * Resolves account type + region and registers the account with MetaCopier.
-     *
-     * Returns the new account id, or a ready-to-send error Response when the
-     * platform/region cannot be resolved or the broker refuses the login.
-     */
-    const resolveAndCreate = async (): Promise<{ id: string } | { errorResponse: Response; limited?: boolean }> => {
-      const [typesRes, regionsRes] = await Promise.all([
-        fetch(`${METACOPIER_BASE}/rest/api/v1/types/accountTypes`, { headers: mcHeaders }),
-        fetch(`${METACOPIER_BASE}/rest/api/v1/types/regions`, { headers: mcHeaders }),
-      ])
-
-      if (!typesRes.ok || !regionsRes.ok) {
-        const detail = `accountTypes=${typesRes.status} regions=${regionsRes.status}`
-        console.error(`[MetaCopier] lookup failed: ${detail}`)
-        return { errorResponse: json({ success: false, error: 'Could not reach MetaCopier.', details: detail }, 502) }
-      }
-
-      const accountTypes = await typesRes.json()
-      const regions = await regionsRes.json()
-
-      // Exact match first. A substring match will happily bind an "MT5_INVESTOR"
-      // style type to a plain MT5 request, and an investor password cannot place
-      // orders -- the broker rejects the login and the user is told their password
-      // is wrong. Substring is kept only as a fallback for projects that name the
-      // type "METATRADER5" rather than "MT5".
-      const typeList = (Array.isArray(accountTypes) ? accountTypes : []) as { id?: string; name?: string }[]
-      const matchedType =
-        typeList.find((t) => normalize(t?.name) === wantPlatform) ??
-        typeList.find((t) => normalize(t?.name).includes(wantPlatform))
-
-      if (!matchedType) {
-        return { errorResponse: json({
-          success: false,
-          code: 'PLATFORM_UNAVAILABLE',
-          error: `Platform ${wantPlatform} is not offered by this MetaCopier project.`,
-          available: typeList.map((t) => t?.name),
-        }, 400) }
-      }
-
-      // Region is the datacenter that dials the broker. Silently taking the first
-      // one the API happens to list makes every connection depend on undeclared
-      // ordering, so an explicit choice wins: the caller's, then the project
-      // default, then the first entry -- and whichever it lands on gets logged so
-      // a failure is attributable.
-      const regionList = (Array.isArray(regions) ? regions : []) as { id?: string; name?: string }[]
-      const preferredRegion = region_name ?? Deno.env.get('METACOPIER_REGION') ?? ''
-      const matchedRegion = preferredRegion
-        ? regionList.find((r) => normalize(r?.name) === normalize(preferredRegion))
-        : regionList[0]
-
-      if (!matchedRegion) {
-        return { errorResponse: json({
-          success: false,
-          code: 'REGION_UNAVAILABLE',
-          error: preferredRegion
-            ? `MetaCopier region "${preferredRegion}" was not found.`
-            : 'No MetaCopier region available.',
-          available: regionList.map((r) => r?.name),
-        }, 400) }
-      }
-
-      console.log(
-        `[MetaCopier] resolved type=${matchedType.name} region=${matchedRegion.name} ` +
-        `platform=${wantPlatform} server=${finalServer}`
-      )
-
-      // Whitespace is stripped from all three because these values are pasted out
-      // of a broker email far more often than they are typed, and a trailing
-      // newline on the password is indistinguishable, to the user, from a correct
-      // password. MetaTrader does not accept leading or trailing whitespace in any
-      // of them, so nothing legitimate is lost by removing it here.
-      const accountPayload = {
-        loginAccountNumber: wantLogin,
-        loginAccountPassword: String(password).trim(),
-        loginServer: finalServer,
-        type: { id: matchedType.id },
-        region: { id: matchedRegion.id },
-        alias: `NovaHost ${key}`,
-        // The de-duplication step above is the real guard against a second
-        // account for one login. This stays `false` as a backstop: if that
-        // lookup could not run (MetaCopier's list endpoint unreachable or shaped
-        // unexpectedly), a reconnect must still succeed rather than fail on an
-        // "account exists" error -- the next clean reconnect will converge it.
-        failIfAccountExistsInProject: false,
-      }
-
-      const createRes = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts`, {
-        method: 'POST',
-        headers: mcHeaders,
-        body: JSON.stringify(accountPayload),
-      })
-
-      if (!createRes.ok) {
-        const detail = await createRes.text()
-        console.error(
-          `[MetaCopier] account create failed ${createRes.status}: ${detail} ` +
-          `(type=${matchedType.name} region=${matchedRegion.name} server=${finalServer})`
-        )
-
-        // MetaCopier reports faults as bracketed codes in an `errors` array, e.g.
-        // {"errors":["[WRONG_CREDENTIALS]"]}. Match on the code rather than on
-        // loose substrings of the raw body.
-        const codes = codesIn(detail)
-
-        // Keep the raw refusal where an operator can query it: users only see a
-        // generic message and function logs are not reachable from our tooling.
-        // Best-effort and credential-free -- the body is MetaCopier's reply, not
-        // our request, and a failure here must never change the response.
-        try {
-          await novaHost.from('provider_refusals').insert({
-            source: 'metacopier-connect',
-            http_status: createRes.status,
-            code: codes[0] ?? null,
-            detail: detail.slice(0, 2000),
-            context: { platform: wantPlatform, server: finalServer, type: matchedType.name, region: matchedRegion.name },
-          })
-        } catch (_) { /* logging only */ }
-        const has = (...names: string[]) => names.some((n) => codes.includes(n))
-
-        let status = 400
-        let code = codes[0] ?? 'CONNECT_FAILED'
-        let message = 'Could not connect this trading account. Check the login, password and server.'
-        let suggestions: string[] = []
-
-        if (has('PLEASE_FUND_YOUR_PROJECT')) {
-          status = 502
-          code = 'PROVIDER_UNFUNDED'
-          message = 'Account connection is unavailable: the NovaHost trading provider needs funding. This is on our side, not your login details.'
-        } else if (codes.some((c) => c.includes('LIMIT'))) {
-          status = 502
-          code = 'PROVIDER_LIMIT'
-
-          /* The numbers go to the LOG, not to the user.
-           *
-           * `allowed=10 | needed=160` is exactly what an operator needs — it
-           * separates a plan ceiling from a genuinely full project, and names
-           * the size of the cleanup — and exactly what a paying customer
-           * should never read. "Our provider is on a trial plan" is not a
-           * status update, it is a reason to ask for a refund.
-           *
-           * What the user gets is the one fact that changes their behaviour:
-           * stop retyping your password, it is not you. `details` still
-           * carries the raw body for support. */
-          const allowed = detail.match(/allowed=(\d+)/)?.[1] ?? '?'
-          const needed  = detail.match(/needed=(\d+)/)?.[1] ?? '?'
-          console.error(
-            `[MetaCopier] PROJECT AT ACCOUNT CAP: allowed=${allowed} needed=${needed} ` +
-            `trial=${codes.some((c) => c.includes('TRIAL'))} — no user can link a broker until this is raised or reclaimed`
-          )
-
-          message =
-            'Connecting a trading account is unavailable right now. This is a fault on our side, ' +
-            'not your login details — there is nothing wrong with your account number, password ' +
-            'or server. Please try again shortly, or contact support if it persists.'
-        } else if (has('WRONG_CREDENTIALS', 'INVALID_CREDENTIALS', 'AUTHENTICATION_FAILED', 'AUTHENTICATION')) {
-          code = 'WRONG_CREDENTIALS'
-          message =
-            `Your broker rejected this login. Check that the account number and password are the ` +
-            `${wantPlatform} trading password (not the investor password), and that "${finalServer}" ` +
-            `is the server name exactly as MetaTrader shows it. If the account is ` +
-            `${wantPlatform === 'MT5' ? 'MT4' : 'MT5'}, switch the platform tab and try again.`
-        } else if (codes.some((c) => c.includes('SERVER'))) {
-          code = 'UNKNOWN_SERVER'
-          // "Copy it exactly" is no help when they already did: a server can be
-          // real at the broker and still missing from MetaCopier's catalogue.
-          // Seen 2026-10-07: it lists XMGlobal-MT5, 2 and 4-18, but not
-          // "XMGlobal-MT5 20", and a correctly typed name was rejected over and over.
-          //
-          // A numbered server is NOT a typo of its neighbour. An account lives on
-          // one server, so suggesting "XMGlobal-MT5 2" to someone on "20" only
-          // trades this error for a wrong-password one. When the broker's
-          // family is known and only this number is missing, say so plainly and
-          // suggest nothing. Suggestions are only for a name that does not fit
-          // any family the broker has, which is a real typo.
-          const stem = (s: string) => normalize(s).replace(/\d+$/, '')
-          const family = knownServers
-            ? knownServers.filter((s) => stem(s) === stem(finalServer))
-            : []
-          if (family.length) {
-            code = 'SERVER_NOT_SUPPORTED'
-            message =
-              `"${finalServer}" is your broker's server, but our trading provider cannot connect ` +
-              `to that one yet. Do not switch to a different server number, because your account ` +
-              `only works on this one. Please contact support so we can get it added.`
-            console.error(
-              `[MetaCopier] server "${finalServer}" missing from provider catalogue; ` +
-              `known in family: ${family.join(', ')}`
-            )
-          } else {
-            suggestions = knownServers ? suggestServers(knownServers, finalServer) : []
-            message = suggestions.length
-              ? `"${finalServer}" is not a ${wantPlatform} server we can connect to. ` +
-                `Did you mean: ${suggestions.join(', ')}? Check the exact name in MetaTrader ` +
-                `under Tools -> Options -> Server.`
-              : `"${finalServer}" was not recognised as a ${wantPlatform} server. Copy it exactly ` +
-                `as it appears in MetaTrader under Tools -> Options -> Server.`
-          }
-        }
-
-        // Broker credentials are never echoed back to the client.
-        return {
-          errorResponse: json({ success: false, code, error: message, suggestions, details: detail }, status),
-          limited: code === 'PROVIDER_LIMIT',
-        }
-      }
-
-      const created = await createRes.json().catch(() => ({}))
-      const id = created?.id == null ? '' : String(created.id)
-      if (!id) {
-        return { errorResponse: json({ success: false, code: 'NO_ACCOUNT_ID', error: 'MetaCopier did not return an account id.' }, 502) }
-      }
-      return { id }
-    }
-
-    /**
-     * Starts the account and waits for the broker session to actually come up.
-     *
-     * Returning "connected" the instant the account is registered -- which this
-     * function used to do implicitly -- is why a signal fired in the first minute
-     * after a reconnect failed with `[ACCOUNT_IS_NOT_CONNTECTED]`: the account
-     * existed, the MT4/MT5 session behind it did not. Up to ~24s of polling
-     * turns that window from a failed trade into a "still connecting" state the
-     * app can show honestly.
-     */
-    const startAndVerify = async (id: string): Promise<'connected' | 'connecting' | 'wrong_credentials' | 'account_gone'> => {
-      await fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/actions/start`,
-        { method: 'POST', headers: mcHeaders }
-      ).catch((e) => console.warn('[MetaCopier] start failed (non-fatal):', e))
-
-      for (let i = 0; i < 6; i++) {
-        await new Promise((r) => setTimeout(r, 4000))
-        try {
-          const infoRes = await fetch(
-            `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/information`,
-            { headers: mcHeaders },
-          )
-          if (!infoRes.ok) {
-            // isDead() above stops an ALREADY-deleted account from being
-            // reused. This covers the account dying mid-poll instead -- a
-            // concurrent reclaim, or the user deleting it at their broker
-            // while we sit in this loop. Only codes that mean "this id is
-            // never coming back" short-circuit to account_gone; anything else
-            // (rate limits, a transient 5xx, a region still spinning up)
-            // keeps polling exactly as before.
-            const detail = await infoRes.text().catch(() => '')
-            const codes = codesIn(detail)
-            if (codes.some((c) => c === 'ACCOUNT_WAS_DELETED' || c === 'ACCOUNT_WAS_ALREADY_DELETED' || c === 'ACCOUNT_NOT_FOUND')) {
-              console.warn(`[MetaCopier] account ${id} gone mid-verify: ${detail}`)
-              return 'account_gone'
-            }
-            continue
-          }
-          const info = await infoRes.json()
-          if (info?.wrongCredentials === true) return 'wrong_credentials'
-          if (info?.connected === true) return 'connected'
-        } catch { /* keep waiting */ }
-      }
-      return 'connecting'
-    }
-
-    /** Fetches one MetaCopier account, or null if it does not exist / cannot be read. */
-    const fetchAccount = async (id: string): Promise<Record<string, unknown> | null> => {
-      try {
-        const r = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}`, { headers: mcHeaders })
-        if (!r.ok) return null
-        return await r.json() as Record<string, unknown>
-      } catch { return null }
-    }
-
-    /**
-     * True when MetaCopier still knows about an account but has deleted it.
-     *
-     * `GET /accounts/{id}` answers 200 for a deleted account -- it does not
-     * 404 -- and hands back the same shape as a live one, just with
-     * `deleted` set and `status.name === 'Deleted'`. Every call the account
-     * needs (`/actions/start`, `/information`) then 400s with
-     * `[ACCOUNT_WAS_DELETED]`. Without this check, `fetchAccount` returning a
-     * truthy value reads as "still there", the corpse gets reused, and
-     * `startAndVerify` cannot tell that 400 apart from "still starting" --
-     * so the licence reports CONNECTING forever no matter how many times the
-     * user retries, because every retry lands on the same dead id.
-     */
-    const isDead = (a: Record<string, unknown> | null | undefined): boolean =>
-      !!a && (a.deleted === true || (a.status as Record<string, unknown> | undefined)?.name === 'Deleted')
-
-    // ---- De-duplicate: one MetaCopier account per broker login --------------
-    //
-    // MetaCopier will hold two accounts for one MT4/MT5 login, and they fight
-    // over the broker session -- each one's connect knocks the other offline,
-    // which surfaces on trades as intermittent [ACCOUNT_IS_NOT_CONNTECTED] and
-    // [BROKER_REJECTION]. The old `failIfAccountExistsInProject: false` created a
-    // fresh duplicate on every reconnect.
-    //
-    // Three signals, cheapest and most authoritative first:
-    //   1. the id already stored on THIS licence -- if it still exists and still
-    //      points at the same login+server, this connect is a no-op: re-start it
-    //      and confirm it is up. Nothing is created.
-    //   2. any account in the project already registered for this login+server --
-    //      catches accounts made before ids were stored, or out of band.
-    //   3. neither -> register a new one.
-    let metacopierAccountId = ''
-    let reused = false
-
-    const priorId = String((license.metadata as Record<string, unknown> | null)?.metacopier_account_id ?? '').trim()
-    if (priorId) {
-      const prior = await fetchAccount(priorId)
-      if (prior && isDead(prior)) {
-        // Gone at the provider already -- deleting it again would just 400
-        // with [ACCOUNT_WAS_ALREADY_DELETED]. Leave metacopierAccountId unset
-        // so a fresh account gets created below, and the write-back at the
-        // end of this function replaces the dead id on the licence.
-        console.log(`[MetaCopier] licence ${license.id}'s stored account ${priorId} was deleted at the provider -- abandoning it`)
-      } else if (prior) {
-        const sameLogin =
-          normalize(prior.loginAccountNumber) === normalize(wantLogin) &&
-          normalize(prior.loginServer) === normalize(finalServer)
-        if (sameLogin) {
-          metacopierAccountId = priorId
-          reused = true
-          console.log(`[MetaCopier] licence ${license.id} already holds account ${priorId} for this login -- reusing`)
-        } else {
-          // The licence is being pointed at a different broker login. The old
-          // account is now orphaned -- remove it so it cannot keep a stale
-          // session (and a provider charge) alive.
-          console.log(`[MetaCopier] licence ${license.id} switching login -- deleting old account ${priorId}`)
-          await deleteAccount(priorId)
-        }
-      }
-    }
-
-    if (!metacopierAccountId) {
-      try {
-        const all = await listAllAccounts()
-        const matches = all.filter((a) =>
-          !isDead(a) &&
-          normalize(a.loginAccountNumber) === normalize(wantLogin) &&
-          normalize(a.loginServer) === normalize(finalServer)
-        )
-        matches.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-          String(a.created ?? '').localeCompare(String(b.created ?? '')))
-
-        if (matches.length === 1) {
-          // Exactly one -- reuse it. A stale password on it is caught by the
-          // verify step below and repaired there.
-          metacopierAccountId = String(matches[0].id)
-          reused = true
-          console.log(`[MetaCopier] reusing existing account ${metacopierAccountId} for login ${wantLogin}`)
-        } else if (matches.length > 1) {
-          // Already in a contending state. Clear them all and build one clean
-          // account, so the outcome does not depend on which duplicate wins.
-          console.warn(`[MetaCopier] ${matches.length} duplicate accounts for login ${wantLogin} -- clearing`)
-          for (const a of matches) await deleteAccount(String(a.id))
-        }
-      } catch (e) {
-        console.warn(`[MetaCopier] account list failed (will create fresh): ${(e as Error).message}`)
-      }
-    }
-
-    if (!metacopierAccountId) {
-      let r = await resolveAndCreate()
-
-      // Out of account slots. Reclaim what this project is holding for licences
-      // that no longer exist, then try once more.
-      //
-      // Not a nicety: a project that has been creating a duplicate on every
-      // reconnect accumulates orphans until the cap is hit, and from that moment
-      // NOBODY can connect an account -- the failure is total and permanent, and
-      // it presents to every user as "your password is wrong". Reclaiming is the
-      // difference between a self-healing cap and a dead product.
-      if ('errorResponse' in r && r.limited) {
-        const freed = await reclaimOrphanAccounts()
-        if (freed > 0) {
-          console.log(`[MetaCopier] reclaimed ${freed} orphaned account(s); retrying create`)
-          r = await resolveAndCreate()
-        }
-      }
-
-      if ('errorResponse' in r) return r.errorResponse
-      metacopierAccountId = r.id
-    }
-
-    let linkState = await startAndVerify(metacopierAccountId)
-
-    // A reused account whose stored password no longer works: the credentials
-    // cannot be edited in place, so drop it and register the login fresh once.
-    if (linkState === 'wrong_credentials' && reused) {
-      console.log(`[MetaCopier] reused account ${metacopierAccountId} has stale credentials -- recreating`)
-      await deleteAccount(metacopierAccountId)
-      reused = false
-      const r = await resolveAndCreate()
-      if ('errorResponse' in r) return r.errorResponse
-      metacopierAccountId = r.id
-      linkState = await startAndVerify(metacopierAccountId)
-    }
-
-    // The account died while we were polling it (see the TODO in
-    // startAndVerify) -- not a credentials problem, so recreate exactly like
-    // the branch above rather than reporting a false CONNECTING.
-    if (linkState === 'account_gone') {
-      console.log(`[MetaCopier] account ${metacopierAccountId} was deleted mid-verify -- recreating`)
-      reused = false
-      const r = await resolveAndCreate()
-      if ('errorResponse' in r) return r.errorResponse
-      metacopierAccountId = r.id
-      linkState = await startAndVerify(metacopierAccountId)
-    }
-
-    if (linkState === 'wrong_credentials') {
+    if (!result.ok) {
+      // Broker credentials are never echoed back to the client.
       return json({
         success: false,
-        code: 'WRONG_CREDENTIALS',
-        error:
-          `Your broker rejected this login. Check that the account number and password are the ` +
-          `${wantPlatform} trading password (not the investor password), and that "${finalServer}" ` +
-          `is the server name exactly as MetaTrader shows it.`,
-      }, 400)
+        ...(result.code ? { code: result.code } : {}),
+        error: result.error,
+        ...(result.extra ?? {}),
+      }, result.status)
     }
 
-    // Recreated once above and it STILL came back gone/uncertain -- give up
-    // rather than write an outcome the type system never promised callers.
-    if (linkState === 'account_gone') {
-      return json({
-        success: false,
-        code: 'CONNECT_FAILED',
-        error: 'Could not establish a trading session for this account. Please try again.',
-      }, 502)
-    }
+    const accountId = result.accountId
+    const linkState = result.state
+    const reused = result.reused
 
     // ---- Record the link, WITHOUT storing broker credentials ----------------
     // Kept on the licence rather than broker_accounts: app users authenticate by
     // licence key and have no auth.users row, but broker_accounts.user_id is a
     // NOT NULL FK to auth.users. Binding here also lets metacopier-execute
     // resolve the account server-side instead of trusting the client.
+    //
+    // Re-read rather than reusing the licence row from the top: the connect
+    // above can take half a minute, and a stale copy written back would undo
+    // anything that changed the metadata in the meantime.
     const { data: current } = await novaHost
       .from('licenses')
       .select('metadata')
       .eq('id', license.id)
       .maybeSingle()
 
-    const metadata = (current?.metadata ?? {}) as Record<string, unknown>
-    metadata.metacopier_account_id = metacopierAccountId
-    metadata.broker_server = finalServer
-    metadata.platform = wantPlatform
-    metadata.connected_at = new Date().toISOString()
-
     // What the verify step actually saw. `connected` means an order placed now
     // will reach the broker; `connecting` means the account is registered and
     // the session is still coming up -- the app shows that as a wait, not a
     // green light, and metacopier-execute holds signals that arrive during it.
-    metadata.metacopier_status = linkState
+    const metadata = withLink(
+      (current?.metadata ?? {}) as Record<string, unknown>,
+      provider,
+      accountId,
+      linkState,
+    )
+    metadata.broker_server = result.server
+    metadata.platform = result.platform
+    metadata.connected_at = new Date().toISOString()
     if (linkState === 'connected') {
-      metadata.metacopier_connected_verified_at = new Date().toISOString()
+      metadata.bridge_verified_at = new Date().toISOString()
+      // Compatibility copy for readers that predate the bridge.
+      if (provider === 'metacopier') metadata.metacopier_connected_verified_at = metadata.bridge_verified_at
     }
 
     // ---- What this broker calls its instruments -----------------------------
@@ -835,7 +187,7 @@ Deno.serve(async (req: Request) => {
     if (account_type) metadata.account_type = String(account_type).trim()
 
     console.log(
-      `[MetaCopier] licence ${license.id} symbol suffix = "${suffix}"` +
+      `[metacopier-connect] licence ${license.id} symbol suffix = "${suffix}"` +
       (suffix ? ` (orders will read e.g. XAUUSD${suffix})` : ' (bare symbol names)')
     )
 
@@ -844,7 +196,7 @@ Deno.serve(async (req: Request) => {
       .update({ metadata })
       .eq('id', license.id)
 
-    // The account now exists at MetaCopier but nothing points at it, so the app
+    // The account now exists at the provider but nothing points at it, so the app
     // would show NOT LINKED forever while the provider bills for it. Reported as
     // its own failure rather than thrown, because the generic 500 handler
     // returns a Postgres message that tells the user nothing and hides the fact
@@ -865,8 +217,8 @@ Deno.serve(async (req: Request) => {
       success: true,
       code: connected ? 'CONNECTED' : 'CONNECTING',
       status: linkState,
-      account_id: metacopierAccountId,
-      platform: wantPlatform,
+      account_id: accountId,
+      platform: result.platform,
       reused,
       message: connected
         ? 'Trading account connected.'

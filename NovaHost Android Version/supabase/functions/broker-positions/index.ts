@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * What is open on the linked account right now.
@@ -116,8 +115,6 @@ function canonicalSymbol(raw: unknown): string {
   return s
 }
 
-const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
-
 /**
  * The magic number `metacopier-execute` stamps on this robot's orders.
  *
@@ -148,12 +145,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      console.error('[broker-positions] METACOPIER_API_KEY is not configured')
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -187,21 +178,24 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id as string | undefined
-    if (!accountId) {
+    const link = resolveLink(metadata)
+    if (!link) {
       return json({ success: false, code: 'NO_ACCOUNT_LINKED', error: 'No trading account is connected.' }, 409)
     }
 
-    const mcHeaders = { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' }
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
+    }
 
     /**
      * Positions and the account's currency, together.
      *
-     * The currency is NOT on `PositionDTO` and is not recorded on the licence
+     * The currency is NOT on a position and is not recorded on the licence
      * -- `metacopier-connect` never writes one -- so the only place it exists
-     * is `/information`. Fetching it here rather than making the client call
-     * `broker-account` as well is the difference between one round trip and
-     * two on a screen that opens constantly.
+     * is the account summary. Fetching it here rather than making the client
+     * call `broker-account` as well is the difference between one round trip
+     * and two on a screen that opens constantly.
      *
      * It is not optional detail. This project's live accounts are ZAR, and a
      * floating P/L of -412 rendered as dollars when it is rands is wrong by
@@ -210,30 +204,21 @@ Deno.serve(async (req: Request) => {
      * Run in parallel, and the currency is allowed to fail on its own: a
      * position list with an unlabelled figure is degraded, but a position list
      * withheld because a second endpoint was slow is useless.
+     *
+     * A list on a phone is waiting on this. An empty screen that says so beats
+     * a spinner held open by a slow broker.
      */
-    const [res, infoRes] = await Promise.all([
-      fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/positions`,
-        {
-          headers: mcHeaders,
-          // A list on a phone is waiting on this. An empty screen that says so
-          // beats a spinner held open by a slow broker.
-          signal: AbortSignal.timeout(9000),
-        }
-      ),
-      fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/information`,
-        { headers: mcHeaders, signal: AbortSignal.timeout(9000) }
-      ).catch(() => null),
+    const [read, infoRead] = await Promise.all([
+      bridge.positions(9000),
+      bridge.accountSummary(9000),
     ])
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      console.error(`[broker-positions] positions query failed ${res.status}: ${detail}`)
+    if (!read.ok) {
+      console.error(`[broker-positions] positions query failed ${read.status}: ${read.detail}`)
       // A disconnected account and an unreachable API are different problems
       // with different fixes -- one is "reconnect your broker", the other is
       // "try again in a minute" -- so they are not collapsed into one message.
-      const disconnected = /NOT_CONNECTED|OFFLINE|DISCONNECT|ACCOUNT_WAS_DELETED/i.test(detail)
+      const disconnected = read.code === 'ACCOUNT_DISCONNECTED'
       return json({
         success: false,
         code: disconnected ? 'ACCOUNT_DISCONNECTED' : 'BROKER_UNREACHABLE',
@@ -243,20 +228,14 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    const raw = await res.json().catch(() => null)
-    if (!Array.isArray(raw)) {
-      return json({ success: false, code: 'BROKER_UNREACHABLE', error: 'Could not read your open trades.' }, 502)
-    }
-
-    const info = infoRes?.ok ? await infoRes.json().catch(() => null) : null
-    const currency = info?.currency
-      ? String(info.currency).toUpperCase().slice(0, 3)
-      : null
+    const raw = read.data
+    const info = infoRead.ok ? infoRead.data : null
+    const currency = info?.currency ?? null
 
     const ourMagic = magicFor(license.ea_id)
 
-    const positions = raw.map((p: Record<string, unknown>) => {
-      const orderType = String(p?.orderType ?? '')
+    const positions = raw.map((p) => {
+      const orderType = p.orderType
       // `BuyLimit`/`BuyStop` start with Buy but are NOT open positions. Both
       // facts are reported: the side for the chip, the pending flag for
       // whether there is any live profit to show at all.
@@ -264,30 +243,30 @@ Deno.serve(async (req: Request) => {
       const side = /^Buy/.test(orderType) ? 'BUY' : /^Sell/.test(orderType) ? 'SELL' : '—'
 
       return {
-        id: String(p?.id ?? ''),
-        symbol: String(p?.symbol ?? ''),
+        id: p.id,
+        symbol: p.symbol,
         /** The canonical name, so the app can match a position to a signal,
          *  a symbol plan or the robot's allowance without re-deriving the
          *  broker's decoration. `XAUUSDm` resolves to `XAUUSD`, not to the
          *  `XAUUSDM` that matches nothing. */
-        base: canonicalSymbol(p?.symbol),
+        base: canonicalSymbol(p.symbol),
         side,
         pending,
         order_type: orderType,
-        volume: num(p?.volume),
-        open_price: num(p?.openPrice),
-        stop_loss: num(p?.stopLoss),
-        take_profit: num(p?.takeProfit),
+        volume: p.volume,
+        open_price: p.openPrice,
+        stop_loss: p.stopLoss,
+        take_profit: p.takeProfit,
         /** Raw profit, before the broker's costs. */
-        profit: pending ? null : num(p?.profit),
+        profit: pending ? null : p.profit,
         /** Profit after swap and commission -- the figure that says whether
          *  this position is actually making money. Prefer it for display. */
-        net_profit: pending ? null : num(p?.netProfit),
-        swap: num(p?.swap),
-        commission: num(p?.commission),
-        open_time: p?.openTime ?? null,
+        net_profit: pending ? null : p.netProfit,
+        swap: p.swap,
+        commission: p.commission,
+        open_time: p.openTime,
         /** Placed by this robot rather than by hand in MetaTrader. */
-        ours: String(p?.magicNumber ?? '') === ourMagic,
+        ours: (p.magic ?? '') === ourMagic,
       }
     })
 
@@ -312,12 +291,12 @@ Deno.serve(async (req: Request) => {
        */
       floating_net: live.length ? sum(live.map((p) => p.net_profit)) : null,
       /** Whose currency the figures above are in. A balance without its unit
-       *  is not a balance; neither is a P/L. Null when `/information` could
+       *  is not a balance; neither is a P/L. Null when the account summary could
        *  not be read -- the client must then label the figure as unknown
        *  rather than assuming dollars. */
       currency,
-      balance: num(info?.balance),
-      equity: num(info?.equity),
+      balance: info?.balance ?? null,
+      equity: info?.equity ?? null,
       as_of: new Date().toISOString(),
     })
 

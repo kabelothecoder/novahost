@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink, type Deal } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * Closed trades, and the equity curve they add up to.
@@ -47,8 +46,6 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  *
  * Read-only. It places nothing, closes nothing and writes nothing.
  */
-
-const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
 
 /** Letters and digits, upper case -- brokers decorate symbols. */
 function baseSymbol(s: unknown): string {
@@ -110,7 +107,7 @@ function magicFor(eaId: unknown): string {
 /**
  * Is this history row an actual trade?
  *
- * `/history/positions` is the account's LEDGER, not its trade list. Alongside
+ * History is the account's LEDGER, not its trade list. Alongside
  * closed positions it returns deposits, withdrawals, credits, bonuses,
  * commissions, dividends, tax and cancelled orders -- and every one of them
  * carries a `closeTime`, so filtering on that alone admits all of them.
@@ -122,22 +119,20 @@ function magicFor(eaId: unknown): string {
  *
  * Three independent tests, because no one of them holds on every broker:
  *
- *  - `dealType` names it outright, but only when the broker populates it.
- *    Anything that is not DealBuy/DealSell is a ledger entry -- including
- *    `CanceledBuy`/`CanceledSell`, which are orders that never became
- *    positions and would otherwise score as break-even trades.
+ *  - `kind` names it outright, but only when the provider reports it.
+ *    Cancelled orders count as ledger entries -- they never became positions
+ *    and would otherwise score as break-even trades.
  *  - A trade has a SYMBOL. Balance operations do not.
  *  - A trade has a positive VOLUME. Balance operations do not.
  *
- * The symbol and volume tests are what carry a broker that leaves `dealType`
- * empty, which is why the filter does not simply trust the enum.
+ * The symbol and volume tests are what carry a broker that leaves `kind`
+ * unreported, which is why the filter does not simply trust it.
  */
-function isClosedTrade(p: Record<string, unknown>): boolean {
-  if (!p?.closeTime) return false
-  const dealType = String(p?.dealType ?? '')
-  if (dealType && !/^Deal(Buy|Sell)$/.test(dealType)) return false
-  if (!String(p?.symbol ?? '').trim()) return false
-  return Number(p?.volume) > 0
+function isClosedTrade(p: Deal): boolean {
+  if (!p.closeTime) return false
+  if (p.kind === 'ledger') return false
+  if (!p.symbol.trim()) return false
+  return Number(p.volume) > 0
 }
 
 /** How far back to look when the caller does not say. */
@@ -156,12 +151,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      console.error('[broker-performance] METACOPIER_API_KEY is not configured')
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -193,9 +182,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id as string | undefined
-    if (!accountId) {
+    const link = resolveLink(metadata)
+    if (!link) {
       return json({ success: false, code: 'NO_ACCOUNT_LINKED', error: 'No trading account is connected.' }, 409)
+    }
+
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
     }
 
     // Clamped rather than trusted: an unbounded window asks the broker for
@@ -206,24 +200,16 @@ Deno.serve(async (req: Request) => {
     const stop = new Date()
     const start = new Date(stop.getTime() - days * 86_400_000)
 
-    const qs = new URLSearchParams({ start: start.toISOString(), stop: stop.toISOString() })
-    const mcHeaders = { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' }
-
-    const [res, infoRes] = await Promise.all([
-      fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/history/positions?${qs}`,
-        { headers: mcHeaders, signal: AbortSignal.timeout(12000) }
-      ),
-      fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/information`,
-        { headers: mcHeaders, signal: AbortSignal.timeout(9000) }
-      ).catch(() => null),
+    // The balance is allowed to fail on its own: a curve without an anchor is
+    // degraded, a history withheld because a second read was slow is useless.
+    const [read, infoRead] = await Promise.all([
+      bridge.history(start, stop, 12000),
+      bridge.accountSummary(9000),
     ])
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      console.error(`[broker-performance] history query failed ${res.status}: ${detail}`)
-      const disconnected = /NOT_CONNECTED|OFFLINE|DISCONNECT|ACCOUNT_WAS_DELETED/i.test(detail)
+    if (!read.ok) {
+      console.error(`[broker-performance] history query failed ${read.status}: ${read.detail}`)
+      const disconnected = read.code === 'ACCOUNT_DISCONNECTED'
       return json({
         success: false,
         code: disconnected ? 'ACCOUNT_DISCONNECTED' : 'HISTORY_UNAVAILABLE',
@@ -233,36 +219,32 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    const raw = await res.json().catch(() => null)
-    if (!Array.isArray(raw)) {
-      return json({ success: false, code: 'HISTORY_UNAVAILABLE', error: 'Could not read your trade history.' }, 502)
-    }
-
-    const info = infoRes?.ok ? await infoRes.json().catch(() => null) : null
-    const currency = info?.currency ? String(info.currency).toUpperCase().slice(0, 3) : null
-    const balance = num(info?.balance)
+    const raw = read.data
+    const info = infoRead.ok ? infoRead.data : null
+    const currency = info?.currency ?? null
+    const balance = info?.balance ?? null
 
     const ourMagic = magicFor(license.ea_id)
 
     const closedAll = raw
       .filter(isClosedTrade)
-      .map((p: Record<string, unknown>) => {
-        const orderType = String(p?.orderType ?? '')
+      .map((p) => {
+        const orderType = p.orderType
         return {
-          id: String(p?.id ?? ''),
-          symbol: String(p?.symbol ?? ''),
-          base: canonicalSymbol(p?.symbol),
+          id: p.id,
+          symbol: p.symbol,
+          base: canonicalSymbol(p.symbol),
           side: /^Buy/.test(orderType) ? 'BUY' : /^Sell/.test(orderType) ? 'SELL' : '—',
-          volume: num(p?.volume),
-          open_price: num(p?.openPrice),
-          close_price: num(p?.closePrice),
-          open_time: p?.openTime ?? null,
-          close_time: p?.closeTime ?? null,
-          profit: num(p?.profit),
-          net_profit: num(p?.netProfit),
-          swap: num(p?.swap),
-          commission: num(p?.commission),
-          ours: String(p?.magicNumber ?? '') === ourMagic,
+          volume: p.volume,
+          open_price: p.openPrice,
+          close_price: p.closePrice,
+          open_time: p.openTime,
+          close_time: p.closeTime,
+          profit: p.profit,
+          net_profit: p.netProfit,
+          swap: p.swap,
+          commission: p.commission,
+          ours: (p.magic ?? '') === ourMagic,
         }
       })
       // Oldest first: the curve is built by walking forward, and sorting once
@@ -341,7 +323,7 @@ Deno.serve(async (req: Request) => {
       },
       currency,
       balance,
-      equity: num(info?.equity),
+      equity: info?.equity ?? null,
       window_days: days,
       /** MetaCopier documents history as lagging live trading by up to three
        *  minutes. Surfaced so the screen can say so rather than looking stuck. */

@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * Reads the instrument list off the subscriber's own broker account and matches
@@ -100,34 +99,11 @@ interface BrokerSymbol {
 }
 
 /**
- * MetaCopier's symbol payload, reduced to names.
- *
- * The shape is not contractual across brokers -- some entries come back as bare
- * strings, others as objects keyed `name`, `symbol` or `id`. Anything that
- * yields no usable name is dropped rather than guessed at, because a wrong name
- * here becomes a rejected order later.
+ * The broker's names, with a comparison key each. The bridge has already
+ * dropped anything that yielded no usable name, and de-duplicated.
  */
-function extractNames(payload: unknown): BrokerSymbol[] {
-  const list = Array.isArray(payload) ? payload : []
-  const out: BrokerSymbol[] = []
-  const seen = new Set<string>()
-
-  for (const entry of list) {
-    let raw = ''
-    if (typeof entry === 'string') {
-      raw = entry
-    } else if (entry && typeof entry === 'object') {
-      const o = entry as Record<string, unknown>
-      raw = String(o.name ?? o.symbol ?? o.symbolName ?? o.id ?? '')
-    }
-
-    const name = raw.trim()
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    out.push({ name, key: canon(name) })
-  }
-
-  return out
+function withKeys(names: string[]): BrokerSymbol[] {
+  return names.map((name) => ({ name, key: canon(name) }))
 }
 
 type Confidence = 'exact' | 'suffix' | 'decorated' | 'alias'
@@ -191,12 +167,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      console.error('METACOPIER_API_KEY is not configured')
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -231,9 +201,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id as string | undefined
+    const link = resolveLink(metadata)
 
-    if (!accountId) {
+    if (!link) {
       return json({
         success: false,
         code: 'NO_ACCOUNT_LINKED',
@@ -241,19 +211,22 @@ Deno.serve(async (req: Request) => {
       }, 409)
     }
 
-    // ---- Ask the broker what it lists ---------------------------------------
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/symbols`,
-      { headers: { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' } }
-    )
+    const accountId = link.accountId
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
+    }
 
-    if (!res.ok) {
-      const detail = await res.text()
-      console.error(`[broker-symbols] symbols query failed ${res.status}: ${detail}`)
+    // ---- Ask the broker what it lists ---------------------------------------
+    const read = await bridge.symbols()
+
+    if (!read.ok) {
+      const detail = read.detail
+      console.error(`[broker-symbols] symbols query failed ${read.status}: ${detail}`)
 
       // A disconnected account is the common case and is the user's to fix, so
       // it is named rather than folded into a generic gateway error.
-      const disconnected = /NOT_CONNECTED|OFFLINE|DISCONNECT/i.test(detail)
+      const disconnected = read.code === 'ACCOUNT_DISCONNECTED'
       return json({
         success: false,
         code: disconnected ? 'ACCOUNT_DISCONNECTED' : 'BROKER_UNREACHABLE',
@@ -264,7 +237,7 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    const brokerSymbols = extractNames(await res.json().catch(() => []))
+    const brokerSymbols = withKeys(read.data)
 
     if (brokerSymbols.length === 0) {
       return json({

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -148,8 +149,8 @@ Deno.serve(async (req: Request) => {
        here costs no round trip and leaves no claimed-then-rejected signal. */
     const eligible = licences.filter((l) => {
       if (l.expires_at && new Date(l.expires_at) < new Date()) return false
-      const acct = (l.metadata as Record<string, unknown> | null)?.metacopier_account_id
-      return typeof acct === 'string' && acct.trim().length > 0
+      // Linked on any provider -- the executor resolves which one.
+      return resolveLink(l.metadata as Record<string, unknown> | null) !== null
     })
 
     if (!eligible.length) {

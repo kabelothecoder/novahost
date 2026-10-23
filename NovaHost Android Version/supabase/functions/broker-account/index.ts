@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * What the linked broker account is actually worth, right now.
@@ -28,7 +27,7 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * R596. The number looked deliberate, appeared on every scan, and was wrong by
  * two orders of magnitude.
  *
- * The balance was never unavailable. MetaCopier's `/information` has it, and
+ * The balance was never unavailable. The bridge's `accountSummary` has it, and
  * `broker-diagnostics` was already reading it for support sessions. This is the
  * same read, on its own, cheap enough to call whenever a sizing screen opens.
  *
@@ -54,11 +53,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -92,30 +86,27 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id as string | undefined
-    if (!accountId) {
+    const link = resolveLink(metadata)
+    if (!link) {
       return json({ success: false, code: 'NO_ACCOUNT_LINKED', error: 'No trading account is connected.' }, 409)
     }
+    const accountId = link.accountId
 
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/information`,
-      {
-        headers: { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' },
-        // A sizing screen is waiting on this. Better to render with the user's
-        // own typed figure than to hold the UI on a slow broker.
-        signal: AbortSignal.timeout(8000),
-      }
-    )
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
+    }
 
-    if (!res.ok) {
+    // A sizing screen is waiting on this. Better to render with the user's
+    // own typed figure than to hold the UI on a slow broker.
+    const read = await bridge.accountSummary(8000)
+    if (!read.ok) {
       return json(
         { success: false, code: 'BROKER_UNREACHABLE', error: 'Could not read your account from the broker just now.' },
         502
       )
     }
-
-    const info = await res.json() as Record<string, unknown>
-    const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
+    const info = read.data
 
     // `credit` is deliberately NOT folded into the balance. Bonus credit cannot
     // be withdrawn and most brokers exclude it from the loss a stop can realise,
@@ -124,17 +115,17 @@ Deno.serve(async (req: Request) => {
     return json({
       success: true,
       account_id: accountId,
-      balance: num(info.balance),
-      equity: num(info.equity),
-      credit: num(info.credit),
-      free_margin: num(info.freeMargin),
-      // Upper-cased and clipped to the ISO shape the app's FxRates speaks.
-      currency: String(info.currency ?? 'USD').toUpperCase().slice(0, 3),
-      leverage: num(info.leverage),
-      connected: typeof info.connected === 'boolean' ? info.connected : null,
+      balance: info.balance,
+      equity: info.equity,
+      credit: info.credit,
+      free_margin: info.freeMargin,
+      // Already upper-cased and clipped to the ISO shape the app's FxRates speaks.
+      currency: info.currency ?? 'USD',
+      leverage: info.leverage,
+      connected: info.connected,
       /** True when the broker refuses orders regardless of anything the app sends. */
-      trading_disabled: info.tradingDisabled === true || info.tradeDisabled === true,
-      investor_password: info.isInvestorPassword === true,
+      trading_disabled: info.tradingDisabled,
+      investor_password: info.investorPassword,
     })
 
   } catch (err) {
