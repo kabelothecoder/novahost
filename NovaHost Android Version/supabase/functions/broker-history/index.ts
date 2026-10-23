@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink, type Deal } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * The account's recent closed trades, reduced to the one figure the scanner
@@ -20,9 +19,8 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * went against the user. A risk control that reports a number nobody measured
  * is worse than no risk control: it is the reassurance without the protection.
  *
- * MetaCopier exposes `GET /accounts/{id}/history/positions`, which carries
- * `netProfit` and `closeTime` per closed position. That is everything the count
- * needs, so the rule can be real.
+ * The bridge's `history()` carries `netProfit` and `closeTime` per closed
+ * position. That is everything the count needs, so the rule can be real.
  *
  * ## Why the count is computed here and not on the handset
  *
@@ -31,6 +29,33 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * and puts the account's whole trading record on the device. One number goes
  * back instead.
  */
+
+/**
+ * Is this history row an actual trade?
+ *
+ * History is the account's LEDGER. Alongside closed positions it returns
+ * deposits, withdrawals, credits, bonuses, commissions, dividends, tax and
+ * cancelled orders -- and every one of them carries a `closeTime`, so
+ * filtering on that alone admits all of them.
+ *
+ * For THIS function that is not a cosmetic error, it is the guardrail failing
+ * open. A deposit arrives with a positive `netProfit` (a live account here
+ * shows a R500 top-up as exactly that), the loop below sees a non-negative
+ * figure and stops, and the streak resets to zero. **Funding your account
+ * would clear the consecutive-loss lock** -- at the precise moment a user on
+ * a losing run is most likely to do it.
+ *
+ * Three independent tests, because no one of them holds on every broker:
+ * `kind` names it outright where the provider reports it; a real trade
+ * has a symbol; a real trade has a positive volume. The last two are what
+ * carry a broker that leaves it unreported.
+ */
+function isClosedTrade(p: Deal): boolean {
+  if (!p.closeTime) return false
+  if (p.kind === 'ledger') return false
+  if (!p.symbol.trim()) return false
+  return Number(p.volume) > 0
+}
 
 /**
  * Losses in a row, counting back from the most recently closed trade.
@@ -43,14 +68,15 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * Exactly zero is treated as NOT a loss. A break-even close is not a losing
  * trade, and counting it as one would lock the engine on a scratch.
  */
-function consecutiveLosses(positions: Array<Record<string, unknown>>): number {
+function consecutiveLosses(positions: Deal[]): number {
   const closed = positions
-    .filter((p) => p?.closeTime)
+    .filter(isClosedTrade)
     .sort((a, b) => String(b.closeTime).localeCompare(String(a.closeTime)))
 
   let streak = 0
   for (const p of closed) {
-    const net = Number(p?.netProfit)
+    // null is "unreadable", not zero -- Number(null) would invent a scratch.
+    const net = p.netProfit ?? NaN
     // An unreadable profit figure stops the count rather than being guessed
     // either way: continuing would invent a loss, skipping would invent a win.
     if (!Number.isFinite(net)) break
@@ -72,12 +98,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      console.error('[broker-history] METACOPIER_API_KEY is not configured')
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -108,9 +128,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? null) as Record<string, unknown> | null
-    const accountId = metadata?.metacopier_account_id as string | undefined
+    const link = resolveLink(metadata)
 
-    if (!accountId) {
+    if (!link) {
       return json({
         success: false,
         code: 'NO_ACCOUNT_LINKED',
@@ -118,15 +138,34 @@ Deno.serve(async (req: Request) => {
       }, 409)
     }
 
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/history/positions`,
-      { headers: { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' } }
-    )
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
+    }
 
-    if (!res.ok) {
-      const detail = await res.text()
-      console.error(`[broker-history] history query failed ${res.status}: ${detail}`)
-      const disconnected = /NOT_CONNECTED|OFFLINE|DISCONNECT|ACCOUNT_WAS_DELETED/i.test(detail)
+    /**
+     * The window is REQUIRED, and omitting it was silently disarming this rule.
+     *
+     * MetaCopier refuses a history read without `start` and `stop`. This call
+     * once sent neither, so every invocation returned HISTORY_UNAVAILABLE --
+     * which the scanner reads as "could not measure" and renders as a rule it could not check.
+     *
+     * That is precisely the failure this function's own docstring was written
+     * to end: "A risk control that reports a number nobody measured is worse
+     * than no risk control." It has been reporting one since it shipped.
+     *
+     * Thirty days: a losing streak is a statement about recent trading, and a
+     * run that ended six weeks ago is not the thing the guardrail is asking
+     * about. Long enough that a low-frequency account still has history in it.
+     */
+    const stop = new Date()
+    const start = new Date(stop.getTime() - 30 * 86_400_000)
+
+    const read = await bridge.history(start, stop)
+
+    if (!read.ok) {
+      console.error(`[broker-history] history query failed ${read.status}: ${read.detail}`)
+      const disconnected = read.code === 'ACCOUNT_DISCONNECTED'
       return json({
         success: false,
         code: disconnected ? 'ACCOUNT_DISCONNECTED' : 'HISTORY_UNAVAILABLE',
@@ -136,13 +175,10 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    const positions = await res.json().catch(() => null)
-    if (!Array.isArray(positions)) {
-      return json({ success: false, code: 'HISTORY_UNAVAILABLE', error: 'Could not read your trade history.' }, 502)
-    }
+    const positions = read.data
 
     const streak = consecutiveLosses(positions)
-    const closedCount = positions.filter((p) => p?.closeTime).length
+    const closedCount = positions.filter(isClosedTrade).length
 
     console.log(`[broker-history] licence ${license.id}: ${streak} consecutive losses of ${closedCount} closed`)
 

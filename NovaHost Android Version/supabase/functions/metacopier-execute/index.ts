@@ -1,12 +1,14 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  linkStatusOf, openBridge, resolveLink, withoutLink,
+  type BrokerBridge, type OrderRefusal, type OrderType,
+} from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * MetaCopier orderType, from the side and how the entry is reached.
@@ -57,7 +59,8 @@ function isPending(orderType: string): boolean {
  * open-position endpoint, and their modify endpoint accepts only volume, open
  * price, take profit and stop loss, so it cannot be rewritten afterwards
  * either. Everything after the second `|` is the part we control, and this
- * function is all of it.
+ * function is all of it. See [magicFor] for the undecorated half of a trade's
+ * identity.
  *
  * The suffix is protected and the robot name is what gets shortened -- losing
  * the tail of a long robot name is survivable, losing "-NovaHost" defeats the
@@ -147,9 +150,8 @@ const MAX_REQUEST_ID = 999
  * Stable request id derived from the signal id, inside MetaCopier's range.
  *
  * The same signal must always produce the same number: that is what stops a
- * network hiccup turning one mentor call into two positions, and it keeps the
- * id fixed across the candidate-name walk so the broker sees one request rather
- * than five.
+ * network hiccup turning one mentor call into two positions. (A later name in
+ * the candidate walk is seeded with the name as well -- see `requestIdFor`.)
  *
  * The modulo is not a detail -- it is the whole bug this function once had. The
  * hash below is 32-bit and was returned raw, producing ids like 2105094537
@@ -166,6 +168,82 @@ function requestIdFrom(seed: string): number {
     h = Math.imul(h, 16777619)
   }
   return Math.abs(h | 0) % (MAX_REQUEST_ID + 1)
+}
+
+/**
+ * MetaTrader's own field for "which robot placed this".
+ *
+ * The comment cannot carry that job alone. MetaCopier prepends
+ * `API|<requestId>|` to every comment on the open-position endpoint -- their
+ * schema documents it, their modify endpoint explicitly cannot rewrite it
+ * ("only volume, open price, take profit, and stop loss can be modified"), and
+ * the `hideComment` / `customComment` switches they do offer apply only to the
+ * copier path, which NovaHost does not use. So a trade reads as
+ * `API|780|QuantumBreaker-NovaHost` in the terminal and there is no request we
+ * can send that changes it.
+ *
+ * The magic number is the field MetaTrader provides for exactly this, it has
+ * its own column, and nothing decorates it. Filtering, reporting and "was this
+ * mine or the robot's" all work off it in every terminal and every third-party
+ * tool.
+ *
+ * The namespace is the point: every NovaHost trade begins 77, so the whole
+ * platform's activity is one filter, while the six digits after it are derived
+ * from the robot so two robots on one account stay distinguishable.
+ *
+ * Kept under eight digits deliberately. MT5 stores the magic as a 64-bit value
+ * but MT4 stores it as a signed 32-bit int (ceiling 2,147,483,647), and a magic
+ * that overflows on MT4 is silently truncated into somebody else's namespace.
+ */
+const MAGIC_PREFIX = 77
+const MAGIC_ROBOT_RANGE = 1_000_000
+
+/**
+ * A stable magic number for one robot. Same robot, same number, forever.
+ *
+ * Derived rather than stored because it has to be identical on every account
+ * this robot ever trades, including accounts linked before the column existed --
+ * and a value computed from the id is that, with nothing to migrate.
+ */
+function magicFor(eaId: unknown): string {
+  const seed = String(eaId ?? '').trim()
+  if (!seed) return String(MAGIC_PREFIX * MAGIC_ROBOT_RANGE)
+
+  // Same FNV-1a as requestIdFrom, for the same reason: cheap, stable, and
+  // dependency-free.
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return String(MAGIC_PREFIX * MAGIC_ROBOT_RANGE + (Math.abs(h | 0) % MAGIC_ROBOT_RANGE))
+}
+
+/**
+ * The smallest volume increment any broker on this platform accepts.
+ *
+ * Every account seen here quotes `stepVolume: 0.01` and `minimalVolume: 0.01`.
+ * It is a constant rather than a per-symbol read on purpose: this runs on the
+ * hot path ahead of the order, and an extra round trip to `/symbols/{name}` to
+ * confirm a value that has never varied would cost every trade latency to
+ * protect against a book nobody trades. `explainRejection` still reads the real
+ * spec on the way out, so a broker that genuinely differs is reported by name
+ * rather than silently mis-sized.
+ */
+const LOT_STEP = 0.01
+
+/**
+ * The nearest tradeable volume at or below [value].
+ *
+ * Down, never up: [value] is already the user's risk budget expressed in lots,
+ * and rounding up spends more of their account than they authorised.
+ */
+function toLotStep(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return LOT_STEP
+  // Scaled to integers before flooring -- 0.07/0.01 is 6.999999999999999 in
+  // binary floating point, and flooring that gives 0.06.
+  const steps = Math.floor(Math.round(value * 1000) / (LOT_STEP * 1000))
+  return Math.max(LOT_STEP, Math.round(steps * LOT_STEP * 100) / 100)
 }
 
 /** The canonical NovaHost name for an instrument: letters and digits, upper case. */
@@ -221,7 +299,7 @@ const SYMBOL_ALIASES: Record<string, string[]> = {
   JP225:  ['JPN225', 'JP225', 'NIKKEI'],
   USOIL:  ['WTI', 'XTIUSD', 'USOIL', 'CRUDE', 'OIL'],
   UKOIL:  ['BRENT', 'XBRUSD', 'UKOIL'],
-  BTCUSD: ['BTCUSD', 'BITCOIN', 'BTC'],
+  BTCUSD: ['BTCUSD', 'BITCOIN', 'BTC', 'XBTUSD'],
   ETHUSD: ['ETHUSD', 'ETHEREUM', 'ETH'],
   VIX:    ['VIX', 'VOLATILITY', 'VIXX'],
 }
@@ -257,6 +335,36 @@ const ALIAS_FAMILY: Record<string, string[]> = (() => {
 /** The alias family for a symbol, whichever member of it was named. */
 function aliasesFor(base: string): string[] {
   return ALIAS_FAMILY[base] ?? []
+}
+
+/**
+ * Whether a chart-reported symbol should count as one the licence allows.
+ *
+ * The chart scanner reports whatever text is printed on the chart, which on
+ * many brokers carries their own decoration -- BTCUSDM, XAUUSDPRO -- rather
+ * than the canonical name a mentor's allowance is written against. Reading
+ * that as "not licensed" was the actual fault behind a subscriber whose
+ * licence allowed BTCUSD being refused it outright: the allowance said
+ * BTCUSD, the chart said BTCUSDM, and the two were compared for exact
+ * equality with no room for a broker's own spelling.
+ *
+ * Checked against every member of the canonical's alias family, not just
+ * itself -- an allowance written as GOLD must still cover a chart reporting
+ * XAUUSDM. The extra characters must be LETTERS ONLY: this gate decides
+ * whether a trade is allowed to happen at all, so unlike the order-routing
+ * lookups elsewhere in this file, a length-tolerant guess is not safe here
+ * -- US30 must never satisfy an allowance written for US300, and a trailing
+ * digit is a different instrument, never a broker's decoration.
+ */
+function coversSymbol(reported: string, allowedCanonical: string): boolean {
+  const family = aliasesFor(allowedCanonical)
+  const members = family.length > 0 ? family : [allowedCanonical]
+  return members.some((member) => {
+    if (reported === member) return true
+    if (!reported.startsWith(member)) return false
+    const extra = reported.slice(member.length)
+    return extra.length > 0 && extra.length <= 5 && /^[A-Z]+$/.test(extra)
+  })
 }
 
 /** A broker suffix reduced to what MetaTrader permits inside a symbol name. */
@@ -337,34 +445,18 @@ function symbolCandidates(
  * instrument, which is the honest answer and the one the user needs to see.
  */
 async function resolveFromBrokerList(
-  accountId: string,
+  bridge: BrokerBridge,
   base: string,
   suffix: string,
-  apiKey: string
 ): Promise<string | null> {
   try {
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/symbols`,
-      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' } }
-    )
-    if (!res.ok) {
-      console.warn(`[metacopier-execute] symbol list unavailable ${res.status}`)
+    const read = await bridge.symbols()
+    if (!read.ok) {
+      console.warn(`[metacopier-execute] symbol list unavailable ${read.status}`)
       return null
     }
 
-    const payload = await res.json()
-    if (!Array.isArray(payload)) return null
-
-    // Names only. Some brokers answer with strings, others with objects.
-    const names: { name: string; key: string }[] = []
-    for (const entry of payload) {
-      const raw = typeof entry === 'string'
-        ? entry
-        : String((entry as Record<string, unknown>)?.name ??
-                 (entry as Record<string, unknown>)?.symbol ?? '')
-      const name = raw.trim()
-      if (name) names.push({ name, key: baseSymbol(name) })
-    }
+    const names = read.data.map((name) => ({ name, key: baseSymbol(name) }))
     if (names.length === 0) return null
 
     // Shortest wins within a rank: a book carrying both `XAUUSD` and `XAUUSDpro`
@@ -406,7 +498,7 @@ async function resolveFromBrokerList(
  * Checks a stop/target pair for the faults a broker answers with error 130
  * (invalid stops), before an order is spent finding out.
  *
- * There is no market price here -- MetaCopier's REST surface does not quote --
+ * There is no market price here -- the order path does not fetch a quote --
  * so this cannot check distance from the market. What it CAN check is that the
  * two levels are on the right sides of each other for the direction, which is
  * true of every valid bracket regardless of price:
@@ -420,7 +512,7 @@ async function resolveFromBrokerList(
  * portal, which validates each field alone and never the pair.
  *
  * A level that is absent, zero, negative or unparseable means "no bracket" and
- * is normalised to 0 -- MetaCopier's own "not set" -- rather than rejected.
+ * is normalised to 0 -- the bridge's "not set" -- rather than rejected.
  */
 function normalizeStops(
   orderType: string,
@@ -480,21 +572,16 @@ function normalizeStops(
  * the cap the user set against `XAUUSD`.
  */
 async function countOpenPositions(
-  accountId: string,
+  bridge: BrokerBridge,
   names: string[],
-  apiKey: string
 ): Promise<number | null> {
   try {
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/positions`,
-      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' } }
-    )
-    if (!res.ok) {
-      console.warn(`[metacopier-execute] positions query failed ${res.status}`)
+    const read = await bridge.positions()
+    if (!read.ok) {
+      console.warn(`[metacopier-execute] positions query failed ${read.status}`)
       return null
     }
-    const positions = await res.json()
-    if (!Array.isArray(positions)) return null
+    const positions = read.data
 
     // A broker symbol is one of this instrument's names plus decoration, so
     // compare on the prefix rather than on equality -- `XAUUSD.m` is an open
@@ -513,8 +600,8 @@ async function countOpenPositions(
     // needed the decoration handled.
     const wanted = names.map((n) => baseSymbol(n)).filter(Boolean)
 
-    return positions.filter((p: Record<string, unknown>) => {
-      const held = baseSymbol(p?.symbol)
+    return positions.filter((p) => {
+      const held = baseSymbol(p.symbol)
       return wanted.some((n) => held.startsWith(n))
     }).length
   } catch (e) {
@@ -524,7 +611,7 @@ async function countOpenPositions(
 }
 
 /**
- * An account's live broker link and margin state, from `/information`.
+ * An account's live broker link and margin state, from the account summary.
  *
  * Used for two things the executor could not previously tell apart: whether the
  * broker session is actually up *before* an order is spent finding out, and --
@@ -543,28 +630,24 @@ interface AccountState {
   freeMargin: number | null
 }
 
-async function readAccountState(accountId: string, apiKey: string): Promise<AccountState> {
+async function readAccountState(bridge: BrokerBridge): Promise<AccountState> {
   const unknown: AccountState = {
     connected: null, wrongCredentials: false, investorPassword: false,
     tradingDisabled: false, freeMargin: null,
   }
   try {
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/information`,
-      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' }, signal: AbortSignal.timeout(6000) }
-    )
-    if (!res.ok) {
-      console.warn(`[metacopier-execute] account information unavailable ${res.status}`)
+    const read = await bridge.accountSummary(6000)
+    if (!read.ok) {
+      console.warn(`[metacopier-execute] account information unavailable ${read.status}`)
       return unknown
     }
-    const info = await res.json() as Record<string, unknown>
-    const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
+    const info = read.data
     return {
-      connected: typeof info.connected === 'boolean' ? info.connected : null,
-      wrongCredentials: info.wrongCredentials === true,
-      investorPassword: info.isInvestorPassword === true,
-      tradingDisabled: info.tradingDisabled === true || info.tradeDisabled === true,
-      freeMargin: num(info.freeMargin),
+      connected: info.connected,
+      wrongCredentials: info.wrongCredentials,
+      investorPassword: info.investorPassword,
+      tradingDisabled: info.tradingDisabled,
+      freeMargin: info.freeMargin,
     }
   } catch (e) {
     console.warn(`[metacopier-execute] account information threw: ${(e as Error).message}`)
@@ -573,22 +656,22 @@ async function readAccountState(accountId: string, apiKey: string): Promise<Acco
 }
 
 /**
- * Turns a bare `[BROKER_REJECTION]` into the specific thing that was wrong.
+ * Turns a refusal that gave no reason into the specific thing that was wrong.
  *
  * MetaCopier collapses a whole class of broker refusals -- no margin, a
  * read-only login, a symbol the broker has closed, a size outside the book's
- * limits -- into one token with no reason attached. The reason is on
- * `/information` and `/symbols/{symbol}`, which the hot path has no cause to
- * read until an order has already been refused. Best-effort: any failure here
- * just leaves the generic message in place.
+ * limits -- into one token with no reason attached, and its adapter marks
+ * those `explain`. The reason is in the account summary and the symbol's
+ * spec, which the hot path has no cause to read until an order has already
+ * been refused. Best-effort: any failure here just leaves the generic message
+ * in place.
  */
 async function explainRejection(
-  accountId: string,
+  bridge: BrokerBridge,
   brokerSymbol: string,
   lots: number,
-  apiKey: string,
 ): Promise<{ code: string; message: string } | null> {
-  const state = await readAccountState(accountId, apiKey)
+  const state = await readAccountState(bridge)
 
   if (state.connected === false) {
     return {
@@ -610,16 +693,12 @@ async function explainRejection(
   }
 
   try {
-    const res = await fetch(
-      `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/symbols/${encodeURIComponent(brokerSymbol)}`,
-      { headers: { 'X-API-KEY': apiKey, 'Accept': 'application/json' }, signal: AbortSignal.timeout(6000) },
-    )
-    if (res.ok) {
-      const spec = await res.json() as Record<string, unknown>
-      const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null)
-      const min = n(spec.minimalVolume)
-      const max = n(spec.maximalVolume)
-      if (spec.disabled === true) {
+    const read = await bridge.symbolSpec(brokerSymbol, 6000)
+    if (read.ok) {
+      const spec = read.data
+      const min = spec.minVolume
+      const max = spec.maxVolume
+      if (spec.disabled) {
         return { code: 'MARKET_CLOSED', message: `Your broker has ${brokerSymbol} closed for trading right now.` }
       }
       if (min !== null && lots < min) {
@@ -651,15 +730,33 @@ Deno.serve(async (req: Request) => {
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-
     const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
     const { license_key, pair, side, volume, sl, tp, signal_id, dry_run, order_type, open_price, pending_expiry_seconds } = body
+    // One of this licence's linked accounts (multi-account). Absent = the primary.
+    const targetAccount = body?.account_id ? String(body.account_id) : null
 
     const key = license_key ? String(license_key).trim().toUpperCase() : null
     const dryRun = dry_run === true
+
+    /**
+     * True when a person pressed Execute, rather than a signal arriving on its
+     * own. Governs the concurrency cap below and nothing else.
+     *
+     * Every automated path names the signal it is acting on -- the server's
+     * `auto-execute-signals` sends `signal.signal_id ?? signal.id`, Android's
+     * SignalListener sends `signal.signal_id ?: signal.id` -- and the chart
+     * scanner has no signal to name, on either platform. So the ABSENCE of
+     * `signal_id` is the distinction, and it needs no new field.
+     *
+     * Inferred rather than read from a client-set flag on purpose: a new request
+     * field would only take effect on handsets that had installed a new build,
+     * and the users living with this are precisely the ones who cannot be asked
+     * to reinstall. Read this way, the fix lands on every device already out
+     * there the moment this function deploys.
+     */
+    const manual = !signal_id
 
     // ---- Every outcome is recorded, not just the ones the broker saw --------
     //
@@ -709,16 +806,7 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    // Fail closed and loudly rather than pretending a trade went out.
-    if (!METACOPIER_API_KEY) {
-      console.error('METACOPIER_API_KEY is not configured')
-      return await finish('failed', 500, {
-        success: false, code: 'SERVER_MISCONFIGURED',
-        error: 'Server misconfiguration.',
-      })
-    }
-
-    // NOTE: the MetaCopier account is resolved from the licence server-side.
+    // NOTE: the broker account is resolved from the licence server-side.
     // It is deliberately NOT taken from the request -- otherwise a caller could
     // point a trade at any account id they liked.
     if (!key || !pair || !side) {
@@ -781,20 +869,68 @@ Deno.serve(async (req: Request) => {
       }, { expires_at: license.expires_at })
     }
 
-    const metadata = (license.metadata ?? null) as Record<string, unknown> | null
-    const account_id = metadata?.metacopier_account_id as string | undefined
+    let metadata = (license.metadata ?? null) as Record<string, unknown> | null
+    let link = resolveLink(metadata)
 
-    if (!account_id) {
+    // ---- A named account, when the licence has several -----------------------
+    //
+    // Still never trusted from the request on its own: the id must be a live
+    // row on THIS licence, so a caller can only ever pick among its own
+    // accounts. A secondary account reads its own symbol map and suffix, since
+    // the licence's are learnt from the primary's broker and an IFX spelling
+    // sent to Exness is a guaranteed refusal.
+    let secondaryRowId: string | null = null
+    if (targetAccount && targetAccount !== link?.accountId) {
+      const { data: row } = await novaHost
+        .from('license_broker_accounts')
+        .select('id, provider, bridge_account_id, is_primary, symbol_map, symbol_suffix, created_at, status, platform')
+        .eq('license_id', license.id)
+        .eq('bridge_account_id', targetAccount)
+        .is('disconnected_at', null)
+        .maybeSingle()
+      if (!row) {
+        return await finish('rejected', 404, {
+          success: false, code: 'ACCOUNT_NOT_ON_LICENCE',
+          error: 'That trading account is not linked to this licence.',
+        }, { account_id: targetAccount })
+      }
+      if (!row.is_primary) {
+        secondaryRowId = row.id
+        link = { provider: row.provider, accountId: row.bridge_account_id }
+        metadata = {
+          ...(metadata ?? {}),
+          symbol_map: row.symbol_map ?? {},
+          symbol_suffix: row.symbol_suffix ?? '',
+          connected_at: row.created_at,
+          bridge_status: row.status,
+          platform: row.platform,
+        }
+      }
+    }
+
+    if (!link) {
       return await finish('rejected', 409, {
         success: false, code: 'NO_ACCOUNT_LINKED',
         error: 'No trading account is connected to this licence.',
       })
     }
+    const account_id = link.accountId
+
+    // Fail closed and loudly rather than pretending a trade went out. Never
+    // falls back to another provider: a licence on one bridge must not be
+    // traded through another because a key was missing.
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return await finish('failed', 500, {
+        success: false, code: 'SERVER_MISCONFIGURED',
+        error: 'Server misconfiguration.',
+      }, { bridge_provider: link.provider })
+    }
 
     // Respect a per-licence symbol restriction when one is set.
     const allowed = Array.isArray(license.allowed_symbols) ? license.allowed_symbols : []
     const cleanPair = baseSymbol(pair)
-    if (allowed.length > 0 && !allowed.map((s: string) => baseSymbol(s)).includes(cleanPair)) {
+    if (allowed.length > 0 && !allowed.some((s: string) => coversSymbol(cleanPair, baseSymbol(s)))) {
       return await finish('rejected', 403, {
         success: false, code: 'SYMBOL_NOT_LICENSED',
         error: `Symbol ${cleanPair} is not enabled on this licence.`,
@@ -864,9 +1000,24 @@ Deno.serve(async (req: Request) => {
       }
 
       // ---- Concurrency cap --------------------------------------------------
+      //
+      // `max_trades` is the ROBOT's appetite for a symbol, and it was being
+      // charged against the user's own hand as well. That made one shape of
+      // refusal dominate this endpoint: gold, one position open, limit one, 58
+      // times -- the hosted robot holding the only slot, so a subscriber could
+      // never execute their own scan of the instrument their robot was already
+      // trading. From the handset it read as "execute is broken".
+      //
+      // A deliberate tap on Execute is not the runaway this limit exists to
+      // stop, so it is exempt. Automated signals are still counted and still
+      // capped, which is the half that was doing real work.
       const maxTrades = Number(symbolCfg.max_trades) || 0
-      if (maxTrades > 0) {
-        const open = await countOpenPositions(account_id, symbolCandidates(cleanPair, metadata, userSymbol), METACOPIER_API_KEY)
+      if (maxTrades > 0 && manual) {
+        console.log(
+          `[metacopier-execute] ${cleanPair} manual order: max_trades ${maxTrades} not applied`
+        )
+      } else if (maxTrades > 0) {
+        const open = await countOpenPositions(bridge, symbolCandidates(cleanPair, metadata, userSymbol))
 
         // null means the broker could not be asked. Fail open and say so: a
         // transient failure on the positions endpoint blocking every order is a
@@ -883,6 +1034,31 @@ Deno.serve(async (req: Request) => {
           }, { open, max_trades: maxTrades })
         }
       }
+    }
+
+    // ---- Lot step --------------------------------------------------------
+    //
+    // Brokers accept volume in discrete increments, and until here nothing
+    // guaranteed one. `smart_lot_size` is the calculator's raw quotient -- a
+    // full-precision double such as 0.015560200210315327 -- and the ceiling
+    // above assigns it straight into `effectiveLots`. That number went to the
+    // broker verbatim. Gold on a live book here quotes `stepVolume: 0.01`, so
+    // it is not a size the account can trade under any circumstances, and
+    // MetaCopier refuses it without ever mentioning volume.
+    //
+    // Outside the `symbolCfg` block deliberately: a licence that has never
+    // synced its plan has no config row, and its orders are sized entirely by
+    // the handset -- which is exactly the case with nothing else checking.
+    //
+    // Rounded DOWN, for the same reason the app's own sizing floors: rounding
+    // up puts the position above the budget the user set, and a limit breached
+    // by half of all roundings is not a limit.
+    const steppedLots = toLotStep(effectiveLots)
+    if (steppedLots !== effectiveLots) {
+      console.log(
+        `[metacopier-execute] ${cleanPair} volume ${effectiveLots} -> ${steppedLots} (lot step)`
+      )
+      effectiveLots = steppedLots
     }
 
     // ---- Bracket sanity ------------------------------------------------------
@@ -907,10 +1083,20 @@ Deno.serve(async (req: Request) => {
     // second position on an account that had already accepted the first.
     const candidates = symbolCandidates(cleanPair, metadata, userSymbol)
 
-    // Stable across attempts. The same trade keeps the same id no matter how
-    // many names it took to find the instrument, so a retry can never be
-    // mistaken by MetaCopier for a second order.
-    const requestId = requestIdFrom(String(signal_id ?? `${license.id}:${Date.now()}`))
+    // Stable per name. The first name carries the signal's own id, exactly as
+    // it always has, so a network retry of the same order is still recognised
+    // by MetaCopier as one order.
+    //
+    // A LATER name gets an id of its own. It is only ever tried after the broker
+    // refused the previous one outright, so nothing was opened under it -- and
+    // MetaCopier documents the id as a duplicate guard without saying what it
+    // does with one it has already refused. Reusing it risks the retry being
+    // answered from that guard: dropped, or acknowledged without executing,
+    // which would be reported here as a filled trade that never happened.
+    const requestSeed = String(signal_id ?? `${license.id}:${Date.now()}`)
+    const requestId = requestIdFrom(requestSeed)
+    const requestIdFor = (forSymbol: string) =>
+      forSymbol === candidates[0] ? requestId : requestIdFrom(`${requestSeed}|${forSymbol}`)
 
     // ---- Pending entry -------------------------------------------------------
     // 0 is MetaCopier's "fill at market" flag. A pending orderType sent with 0
@@ -967,8 +1153,12 @@ Deno.serve(async (req: Request) => {
       ...(pending && expirySeconds > 0 ? { pendingExpirySeconds: expirySeconds } : {}),
       stopLoss: stops.sl,                 // 0 => no stop loss
       takeProfit: stops.tp,               // 0 => no take profit
-      requestId,
+      requestId: requestIdFor(forSymbol),
       comment: tradeComment(license),
+      // The clean half of the trade's identity. The comment arrives in the
+      // terminal wearing MetaCopier's `API|<requestId>|` prefix and nothing we
+      // send can strip it; this field carries no decoration at all.
+      magicNumber: magicFor(license.ea_id),
     })
 
     const symbol = candidates[0]
@@ -981,14 +1171,12 @@ Deno.serve(async (req: Request) => {
     // proved end to end -- from the app, from a support session, from a
     // deployment check -- without a live position being the test instrument.
     if (dryRun) {
-      const open = await countOpenPositions(account_id, candidates, METACOPIER_API_KEY)
+      const open = await countOpenPositions(bridge, candidates)
 
       // A dry run is the one place it is worth paying for certainty: if none of
       // the guessed names would be recognised, say so HERE rather than letting
       // the user find out on a live signal.
-      const discovered = await resolveFromBrokerList(
-        account_id, cleanPair, safeSuffix(metadata), METACOPIER_API_KEY
-      )
+      const discovered = await resolveFromBrokerList(bridge, cleanPair, safeSuffix(metadata))
 
       // What a REAL order would send, which is candidates[0] and nothing else.
       //
@@ -1030,19 +1218,20 @@ Deno.serve(async (req: Request) => {
 
     // ---- Pre-flight: is the broker session actually up? --------------------
     //
-    // MetaCopier accepts an order the instant an account is *registered*, well
-    // before the MT4/MT5 session behind it has connected -- and a signal that
-    // lands in that window is refused with `[ACCOUNT_IS_NOT_CONNTECTED]`, which
-    // reads to the subscriber as "the broker refused the trade". One
-    // `/information` read here turns that first minute after a reconnect from a
-    // failed trade into a clearly-labelled skipped one.
+    // A provider can accept an order the instant an account is *registered*,
+    // well before the MT4/MT5 session behind it has connected -- and a signal
+    // that lands in that window is refused (MetaCopier says
+    // `[ACCOUNT_IS_NOT_CONNTECTED]`), which reads to the subscriber as "the
+    // broker refused the trade". One account-summary read here turns that first
+    // minute after a reconnect from a failed trade into a clearly-labelled
+    // skipped one.
     //
     // Only a definite `connected: false` short-circuits. A read that fails or is
     // ambiguous falls straight through to the order attempt, which surfaces the
     // real error rather than blocking a trade on a flaky probe.
-    const link = await readAccountState(account_id, METACOPIER_API_KEY)
-    if (link.connected === false) {
-      if (link.wrongCredentials) {
+    const session = await readAccountState(bridge)
+    if (session.connected === false) {
+      if (session.wrongCredentials) {
         return await finish('failed', 409, {
           success: false,
           code: 'ACCOUNT_WRONG_CREDENTIALS',
@@ -1055,8 +1244,9 @@ Deno.serve(async (req: Request) => {
       // as `connecting`, is the reconnect window -- hold the signal quietly. Any
       // older disconnection is a real fault the user needs to act on.
       const linkedAt = Date.parse(String(metadata?.connected_at ?? '')) || 0
+      const linkStatus = linkStatusOf(metadata)
       const stillConnecting =
-        metadata?.metacopier_status === 'connecting' ||
+        linkStatus === 'connecting' ||
         (linkedAt > 0 && Date.now() - linkedAt < 5 * 60 * 1000)
 
       return await finish(stillConnecting ? 'skipped' : 'failed', 409, {
@@ -1066,13 +1256,28 @@ Deno.serve(async (req: Request) => {
           ? 'Your broker was still connecting when this signal arrived, so it was not placed. ' +
             'Newer signals will go through once the connection is up.'
           : "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again.",
-      }, { account_id, connected: false, metacopier_status: metadata?.metacopier_status ?? null })
+      }, { account_id, connected: false, metacopier_status: linkStatus })
     }
 
     let placed: string | null = null
     const attempted: string[] = []
     let lastDetail = ''
     let lastStatus = 0
+    let lastRefusal: OrderRefusal | null = null
+
+    /** The audit-trail request above, as the bridge's neutral order. */
+    const toOrder = (r: ReturnType<typeof buildRequest>) => ({
+      symbol: r.symbol,
+      orderType: r.orderType as OrderType,
+      volume: r.volume,
+      openPrice: r.openPrice,
+      pendingExpirySeconds: r.pendingExpirySeconds ?? 0,
+      stopLoss: r.stopLoss,
+      takeProfit: r.takeProfit,
+      clientId: r.requestId,
+      comment: r.comment,
+      magic: r.magicNumber,
+    })
 
     /**
      * Sends the order under one name.
@@ -1084,37 +1289,26 @@ Deno.serve(async (req: Request) => {
      * stop or closed-market refusal is a property of the ORDER and would fail
      * identically under every alias -- retrying those is how one signal becomes
      * two positions.
+     *
+     * An outcome the bridge could not confirm (`definitive: false`) is 'stop'
+     * too, and the strongest kind: the order may be open, so no other name is
+     * tried and nothing is retried.
      */
     const attempt = async (candidate: string): Promise<'placed' | 'wrong-name' | 'stop'> => {
       attempted.push(candidate)
 
-      const mcResponse = await fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(account_id)}/positions`,
-        {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': METACOPIER_API_KEY,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify(buildRequest(candidate)),
-        }
-      )
+      const result = await bridge.placeOrder(toOrder(buildRequest(candidate)))
 
-      // Success is 204 No Content -- there is no body to parse.
-      if (mcResponse.ok) {
+      if (result.ok) {
         placed = candidate
         return 'placed'
       }
 
-      lastStatus = mcResponse.status
-      lastDetail = await mcResponse.text()
-      console.error(
-        `[MetaCopier] open position failed ${lastStatus} for ${candidate}: ${lastDetail}`
-      )
+      lastRefusal = result
+      lastStatus = result.status
+      lastDetail = result.detail
 
-      const faults = (lastDetail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
-      return faults.some((c) => c.includes('SYMBOL')) ? 'wrong-name' : 'stop'
+      return result.definitive && result.wrongName ? 'wrong-name' : 'stop'
     }
 
     let outcome: 'placed' | 'wrong-name' | 'stop' = 'wrong-name'
@@ -1131,13 +1325,23 @@ Deno.serve(async (req: Request) => {
     // forever. One request converts that from a permanent failure into a
     // one-time cost: the answer is written back to the licence below, so the
     // next signal on this instrument goes out as a single order to a known name.
-    if (!placed && outcome === 'wrong-name') {
-      const discovered = await resolveFromBrokerList(
-        account_id, cleanPair, safeSuffix(metadata), METACOPIER_API_KEY
-      )
+    //
+    // "Autotrading disabled" also earns one look at the list. It reads as an
+    // account-wide verdict, but on every live occurrence it was a name the
+    // broker does not list (see AUTOTRADING_REFUSAL in the MetaCopier adapter).
+    // If the list names exactly what was sent, nothing is retried and the
+    // refusal stands as written.
+    // Safe either way: the broker refused, so nothing is open under that name.
+    // `as` because TypeScript cannot see the assignment inside attempt().
+    const refusedWith = lastRefusal as OrderRefusal | null
+    const autotradingRefused = !placed && outcome === 'stop' &&
+      refusedWith?.definitive === true && refusedWith.code === 'AUTOTRADING_DISABLED'
+
+    if (!placed && (outcome === 'wrong-name' || autotradingRefused)) {
+      const discovered = await resolveFromBrokerList(bridge, cleanPair, safeSuffix(metadata))
 
       if (discovered && !attempted.includes(discovered)) {
-        console.log(`[MetaCopier] broker lists ${cleanPair} as "${discovered}" -- retrying`)
+        console.log(`[metacopier-execute] broker lists ${cleanPair} as "${discovered}" -- retrying`)
         outcome = await attempt(discovered)
       }
     }
@@ -1145,32 +1349,97 @@ Deno.serve(async (req: Request) => {
     if (!placed) {
       const symbolTried = attempted[attempted.length - 1] ?? cleanPair
 
-      // MetaCopier reports faults as bracketed codes, e.g. ["[UNKNOWN_SYMBOL]"].
-      // Translated here because the alternative the subscriber sees is a raw
-      // MetaTrader number -- 130, 131, 134, 4109 -- which tells them nothing
-      // about which of these they can actually fix.
-      // MetaCopier reports faults as bracketed codes, e.g. ["[UNKNOWN_SYMBOL]"],
-      // but plain-language validation errors arrive unbracketed. Both are
-      // matched, because the second kind is what a malformed request produces
-      // and it is the kind that reads as "the broker refused" when it is really
-      // "we sent something invalid".
-      const codes = (lastDetail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
-      const hit = (needle: string) => codes.some((c) => c.includes(needle))
-      const says = (re: RegExp) => re.test(lastDetail)
+      // The adapter has already read the refusal into our vocabulary -- how a
+      // provider spells "no margin" is its business. What is left here is the
+      // part that is ours: the words the subscriber reads, which name their
+      // symbol and their size. Translated because the alternative they would
+      // see is a raw MetaTrader number -- 130, 131, 134, 4109 -- which tells
+      // them nothing about which of these they can actually fix.
+      const refusal = (lastRefusal as OrderRefusal | null) ?? {
+        ok: false as const, code: 'BROKER_REJECTED', definitive: true, wrongName: false,
+        accountGone: false, explain: true, brokerMessage: null, providerCode: null,
+        status: lastStatus, detail: lastDetail,
+      }
 
-      let code = codes[0] ?? 'BROKER_REJECTED'
-      let message = 'Trade could not be placed with the broker.'
+      // The broker's own sentence is the most specific thing anyone will ever
+      // have about the refusal. It is only ever replaced below by a message
+      // that is MORE specific -- never by a generic. (Four live orders were once
+      // told "check the symbol's trading hours and your free margin" while the
+      // broker had said "Autotrading disabled by server" in plain English.)
+      const brokerSays = refusal.brokerMessage
 
-      // Connection state first -- it is the most common cause and the most
-      // actionable, and MetaCopier spells its token `[ACCOUNT_IS_NOT_CONNTECTED]`
-      // (their typo, "CONNTECTED"). The previous check looked for `NOT_CONNECTED`
-      // and missed it on every live account, so every reconnect-window failure
-      // fell through to the catch-all "Trade could not be placed with the broker".
-      if (hit('CONNTECT') || hit('NOT_CONNECTED') || hit('OFFLINE') || hit('DISCONNECT')) {
-        code = 'ACCOUNT_DISCONNECTED'
+      let code = refusal.code
+      let message = brokerSays
+        ? `Your broker refused the order on ${symbolTried}: ${brokerSays}`
+        : 'Trade could not be placed with the broker.'
+
+      if (!refusal.definitive) {
+        // The bridge could not tell whether the order reached the broker. It
+        // may be open. Saying "refused" here would invite the user -- or the
+        // next signal -- to place it again.
+        code = 'ORDER_UNCONFIRMED'
+        message =
+          `We could not confirm whether your ${symbolTried} order reached the broker. ` +
+          `Check your open trades before placing it again.`
+      }
+      // ---- Autotrading switched off at the broker ----------------------------
+      //
+      // Checked before anything else because it is terminal in a way none of the
+      // others are: the account is connected, funded, holds the symbol and has
+      // the right password, and not one order will ever fill. Only the broker
+      // can lift it, so sending them to Trading Symbols or Broker Setup wastes
+      // their evening.
+      else if (code === 'AUTOTRADING_DISABLED') {
+        message =
+          `Your broker has automated trading switched off on this account, so no order ` +
+          `NovaHost sends can be filled. Ask your broker to enable algorithmic (EA) ` +
+          `trading on it, or link a licence to an account that allows it. Nothing is ` +
+          `wrong with your licence, your balance or your symbols.`
+      }
+      // Connection state next -- it is the most common cause and the most
+      // actionable.
+      else if (code === 'ACCOUNT_DISCONNECTED') {
         message = "Your broker isn't connected right now. Reconnect it in Broker Setup, then try again."
-      } else if (hit('SYMBOL')) {
-        code = 'UNKNOWN_SYMBOL'
+      }
+      // ---- The account itself is gone, not merely offline --------------------
+      //
+      // A disconnected account may come back on its own, so its link is left
+      // alone. A deleted one will NEVER reconnect. Reported with the same code
+      // and copy as a normal disconnect (the app already knows how to render
+      // `ACCOUNT_DISCONNECTED`), but this branch ALSO clears the dead id off
+      // the licence. Without that, two licences once kept showing CONNECTED and
+      // traded against a deleted account for days, every signal failing here,
+      // alone, unread. Clearing it makes `license-status` report NOT LINKED
+      // immediately, and the next signal fails fast on NO_ACCOUNT_LINKED.
+      else if (refusal.accountGone) {
+        code = 'ACCOUNT_DISCONNECTED'
+        message = "Your trading account's connection to the broker was lost. Reconnect it in Broker Setup to keep trading."
+
+        const clearedMetadata = withoutLink(
+          (metadata ?? {}) as Record<string, unknown>,
+          refusal.providerCode ?? 'ACCOUNT_WAS_DELETED',
+        )
+
+        // A dead secondary retires its own row; the licence's link is the primary's.
+        const { error: clearErr } = secondaryRowId
+          ? await novaHost.from('license_broker_accounts')
+              .update({ disconnected_at: new Date().toISOString(), status: 'disconnected' })
+              .eq('id', secondaryRowId)
+          : await novaHost
+              .from('licenses')
+              .update({ metadata: clearedMetadata })
+              .eq('id', license.id)
+
+        if (clearErr) {
+          // Best-effort, like every other write in this file: a failed
+          // cleanup must not turn an already-failed trade into a crashed
+          // request, and the next signal on this licence gets another chance
+          // to clear it.
+          console.error(`[metacopier-execute] could not clear dead account link for licence ${license.id}: ${clearErr.message}`)
+        } else {
+          console.warn(`[metacopier-execute] licence ${license.id}'s account ${account_id} was deleted at the provider -- link cleared, will now show NOT LINKED`)
+        }
+      } else if (code === 'UNKNOWN_SYMBOL') {
         // By this point the account's own symbol list has been read and searched,
         // so this is no longer "we ran out of guesses" -- it is "your broker does
         // not carry this instrument". Said plainly, because the action it calls
@@ -1181,47 +1450,39 @@ Deno.serve(async (req: Request) => {
           `checked directly and nothing matching it is there. Tried: ${attempted.join(', ')}. ` +
           `Turn ${cleanPair} off in Trading Symbols, or set the exact name from your ` +
           `MetaTrader Market Watch if you can see it there.`
-      } else if (says(/requestId|must be less than|must be greater than|constraint|validation/i)) {
-        // Not the broker's doing. Named separately so it can never again be read
-        // as a market or account problem: every field of this request is built
+      } else if (code === 'REQUEST_INVALID') {
+        // Not the broker's doing. Every field of this request is built
         // server-side, so a validation failure is ours to fix and nothing the
-        // subscriber does will change it.
-        //
-        // This branch exists because its absence cost three live signals. A
-        // `requestId` of 2105094537 against a field capped at 999 came back as
-        // a bare 400 and was reported to the user as "Trade could not be placed
-        // with the broker" -- pointing at the broker, the account and the
-        // market, none of which had anything to do with it.
-        code = 'REQUEST_INVALID'
+        // subscriber does will change it. (A `requestId` of 2105094537 against
+        // a field capped at 999 once cost three live signals, reported as "Trade
+        // could not be placed with the broker".)
         message =
           'NovaHost sent an order the trading provider rejected as malformed. ' +
           'This is a fault on our side, not with your account or your broker.'
-      } else if (hit('VOLUME') || hit('LOT')) {
-        code = 'INVALID_VOLUME'
+      } else if (code === 'INVALID_VOLUME') {
         message = `Your broker rejected ${effectiveLots} lots on ${symbolTried}. It is outside the size this account allows.`
-      } else if (hit('MONEY') || hit('MARGIN') || hit('FUNDS')) {
-        code = 'INSUFFICIENT_MARGIN'
+      } else if (code === 'INSUFFICIENT_MARGIN') {
         message = `Not enough free margin to open ${effectiveLots} lots of ${symbolTried}.`
-      } else if (hit('STOP') || hit('INVALID_PRICE')) {
-        code = 'INVALID_STOPS'
+      } else if (code === 'INVALID_STOPS') {
         message = `Your broker refused the stop or target on ${symbolTried} -- they are too close to the current price.`
-      } else if (hit('DISABLED') || hit('PROHIBIT') || hit('CLOSED') || hit('MARKET')) {
-        code = 'TRADING_PROHIBITED'
+      } else if (code === 'TRADING_PROHIBITED' || code === 'MARKET_CLOSED') {
         message = `Trading ${symbolTried} is not permitted on this account right now -- the market may be closed, or the account may be read-only.`
-      } else if (hit('BROKER_REJECT') || code === 'BROKER_REJECTED') {
-        // MetaCopier's catch-all for a broker refusal with no reason attached.
-        // Ask `/information` and `/symbols` what it actually was -- read-only
-        // login, no margin, a closed market, a size outside the book's limits --
-        // rather than handing the subscriber a token they cannot act on.
-        const explained = await explainRejection(account_id, symbolTried, effectiveLots, METACOPIER_API_KEY)
+      } else if (refusal.explain) {
+        // A refusal with no reason attached. Ask the account and the
+        // instrument what it actually was -- read-only login, no margin, a
+        // closed market, a size outside the book's limits -- rather than
+        // handing the subscriber a token they cannot act on.
+        const explained = await explainRejection(bridge, symbolTried, effectiveLots)
         if (explained) {
           code = explained.code
           message = explained.message
         } else {
           code = 'BROKER_REJECTED'
-          message =
-            `Your broker refused the order on ${symbolTried} without giving a reason. ` +
-            `Check the symbol's trading hours and your free margin.`
+          // "Without giving a reason" is only true when the broker gave none.
+          message = brokerSays
+            ? `Your broker refused the order on ${symbolTried}: ${brokerSays}`
+            : `Your broker refused the order on ${symbolTried} without giving a reason. ` +
+              `Check the symbol's trading hours and your free margin.`
         }
       }
 
@@ -1252,10 +1513,13 @@ Deno.serve(async (req: Request) => {
     const filledAs: string = placed
     const knownMap = (metadata?.symbol_map ?? {}) as Record<string, string>
     if (knownMap[cleanPair] !== filledAs) {
-      const { error: mapErr } = await novaHost
-        .from('licenses')
-        .update({ metadata: { ...(metadata ?? {}), symbol_map: { ...knownMap, [cleanPair]: filledAs } } })
-        .eq('id', license.id)
+      const learnt = { ...knownMap, [cleanPair]: filledAs }
+      const { error: mapErr } = secondaryRowId
+        ? await novaHost.from('license_broker_accounts').update({ symbol_map: learnt }).eq('id', secondaryRowId)
+        : await novaHost
+            .from('licenses')
+            .update({ metadata: { ...(license.metadata ?? {}), symbol_map: learnt } })
+            .eq('id', license.id)
 
       if (mapErr) {
         console.warn(
@@ -1263,7 +1527,7 @@ Deno.serve(async (req: Request) => {
         )
       } else {
         console.log(
-          `[MetaCopier] licence ${license.id}: ${cleanPair} trades as "${filledAs}" here -- remembered`
+          `[metacopier-execute] licence ${license.id}: ${cleanPair} trades as "${filledAs}" here -- remembered`
         )
       }
     }
@@ -1274,8 +1538,11 @@ Deno.serve(async (req: Request) => {
       // effectiveLots, not lots: reporting the requested size when a cap reduced
       // it tells the user they hold a position they do not hold.
       message: `${orderType} ${filledAs} ${effectiveLots} lots sent.`,
-      requestId,
-    }, { request: buildRequest(filledAs), account_id, capped_from: cappedFrom, tried: attempted })
+      requestId: requestIdFor(filledAs),
+      // `cap_exempt` is recorded, not merely acted on: this order may sit above
+      // the user's own max_trades, and a position nobody can explain later is
+      // worse than one the audit trail accounts for.
+    }, { request: buildRequest(filledAs), account_id, capped_from: cappedFrom, tried: attempted, cap_exempt: manual })
   } catch (error) {
     console.error('[metacopier-execute] fatal:', error)
     return new Response(

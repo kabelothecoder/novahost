@@ -255,7 +255,9 @@ fun HomeScreen(
                     initialEmail = savedEmail,
                     onCheckAccess = { email -> mainViewModel.checkAppAccess(email) },
                     onBuy = { email -> mainViewModel.buyAppAccess(email) },
+                    onSubmitMoveReason = { reason -> mainViewModel.startDeviceMove(reason) },
                     onSubmitMoveCode = { code -> mainViewModel.submitMoveCode(code) },
+                    onCheckMoveStatus = { mainViewModel.checkMoveStatus() },
                     onCancelMove = { mainViewModel.cancelDeviceMove() },
                     onGranted = {
                         mainViewModel.unlockApp()

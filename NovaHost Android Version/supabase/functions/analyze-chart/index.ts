@@ -4,9 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
  * The AI Chart Scanner's vision pass, on Gemini.
  *
  * Takes a chart screenshot and returns the reading the confluence engine scores:
- * a direction, an entry and a stop, the pattern, the higher-timeframe bias, the
- * nearest structural level with its touch count, a volatility measure, and a
- * per-timeframe read.
+ * a direction, an entry and how to reach it, a stop, the pattern, the
+ * higher-timeframe bias, the nearest structural level with its touch count, a
+ * volatility measure, a per-timeframe read, and whether the chart is still
+ * describing a live market at all.
  *
  * ## Why raw fetch and not an SDK
  *
@@ -50,6 +51,47 @@ const MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
 
 /** Largest decoded image we will forward, in bytes. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * How many times one scan will ask Gemini before giving up.
+ *
+ * The free tier is the first traffic shed when a model is busy, so a 503
+ * UNAVAILABLE here is routine rather than exceptional: seven of the eleven scan
+ * failures in the day this was written were that, and every one was handed back
+ * to the handset as "The scan did not complete. Try again." with no attempt made
+ * to do exactly that. The user then retries by hand -- the same request a few
+ * seconds later -- so the function may as well make it for them. "The scanner
+ * never works" is, in a good share of cases, this.
+ *
+ * Three and no more: a scan is a person holding a phone waiting on an answer,
+ * and a fourth attempt buys less than the wait costs.
+ */
+const GEMINI_ATTEMPTS = 3;
+
+/** Floor between attempts, per retry. Google's own retryDelay wins if longer. */
+const GEMINI_BACKOFF_MS = [700, 1800];
+
+/**
+ * Whether a failed Gemini call is worth repeating, and after how long.
+ * Null means no -- answer the user now.
+ *
+ * 503 is capacity and clears on its own, so it is retried immediately. 429 is
+ * quota, and the two quotas behind that status are not the same failure: a
+ * per-minute limit refills inside the time someone would wait, a per-DAY limit
+ * does not refill today at all. Google names which one ran out in `quotaId` and
+ * how long to wait in `retryDelay`, so both are read rather than assumed --
+ * sleeping through a retry against a daily cap only makes the refusal slower.
+ */
+function retryAfterMs(status: number, detail: string): number | null {
+  if (status === 503) return 0;
+  if (status !== 429) return null;
+  if (/PerDay/i.test(detail)) return null;
+
+  const named = detail.match(/"retryDelay"s*:s*"(d+(?:.d+)?)s"/);
+  const delay = named ? Number(named[1]) * 1000 : 0;
+  // Longer than anyone will hold a phone for. Refuse now and say so.
+  return delay > 30_000 ? null : delay;
+}
 
 /**
  * How to read the chart, keyed by [ScanStrategy] on the handset.
@@ -144,6 +186,29 @@ const RESPONSE_SCHEMA = {
       nullable: true,
       description: "The timeframe printed on the chart (e.g. 'M15', 'H4', '1D'). Null if not visible.",
     },
+    market_closed: {
+      type: "boolean",
+      description:
+        "True when the chart itself says the market is shut -- MetaTrader prints 'Market closed' " +
+        "beside the symbol label, TradingView prints 'Market closed' or 'Post-market'. Report what " +
+        "is written on the image; do not infer it from the date or from quiet candles.",
+    },
+    last_candle_time: {
+      type: "string",
+      nullable: true,
+      description:
+        "The time axis label at or immediately under the RIGHTMOST candle, copied verbatim " +
+        "(e.g. '11 Sep 22:15', '2025.09.11 14:45'). Null if the time axis is cropped or illegible.",
+    },
+    last_candle_iso: {
+      type: "string",
+      nullable: true,
+      description:
+        "last_candle_time normalised to 'YYYY-MM-DDTHH:MM', in the chart's own clock. The axis " +
+        "usually omits the year -- use the year given in the request, and if that would place the " +
+        "date in the future, use the year before. Null whenever last_candle_time is null or " +
+        "carries no date you can pin down.",
+    },
     direction: { type: "string", enum: ["BUY", "SELL"] },
     confidence: {
       type: "number",
@@ -224,12 +289,14 @@ const RESPONSE_SCHEMA = {
   },
   required: [
     "chart_readable", "unreadable_reason", "symbol_on_chart", "timeframe_on_chart",
+    "market_closed", "last_candle_time", "last_candle_iso",
     "direction", "confidence", "entry", "entry_type", "entry_note", "sl", "tp", "patterns",
     "trend_bias", "trend_timeframe", "key_level", "key_level_touches",
     "average_candle_range", "timeframes", "narrative",
   ],
   propertyOrdering: [
     "chart_readable", "unreadable_reason", "symbol_on_chart", "timeframe_on_chart",
+    "market_closed", "last_candle_time", "last_candle_iso",
     "direction", "confidence", "entry", "entry_type", "entry_note", "sl", "tp", "patterns",
     "trend_bias", "trend_timeframe", "key_level", "key_level_touches",
     "average_candle_range", "timeframes", "narrative",
@@ -254,6 +321,8 @@ Timeframes: return a row only for a timeframe you can genuinely read. If the scr
 
 Volatility: average_candle_range is the typical high-to-low distance of one candle over roughly the last 14, in the chart's price units. Measure it off the candles you can see. If they are too compressed to measure, return null -- the app treats null as unknown and scores it as unverified, which is correct. A number you did not measure is worse than no number, because it will be scored as if it were measured.
 
+How old is this chart: read the time axis label under the rightmost candle and copy it into last_candle_time exactly as printed, then normalise it into last_candle_iso. Also report market_closed from whatever the terminal has written on the image -- MetaTrader puts "Market closed" under the symbol name when the book is shut. This matters more than anything else on the chart: the app places a live order from your answer, and a setup read off a screenshot from last week is a setup that resolved days ago. Both fields are observations, not judgements -- if the time axis is cropped out, say null rather than estimating from the candles.
+
 Confidence: what the visible evidence supports. A clean structure at a well-tested level is high. A guess from a noisy crop is low, and saying so is more useful than a confident number that is wrong.
 
 If the image is not a readable price chart at all, set chart_readable false, give one sentence in unreadable_reason, and fill the remaining fields with any valid values -- they will be discarded.`;
@@ -263,6 +332,9 @@ interface Reading {
   unreadable_reason: string | null;
   symbol_on_chart: string | null;
   timeframe_on_chart: string | null;
+  market_closed: boolean;
+  last_candle_time: string | null;
+  last_candle_iso: string | null;
   direction: "BUY" | "SELL";
   confidence: number;
   entry: number;
@@ -278,6 +350,21 @@ interface Reading {
   average_candle_range: number | null;
   timeframes: Array<{ timeframe: string; bias: string; note: string }>;
   narrative: string;
+}
+
+/**
+ * A minute count as a trader would say it out loud.
+ *
+ * Rounded hard on purpose. The input is an age derived from a time axis read off
+ * an image, against a chart clock whose timezone is unknown -- "about 3 days" is
+ * the whole of what it supports, and "4,412 minutes" would dress that up as a
+ * measurement.
+ */
+function describeAge(minutes: number): string {
+  if (minutes < 90) return `${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `${hours} hours`;
+  return `${Math.round(hours / 24)} days`;
 }
 
 /**
@@ -318,12 +405,29 @@ Deno.serve(async (req: Request) => {
     });
 
   try {
-    const apiKey = Deno.env.get("GEMINI_API_KEY");
+    // Both names accepted. GEMINI_API_KEY is the documented one; GOOGLE_API_KEY
+    // is what Google's own tooling exports, and having the scanner refuse to
+    // start over which of two synonyms was typed helps nobody.
+    //
+    // Recovered from the deployed v25, which had this and the repo did not --
+    // deploying the repo copy over it would have taken the fallback out from
+    // under a project that may be running on the second name.
+    const apiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
     if (!apiKey) {
-      // Named explicitly. The predecessor's equivalent failure surfaced to the
-      // user as "Incorrect API key provided: undefined", which reads like a
-      // problem with their account rather than an unset server secret.
-      console.error("[analyze-chart] GEMINI_API_KEY is not set on this project.");
+      // Named explicitly, and the visible secret names are logged with it. The
+      // predecessor's equivalent failure surfaced as "Incorrect API key
+      // provided: undefined", which reads like a broken account rather than an
+      // unset server secret -- and gave nobody a way to tell a missing secret
+      // from a misspelled one. That diagnostic immediately earned itself: the
+      // key had been saved as "Gemini flash", a name no environment variable
+      // can have.
+      const visible = Object.keys(Deno.env.toObject())
+        .filter((k) => !k.startsWith("SUPABASE_") && !k.startsWith("SB_") && !k.startsWith("DENO_"))
+        .join(", ");
+      console.error(
+        "[analyze-chart] GEMINI_API_KEY is not set. Custom secrets visible to this function: " +
+        (visible || "(none)")
+      );
       return json({ error: "The scanner is not configured on the server yet.", code: "NOT_CONFIGURED" }, 503);
     }
 
@@ -388,9 +492,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- Read the chart -----------------------------------------------------
+    // The model has no clock, so it is given one. Without it `last_candle_iso`
+    // cannot resolve a year -- a MetaTrader time axis prints "11 Sep 22:15" and
+    // nothing else -- and a chart from last December would date itself to this
+    // one.
+    const nowUtc = new Date();
     const context = [
       pair ? `The trader has selected ${pair} in the app.` : null,
       mode ? `They are scanning for a ${mode.toLowerCase()} trade.` : null,
+      `The current time in UTC is ${nowUtc.toISOString().slice(0, 16)} ` +
+        `(year ${nowUtc.getUTCFullYear()}). Use that year for last_candle_iso ` +
+        `unless doing so would date the chart in the future.`,
       "Read this chart.",
       pair
         ? `If the symbol printed on the chart is not ${pair}, still report what the chart says in ` +
@@ -398,7 +510,7 @@ Deno.serve(async (req: Request) => {
         : null,
     ].filter(Boolean).join(" ");
 
-    const geminiResponse = await fetch(`${GEMINI_BASE}/${MODEL}:generateContent`, {
+    const geminiRequest: RequestInit = {
       method: "POST",
       headers: {
         // Header rather than ?key= in the URL: query strings end up in access
@@ -429,18 +541,53 @@ Deno.serve(async (req: Request) => {
           temperature: 0.2,
         },
       }),
-    });
+    };
+
+    // Retried rather than surfaced -- see GEMINI_ATTEMPTS. `detail` outlives the
+    // loop because the refusal written below is shaped from the LAST failure.
+    let geminiResponse!: Response;
+    let detail = "";
+
+    for (let attempt = 1; attempt <= GEMINI_ATTEMPTS; attempt++) {
+      geminiResponse = await fetch(`${GEMINI_BASE}/${MODEL}:generateContent`, geminiRequest);
+      if (geminiResponse.ok) break;
+
+      detail = await geminiResponse.text();
+      console.error(
+        `[analyze-chart] Gemini ${geminiResponse.status} ` +
+        `(attempt ${attempt}/${GEMINI_ATTEMPTS}): ${detail}`
+      );
+
+      const wait = retryAfterMs(geminiResponse.status, detail);
+      if (wait === null || attempt === GEMINI_ATTEMPTS) break;
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(wait, GEMINI_BACKOFF_MS[attempt - 1] ?? 1800))
+      );
+    }
 
     if (!geminiResponse.ok) {
-      const detail = await geminiResponse.text();
-      console.error(`[analyze-chart] Gemini ${geminiResponse.status}: ${detail}`);
-
-      // 429 is the free tier's shape of failure, not a bug, and it is the one
-      // the user can act on -- waiting works. Named so it does not read as a
-      // broken scanner.
+      // A busy minute and a spent day arrive as the same status and are not the
+      // same failure. "Give it a minute" against an exhausted DAILY quota walks
+      // a paying user into the same wall every minute until the quota rolls
+      // over -- which is how a billing setting on a Google project turns into
+      // "the scanner never works" in a support queue.
       if (geminiResponse.status === 429) {
+        const daily = /PerDay/i.test(detail);
+        if (daily) {
+          console.error(
+            "[analyze-chart] DAILY Gemini quota exhausted. This key is on the FREE TIER: " +
+            "20 requests per day for the whole project, shared by every paying scanner user. " +
+            "Enable billing on the Google AI project -- no code change can move this ceiling."
+          );
+        }
         return json(
-          { error: "The scanner is busy right now. Give it a minute and scan again.", code: "RATE_LIMITED" },
+          {
+            error: daily
+              ? "The scanner has hit a daily limit on our side, not on your account. Please try again later."
+              : "The scanner is busy right now. Give it a minute and scan again.",
+            code: daily ? "QUOTA_EXHAUSTED" : "RATE_LIMITED",
+          },
           429
         );
       }
@@ -508,11 +655,59 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // ---- Is this chart still current? ---------------------------------------
+    // The reason this endpoint exists is to price a live order, and nothing
+    // upstream of here could tell a screenshot taken a minute ago from one taken
+    // last week. A scan of a three-day-old gold chart returned a confident SELL
+    // that scored MODERATE and armed the execute control; price had rallied
+    // ninety dollars in the interval. The reading was not wrong about the chart.
+    // It was answering a question about a market that had moved on.
+    //
+    // Two independent signals, because each one alone has a hole: the terminal's
+    // own "Market closed" banner is exact but absent on a weekday screenshot,
+    // and the time axis is always there but has to survive being read off an
+    // image.
+    //
+    // The threshold is deliberately coarse. A MetaTrader chart runs on BROKER
+    // server time, typically UTC+2 or +3, and the axis never says so -- so an
+    // hour-by-hour comparison against UTC would call fresh charts stale all
+    // morning. Twelve hours clears any broker offset in use and still catches
+    // the case that matters, which is a chart from another session entirely.
+    const STALE_AFTER_MINUTES = 12 * 60;
+
+    let ageMinutes: number | null = null;
+    if (reading.last_candle_iso) {
+      // Normalised rather than trusted: the field is asked for as
+      // `YYYY-MM-DDTHH:MM` and comes back as that most of the time, but a space
+      // separator and a trailing `:00Z` are both within a model's idea of
+      // following the instruction. Taking the first sixteen characters and
+      // supplying the rest accepts every one of those spellings and rejects
+      // anything shorter.
+      const iso = reading.last_candle_iso.trim().replace(" ", "T").slice(0, 16);
+      // `Date.parse` on a bare `YYYY-MM-DDTHH:MM` reads as UTC, which is the
+      // assumption documented above rather than an oversight.
+      const at = iso.length === 16 ? Date.parse(iso + ":00Z") : NaN;
+      if (Number.isFinite(at)) {
+        // Negative means the chart's clock is ahead of UTC -- a broker offset,
+        // not a chart from the future. Floored at zero so it never reads as
+        // "fresh by minus three hours".
+        ageMinutes = Math.max(0, Math.round((nowUtc.getTime() - at) / 60_000));
+      }
+    }
+
+    const tooOld = ageMinutes != null && ageMinutes > STALE_AFTER_MINUTES;
+    const staleReason = reading.market_closed
+      ? "This chart was taken with the market closed."
+      : tooOld
+        ? `The last candle on this chart is about ${describeAge(ageMinutes!)} old.`
+        : null;
+
     const usage = payload?.usageMetadata ?? {};
     console.log(
       `[analyze-chart] ${pair || "?"} ${strategyKey} ${reading.direction} ${reading.entry_type} ` +
       `entry=${reading.entry} sl=${reading.sl} bias=${reading.trend_bias} ` +
       `touches=${reading.key_level_touches} atr=${reading.average_candle_range} ` +
+      `age=${ageMinutes ?? "?"}m closed=${reading.market_closed} stale=${!!staleReason} ` +
       `in=${usage.promptTokenCount} out=${usage.candidatesTokenCount}`
     );
 
@@ -522,6 +717,11 @@ Deno.serve(async (req: Request) => {
       action: reading.direction,
       strategy: strategyKey,
       model: MODEL,
+      /** True when this reading must not arm an execute control. */
+      stale: !!staleReason,
+      stale_reason: staleReason,
+      /** Null when the time axis could not be read. See the note above. */
+      chart_age_minutes: ageMinutes,
     });
 
   } catch (err) {

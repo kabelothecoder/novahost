@@ -95,6 +95,10 @@ const val APP_PRICE_LABEL = "R599"
 const val SCANNER_PRICE_LABEL = "R349"
 const val REACTIVATION_PRICE_LABEL = "R150"
 
+/** Keep identical to request-device-move. The server is the authority; these only size the field. */
+private const val MOVE_REASON_MIN = 15
+private const val MOVE_REASON_MAX = 500
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Paygate 1 · the app lock
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,8 +110,12 @@ const val REACTIVATION_PRICE_LABEL = "R150"
  * @param onBuy          the primary purchase. R599 normally; on a paid email
  *                       sitting on another handset it starts the R150 move by
  *                       emailing a confirmation code.
+ * @param onSubmitMoveReason  why the licence is moving. Every move is reviewed by
+ *                       an admin, who decides on this; sending it emails the code.
  * @param onSubmitMoveCode  the six digits from that email.
- * @param onCancelMove   back out of code entry to try a different email.
+ * @param onCheckMoveStatus  "has the admin answered?" while waiting, and "go on to
+ *                       pay" once the move is approved.
+ * @param onCancelMove   back out of the move to try a different email.
  * @param onGranted      access confirmed; the host should dismiss the gate.
  * @param onCheckoutOpened  the browser has been handed the URL, clear the state.
  */
@@ -117,7 +125,9 @@ fun PaywallOverlay(
     initialEmail: String,
     onCheckAccess: (String) -> Unit,
     onBuy: (String) -> Unit,
+    onSubmitMoveReason: (String) -> Unit,
     onSubmitMoveCode: (String) -> Unit,
+    onCheckMoveStatus: () -> Unit,
     onCancelMove: () -> Unit,
     onGranted: () -> Unit,
     onCheckoutOpened: () -> Unit
@@ -125,6 +135,7 @@ fun PaywallOverlay(
     val context = LocalContext.current
     var email by remember { mutableStateOf(initialEmail) }
     var moveCode by remember { mutableStateOf("") }
+    var moveReason by remember { mutableStateOf("") }
 
     // A checkout URL is a one-shot instruction, not a piece of screen state.
     LaunchedEffect(gate.stage, gate.checkout) {
@@ -144,6 +155,12 @@ fun PaywallOverlay(
 
     /** Waiting on the six digits we just emailed. */
     val awaitingCode = gate.stage == GateStage.MOVE_CODE_ENTRY
+
+    // The rest of the move: the reason comes first, then (after the code) an
+    // admin reviews it, and only an approved move can be paid for.
+    val awaitingReason = gate.stage == GateStage.MOVE_REASON_ENTRY
+    val awaitingApproval = gate.stage == GateStage.MOVE_PENDING
+    val approved = gate.stage == GateStage.MOVE_APPROVED
 
     // A paid email on the wrong handset is a R150 move, not a second R599
     // purchase -- but only when the server says the move is actually available.
@@ -208,7 +225,13 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    if (awaitingCode) "Confirm it's you" else "Unlock NovaHost",
+                    when {
+                        awaitingReason -> "Why are you moving?"
+                        awaitingCode -> "Confirm it's you"
+                        awaitingApproval -> "Waiting for approval"
+                        approved -> "Move approved"
+                        else -> "Unlock NovaHost"
+                    },
                     color = GateInk,
                     fontSize = 25.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -218,8 +241,18 @@ fun PaywallOverlay(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
+                        awaitingReason ->
+                            gate.message
+                                ?: "An admin reviews every device move before you pay. " +
+                                    "Tell us why this licence is changing phone."
                         awaitingCode ->
                             gate.message ?: "Enter the 6-digit code we emailed you."
+                        awaitingApproval ->
+                            (gate.message ?: "Your request is with us.") +
+                                " We'll email you as soon as it's reviewed, and this screen " +
+                                "checks automatically. You won't be charged until it's approved."
+                        approved ->
+                            "Continue to pay $REACTIVATION_PRICE_LABEL and bind NovaHost to this phone."
                         else ->
                             "Enter your email to check your app access, or buy it if you haven't yet."
                     },
@@ -231,7 +264,13 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                if (awaitingCode) {
+                if (awaitingReason) {
+                    GateReasonField(
+                        value = moveReason,
+                        onValue = { moveReason = it.take(MOVE_REASON_MAX) },
+                        enabled = !busy
+                    )
+                } else if (awaitingCode) {
                     GateCodeField(
                         value = moveCode,
                         onValue = { entered ->
@@ -241,6 +280,8 @@ fun PaywallOverlay(
                         },
                         enabled = !busy
                     )
+                } else if (awaitingApproval || approved) {
+                    // Nothing to type: the screen is waiting on an answer.
                 } else {
                     GateEmailField(
                         value = email,
@@ -278,9 +319,27 @@ fun PaywallOverlay(
 
                 Spacer(Modifier.height(10.dp))
 
-                if (awaitingCode) {
+                if (awaitingReason) {
                     GatePrimaryButton(
-                        label = if (busy) "Opening checkout..." else "Confirm & pay $REACTIVATION_PRICE_LABEL",
+                        label = if (busy) "Sending..." else "Email me a code",
+                        busy = busy,
+                        enabled = !busy && moveReason.trim().length >= MOVE_REASON_MIN,
+                        onClick = { onSubmitMoveReason(moveReason) }
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    GateSecondaryButton(
+                        label = "Back",
+                        enabled = !busy,
+                        onClick = {
+                            moveReason = ""
+                            onCancelMove()
+                        }
+                    )
+                } else if (awaitingCode) {
+                    GatePrimaryButton(
+                        label = if (busy) "Checking..." else "Submit for approval",
                         busy = busy,
                         enabled = !busy && moveCode.length == 6,
                         onClick = { onSubmitMoveCode(moveCode) }
@@ -293,6 +352,29 @@ fun PaywallOverlay(
                         enabled = !busy,
                         onClick = {
                             moveCode = ""
+                            onCancelMove()
+                        }
+                    )
+                } else if (awaitingApproval || approved) {
+                    GatePrimaryButton(
+                        label = when {
+                            busy -> "Checking..."
+                            approved -> "Continue to pay $REACTIVATION_PRICE_LABEL"
+                            else -> "Check status"
+                        },
+                        busy = busy,
+                        enabled = !busy,
+                        onClick = onCheckMoveStatus
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    GateSecondaryButton(
+                        label = "Use a different email",
+                        enabled = !busy,
+                        onClick = {
+                            moveCode = ""
+                            moveReason = ""
                             onCancelMove()
                         }
                     )
@@ -837,6 +919,54 @@ private fun GateCodeField(
                 modifier = Modifier.onFocusChanged { focused = it.isFocused }
             )
         }
+    }
+}
+
+/**
+ * Why the licence is moving. Free text: an admin reads it and decides, so it is
+ * given room for a sentence or two rather than squeezed onto one line.
+ */
+@Composable
+private fun GateReasonField(
+    value: String,
+    onValue: (String) -> Unit,
+    enabled: Boolean
+) {
+    var focused by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 112.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(GateGround)
+            .border(
+                if (focused) 1.5.dp else 0.dp,
+                if (focused) GateAccent else Color.Transparent,
+                RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 18.dp, vertical = 16.dp)
+    ) {
+        if (value.isEmpty()) {
+            Text(
+                "e.g. My old phone broke and I bought a new one.",
+                color = GateMuted,
+                fontSize = 15.sp,
+                lineHeight = 21.sp
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValue,
+            enabled = enabled,
+            minLines = 3,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            textStyle = TextStyle(color = GateInk, fontSize = 15.sp, lineHeight = 21.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(GateAccent),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focused = it.isFocused }
+        )
     }
 }
 

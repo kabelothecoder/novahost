@@ -284,6 +284,41 @@ data class LicenseStatusRequest(
     val license_key: String
 )
 
+/** Request for broker-account. The licence is the credential, as everywhere. */
+@Serializable
+data class BrokerAccountRequest(
+    val license_key: String
+)
+
+/**
+ * What the linked broker account is worth, read live from the broker.
+ *
+ * [currency] is not decoration and callers must not drop it. The live accounts
+ * on this platform are denominated in rand: treating a R596.29 balance as
+ * dollars sizes every position roughly eighteen times too large, and nothing on
+ * screen would contradict it.
+ *
+ * [credit] is reported separately and deliberately excluded from [balance] by
+ * the server -- bonus credit cannot be withdrawn and must never be risked.
+ */
+@Serializable
+data class BrokerAccountResponse(
+    val success: Boolean = false,
+    val code: String? = null,
+    val error: String? = null,
+    val account_id: String? = null,
+    val balance: Double? = null,
+    val equity: Double? = null,
+    val credit: Double? = null,
+    val free_margin: Double? = null,
+    val currency: String = "USD",
+    val leverage: Double? = null,
+    val connected: Boolean? = null,
+    /** The broker refuses orders on this account whatever the app sends. */
+    val trading_disabled: Boolean = false,
+    val investor_password: Boolean = false
+)
+
 /** Response from license-status. Carries no MetaCopier account id by design. */
 @Serializable
 data class LicenseStatusResponse(

@@ -1,8 +1,9 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell-light': isLightRoute }">
 
     <!-- Persistent background loop (subtle, blended) -->
     <video
+      v-if="!isLightRoute && !isCommandRoute"
       autoplay
       muted
       loop
@@ -13,21 +14,50 @@
       <source :src="'/bg_loop.mp4'" type="video/mp4">
     </video>
 
-    <!-- Router View with slide-scale spring transition -->
+    <!-- Router View with a cross-fade transition.
+         NOT `mode="out-in"` — that mounts the incoming view only after
+         the outgoing one's leave transition ends, and Vue waits on
+         requestAnimationFrame for that. In any context where rAF is
+         throttled (a backgrounded tab, an occluded webview) the leave
+         never resolves, the enter never fires, and the app is left
+         blank with no view mounted at all. The default overlapping mode
+         mounts the new view immediately; the old one fades out over it. -->
     <RouterView v-slot="{ Component, route }">
-      <Transition name="page" mode="out-in">
+      <Transition name="page">
         <component :is="Component" :key="route.name" />
       </Transition>
     </RouterView>
 
-    <!-- Floating Pulse HUD — hidden on splash & activate -->
-    <FloatingPulseHUD v-if="showDock" />
+    <!-- FloatingPulseHUD: removed.
 
-    <!-- Floating Dock — hidden on splash & activate -->
-    <FloatingDock v-if="showDock" />
+         It was the last prop left on the screen. Its bot was hardcoded
+         "GhostRider X", its ONLINE/OFFLINE pill was a local ref a tap
+         flipped, and it carried a "SIM TRADE" button that faked an
+         execution with a shake animation — on a product whose entire
+         claim is that it places real orders. It rendered on Terminal and
+         Support, so a user two taps from Home could press SIM TRADE and
+         watch the app pretend. -->
 
-    <!-- iOS Install Card -->
-    <iOSInstallCard v-if="showInstall" @dismiss="showInstall = false" />
+    <!-- Floating Dock — hidden on splash, onboarding and the gate.
+         Wrapped in a `.cmd` context because the dock now uses command
+         tokens and those are declared on `.cmd`, not :root — only the
+         five runtime tokens (accent, glow) are global. The wrapper is a
+         plain div on purpose: a transform or filter here would become
+         the containing block for the dock's `position: fixed`.
+
+         Scheme follows the user only on command routes. The other five
+         views the dock appears on are obsidian and dark-only, so a light
+         dock would be the single pale object on a black screen. -->
+    <div v-if="showDock" class="cmd dock-host" :data-scheme="dockScheme" :data-motion="theme.motion">
+      <ScreensButton />
+    </div>
+
+    <!-- iOS Install Card — onboarding teaches this as its own step, so the
+         floating card would be a duplicate prompt over the top of it. -->
+    <iOSInstallCard v-if="showInstall && !isLightRoute" @dismiss="showInstall = false" />
+
+    <!-- Alerts while the app is open, grown out of the status bar. -->
+    <DynamicIsland />
 
     <!-- SVG Filters for Gooey & Glitch -->
     <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
@@ -52,19 +82,132 @@
 </template>
 
 <script setup>
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watchEffect, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import FloatingDock from './components/FloatingDock.vue'
-import FloatingPulseHUD from './components/FloatingPulseHUD.vue'
+import ScreensButton from './components/ScreensButton.vue'
 import iOSInstallCard from './components/iOSInstallCard.vue'
+import DynamicIsland from './components/DynamicIsland.vue'
+import { syncPush } from './services/pushService.js'
+
+// Re-register on every launch: iOS can rotate the endpoint while the app is
+// closed, and the robot's name or licences may have changed since.
+onMounted(() => { setTimeout(syncPush, 3000) })
 import { accent } from './stores/accent.js'
+import { resolvedScheme, theme } from './stores/theme.js'
 
 const route   = useRoute()
 
-// Hide the dock on splash, onboarding AND the activation gate
-const showDock = computed(() =>
-  route.name !== 'splash' && route.name !== 'activate' && route.name !== 'onboarding'
-)
+// Hide the dock on splash, onboarding, the licence-key gate and the payment
+// screen. `payment-return` is in here because it is reached from PayFast in a
+// browser that has usually never seen this app: the dock would offer navigation
+// into an unverified session, and its robot avatar reads as a second, competing
+// subject on a screen that has one thing to say.
+const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return']
+
+// Home layouts that render chrome-free.
+//
+// Full-Bleed Art and Focus Engine are the two art-forward compositions —
+// Full-Bleed IS the marketing screen, and Focus Engine strips the screen to
+// one control on purpose. A floating pill across the bottom of either is the
+// one element that stops them being the thing they were designed to be.
+//
+// Neither becomes a dead end. HomeTopBar's layers button opens the Interface
+// Style sheet, whose header carries an "All settings" route to the hub — and
+// the hub reaches every destination the dock offers. That route is what makes
+// this safe: the top bar used to hold a SECOND button going straight to
+// Settings, and it was removed as a duplicate of the layers one. On a layout
+// that also hides the dock, removing it without the sheet's route would have
+// left no way off the screen at all. This only applies on Home — the layout
+// preference says nothing about Scanner or Terminal.
+//
+// Home v4 (2026-10-22): every layout is dockless. The Screens strip (swipe up
+// or the grid button) replaces the dock on Home, and Command Core's tune
+// button and the strip's Settings card both reach the hub.
+//
+// Later the same day the four-tab dock went everywhere else too. Off Home a
+// single Screens button opens that same tray, and every screen carries its
+// own back arrow to Home. `showDock` now means "show the Screens button".
+const showDock = computed(() => !HIDE_DOCK.includes(route.name) && route.name !== 'home')
+
+// Routes on the light Nova system rather than obsidian glass. The shell's
+// black gradient and the bg video would otherwise sit behind — and blur
+// through — the frosted Nova materials on onboarding, the gate and the
+// PayFast landing screen.
+const LIGHT_ROUTES = ['onboarding', 'unlock', 'payment', 'payment-return']
+const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
+
+// Routes on the command.css system. They paint their own opaque canvas
+// and their own backdrop, so the shell's bg_loop video is pure waste
+// behind them — and worse, it would be blurred through by every glass
+// card on the screen, which is not the material HomeBackdrop composes.
+// `pairs` and `scanner` joined with their rewrites: both are command-system
+// screens now, and `sign-out` and `trades` followed.
+//
+// (This list used to carry a second job: keeping the old FloatingPulseHUD's
+// z-index 9999 robot portrait off screens it was landing on top of. That
+// component is gone — see the note in the template — so what is left here is
+// only the bg_loop / glass-blur reasoning above.)
+// `terminal` was missing from this list while TerminalView's root element has
+// been `class="cmd mtv"` — so the MT5 screen painted the command canvas
+// (--cc-canvas) while the shell treated it as an obsidian route: the bg_loop
+// video ran behind it for nothing, and the page ground stayed --obsidian.
+// Those two darks meeting is the black band along the bottom of the MT5 screen.
+// `support` is NOT here and should not be: it is still on the glass system.
+const COMMAND_ROUTES = ['home', 'settings', 'arrange-widgets', 'pairs', 'scanner', 'sign-out', 'trades', 'terminal', 'accounts', 'symbols', 'support']
+const isCommandRoute = computed(() => COMMAND_ROUTES.includes(route.name))
+
+const dockScheme = computed(() => (isCommandRoute.value ? resolvedScheme.value : 'dark'))
+
+/* ── The ground behind the app ─────────────────────────────────────────
+   See the `--app-ground` block in glass.css for what this fixes. The route
+   family decides which of the three canvases the page is painted with, and
+   `data-ground` hands that to CSS; the colour itself stays in the
+   stylesheet so a tone change needs no JS.
+
+   A command route on the light scheme resolves to `light` rather than
+   `cmd`: --cc-tone is a DARK-scheme ladder and theme.js keeps writing it
+   whatever the scheme, so trusting it here would paint an obsidian strip
+   under a light Home. */
+watchEffect(() => {
+  const el = document.documentElement
+
+  let ground
+  if (isLightRoute.value) ground = 'light'
+  else if (isCommandRoute.value) ground = resolvedScheme.value === 'light' ? 'light' : 'cmd'
+  else ground = 'obsidian'
+
+  if (ground === 'obsidian') delete el.dataset.ground
+  else el.dataset.ground = ground
+
+  /* The same decision, handed to iOS.
+   *
+   * On an installed PWA this tag is what the OS paints the strip over the
+   * home indicator with — the black box along the bottom of every screen.
+   * It had two writers before this: theme.js wrote the canvas tone and
+   * accent.js wrote the raw ACCENT hex, so a Crimson robot asked for a red
+   * band and whichever store changed last decided the colour.
+   *
+   * One writer, matching what the page paints, so the strip disappears into
+   * the app instead of ending it with a hard line. The manifest's
+   * `background_color` is the same colour for the same reason, and covers
+   * the launch splash before any of this has run.
+   *
+   * `--cc-tone` is read back off the element rather than imported: theme.js
+   * writes it there as an inline style, so reading it is what keeps this in
+   * step with a background-tone change without duplicating the ladder. */
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) {
+    /* Touched purely to register the dependency — the VALUE comes off the
+     * element below, but without reading the store this effect would never
+     * re-run when the user picked a different background tone. */
+    void theme.tone
+    const tone = getComputedStyle(el).getPropertyValue('--cc-tone').trim()
+    meta.setAttribute('content',
+      ground === 'light' ? '#F4F7F9'
+      : ground === 'cmd' ? (tone || '#0E0E11')
+      : '#010A15')
+  }
+})
 
 // Show iOS install hint on first visit (after 3s)
 const showInstall = ref(false)
@@ -96,6 +239,7 @@ if (isIOS && !isStandalone) {
 }
 
 .app-shell {
+  position: relative; /* containing block for the leaving view below */
   width: 100%;
   height: 100dvh;
   overflow: hidden;
@@ -113,10 +257,35 @@ if (isIOS && !isStandalone) {
   100% { background-position: 0% 100%; }
 }
 
-/* ── Page transition ─────────────────────────────────────────────────────── */
+/* The dock's token context, not a surface. `.cmd` paints
+   `background: var(--cc-canvas)`, which on a wrapper whose only child is
+   `position: fixed` would be a zero-height no-op today — but would become
+   a full-bleed canvas the moment anything else was put inside it. */
+.dock-host {
+  background: none;
+  height: 0;
+}
+
+/* Light routes opt out of the obsidian shell entirely. */
+.app-shell-light {
+  background: #F4F7F9;
+  background-image: none;
+  animation: none;
+}
+
+/* ── Page transition ───────────────────────────────────────────────────────
+   Enter and leave overlap (no `mode="out-in"`). The leaving view is taken
+   out of flow and laid over the top so the two do not stack vertically
+   during the ~220ms crossover; it fades and scales away to reveal the
+   entering view beneath it. */
 .page-enter-active,
 .page-leave-active {
   transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.page-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
 }
 .page-enter-from {
   opacity: 0;

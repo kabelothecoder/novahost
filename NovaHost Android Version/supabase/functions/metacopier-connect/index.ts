@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { bridgeFor, providerOf, resolveLink, withLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -6,15 +7,14 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const METACOPIER_BASE = 'https://api.metacopier.io'
-
 /**
- * Registers a user's MT4/MT5 account with MetaCopier and returns the MetaCopier
- * account id, which is what metacopier-execute places orders against.
+ * Links a user's MT4/MT5 account through the licence's broker bridge and
+ * records the provider account id, which is what metacopier-execute places
+ * orders against.
  *
- * Replaces the MetaAPI broker bridge. Region and account-type ids are looked up
- * from MetaCopier at runtime rather than hardcoded, because those ids are
- * project/environment specific.
+ * The name is historical: the work is done by whichever adapter
+ * `_shared/bridge` picks for the licence. The slug stays because every app
+ * build in the field calls it.
  */
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -30,19 +30,24 @@ Deno.serve(async (req: Request) => {
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-
-    if (!METACOPIER_API_KEY) {
-      console.error('METACOPIER_API_KEY is not configured')
-      return json({ success: false, error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
     const body = await req.json().catch(() => ({}))
     const { license_key, account_number, password, server, platform, region_name, symbol_suffix, account_type } = body
 
-    if (!license_key || !account_number || !password || !server) {
+    // `action: 'servers'` is a read-only lookup of the server names the bridge
+    // can dial, for autocomplete and "did you mean". It needs a licence and
+    // nothing else -- no credentials, and it never creates or touches an account.
+    const serversOnly = body?.action === 'servers'
+
+    // Multi-account actions. `add_account` links ANOTHER account under the same
+    // key without touching the primary; `list_accounts` and `remove_account`
+    // need no credentials. The primary link (no action) behaves exactly as before.
+    const action = String(body?.action ?? '')
+    const addAccount = action === 'add_account'
+    const noCredentials = serversOnly || action === 'list_accounts' || action === 'remove_account'
+
+    if (!license_key || (!noCredentials && (!account_number || !password || !server))) {
       return json({
         success: false,
         error: 'Account number, password and server are all required.',
@@ -53,7 +58,7 @@ Deno.serve(async (req: Request) => {
     const key = String(license_key).trim().toUpperCase()
     const { data: license, error: licErr } = await novaHost
       .from('licenses')
-      .select('id, ea_id, status, expires_at, metadata')
+      .select('id, ea_id, status, expires_at, metadata, max_broker_accounts')
       .eq('license_key', key)
       .maybeSingle()
 
@@ -72,347 +77,151 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, code: 'LICENCE_EXPIRED', error: 'Licence has expired.' }, 403)
     }
 
-    const mcHeaders = {
-      'X-API-KEY': METACOPIER_API_KEY,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    }
-
     const wantPlatform = String(platform ?? 'MT5').toUpperCase().replace(/[^A-Z0-9]/g, '')
-    const finalServer = String(server).trim()
-    const wantLogin = String(account_number).replace(/\s+/g, '')
     const normalize = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
-    /** Deletes a MetaCopier account. Best-effort -- a failed cleanup is logged, not fatal. */
-    const deleteAccount = async (id: string) => {
-      try {
-        const r = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}`, {
-          method: 'DELETE', headers: mcHeaders,
-        })
-        console.log(`[MetaCopier] deleted account ${id}: ${r.status}`)
-      } catch (e) {
-        console.warn(`[MetaCopier] delete ${id} failed: ${(e as Error).message}`)
-      }
+    // The provider is the licence's, not the caller's. Today every licence is
+    // on MetaCopier; once MetaRPC is live, a licence moved there links there.
+    const priorMetadata = (license.metadata ?? {}) as Record<string, unknown>
+    const provider = providerOf(priorMetadata)
+    const bridge = bridgeFor(provider, null, novaHost)
+    if (!bridge) {
+      return json({ success: false, error: 'Server misconfiguration.' }, 500)
     }
 
-    /**
-     * Resolves account type + region and registers the account with MetaCopier.
-     *
-     * Returns the new account id, or a ready-to-send error Response when the
-     * platform/region cannot be resolved or the broker refuses the login.
-     */
-    const resolveAndCreate = async (): Promise<{ id: string } | { errorResponse: Response }> => {
-      const [typesRes, regionsRes] = await Promise.all([
-        fetch(`${METACOPIER_BASE}/rest/api/v1/types/accountTypes`, { headers: mcHeaders }),
-        fetch(`${METACOPIER_BASE}/rest/api/v1/types/regions`, { headers: mcHeaders }),
-      ])
+    // ---- Accounts under this key ---------------------------------------------
+    const liveAccounts = async () => {
+      const { data } = await novaHost
+        .from('license_broker_accounts')
+        .select('id, provider, bridge_account_id, platform, login, server, label, is_primary, auto_execute, lot_multiplier, status, created_at')
+        .eq('license_id', license.id)
+        .is('disconnected_at', null)
+        .order('is_primary', { ascending: false })
+        .order('created_at', { ascending: true })
+      return data ?? []
+    }
+    const maxAccounts = Number(license.max_broker_accounts) || 1
 
-      if (!typesRes.ok || !regionsRes.ok) {
-        const detail = `accountTypes=${typesRes.status} regions=${regionsRes.status}`
-        console.error(`[MetaCopier] lookup failed: ${detail}`)
-        return { errorResponse: json({ success: false, error: 'Could not reach MetaCopier.', details: detail }, 502) }
-      }
-
-      const accountTypes = await typesRes.json()
-      const regions = await regionsRes.json()
-
-      // Exact match first. A substring match will happily bind an "MT5_INVESTOR"
-      // style type to a plain MT5 request, and an investor password cannot place
-      // orders -- the broker rejects the login and the user is told their password
-      // is wrong. Substring is kept only as a fallback for projects that name the
-      // type "METATRADER5" rather than "MT5".
-      const typeList = (Array.isArray(accountTypes) ? accountTypes : []) as { id?: string; name?: string }[]
-      const matchedType =
-        typeList.find((t) => normalize(t?.name) === wantPlatform) ??
-        typeList.find((t) => normalize(t?.name).includes(wantPlatform))
-
-      if (!matchedType) {
-        return { errorResponse: json({
-          success: false,
-          code: 'PLATFORM_UNAVAILABLE',
-          error: `Platform ${wantPlatform} is not offered by this MetaCopier project.`,
-          available: typeList.map((t) => t?.name),
-        }, 400) }
-      }
-
-      // Region is the datacenter that dials the broker. Silently taking the first
-      // one the API happens to list makes every connection depend on undeclared
-      // ordering, so an explicit choice wins: the caller's, then the project
-      // default, then the first entry -- and whichever it lands on gets logged so
-      // a failure is attributable.
-      const regionList = (Array.isArray(regions) ? regions : []) as { id?: string; name?: string }[]
-      const preferredRegion = region_name ?? Deno.env.get('METACOPIER_REGION') ?? ''
-      const matchedRegion = preferredRegion
-        ? regionList.find((r) => normalize(r?.name) === normalize(preferredRegion))
-        : regionList[0]
-
-      if (!matchedRegion) {
-        return { errorResponse: json({
-          success: false,
-          code: 'REGION_UNAVAILABLE',
-          error: preferredRegion
-            ? `MetaCopier region "${preferredRegion}" was not found.`
-            : 'No MetaCopier region available.',
-          available: regionList.map((r) => r?.name),
-        }, 400) }
-      }
-
-      console.log(
-        `[MetaCopier] resolved type=${matchedType.name} region=${matchedRegion.name} ` +
-        `platform=${wantPlatform} server=${finalServer}`
-      )
-
-      // Whitespace is stripped from all three because these values are pasted out
-      // of a broker email far more often than they are typed, and a trailing
-      // newline on the password is indistinguishable, to the user, from a correct
-      // password. MetaTrader does not accept leading or trailing whitespace in any
-      // of them, so nothing legitimate is lost by removing it here.
-      const accountPayload = {
-        loginAccountNumber: wantLogin,
-        loginAccountPassword: String(password).trim(),
-        loginServer: finalServer,
-        type: { id: matchedType.id },
-        region: { id: matchedRegion.id },
-        alias: `NovaHost ${key}`,
-        // The de-duplication step above is the real guard against a second
-        // account for one login. This stays `false` as a backstop: if that
-        // lookup could not run (MetaCopier's list endpoint unreachable or shaped
-        // unexpectedly), a reconnect must still succeed rather than fail on an
-        // "account exists" error -- the next clean reconnect will converge it.
-        failIfAccountExistsInProject: false,
-      }
-
-      const createRes = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts`, {
-        method: 'POST',
-        headers: mcHeaders,
-        body: JSON.stringify(accountPayload),
+    if (action === 'list_accounts') {
+      const accounts = await liveAccounts()
+      return json({
+        success: true,
+        max_accounts: maxAccounts,
+        accounts: accounts.map((a) => ({
+          account_id: a.bridge_account_id, provider: a.provider, platform: a.platform,
+          login: a.login, server: a.server, label: a.label, primary: a.is_primary,
+          auto_execute: a.auto_execute, lot_multiplier: Number(a.lot_multiplier), status: a.status,
+        })),
       })
-
-      if (!createRes.ok) {
-        const detail = await createRes.text()
-        console.error(
-          `[MetaCopier] account create failed ${createRes.status}: ${detail} ` +
-          `(type=${matchedType.name} region=${matchedRegion.name} server=${finalServer})`
-        )
-
-        // MetaCopier reports faults as bracketed codes in an `errors` array, e.g.
-        // {"errors":["[WRONG_CREDENTIALS]"]}. Match on the code rather than on
-        // loose substrings of the raw body.
-        const codes = (detail.match(/\[([A-Z0-9_]+)\]/g) ?? []).map((c) => c.slice(1, -1))
-        const has = (...names: string[]) => names.some((n) => codes.includes(n))
-
-        let status = 400
-        let code = codes[0] ?? 'CONNECT_FAILED'
-        let message = 'Could not connect this trading account. Check the login, password and server.'
-
-        if (has('PLEASE_FUND_YOUR_PROJECT')) {
-          status = 502
-          code = 'PROVIDER_UNFUNDED'
-          message = 'Account connection is unavailable: the NovaHost trading provider needs funding. This is on our side, not your login details.'
-        } else if (codes.some((c) => c.includes('LIMIT'))) {
-          status = 502
-          code = 'PROVIDER_LIMIT'
-          message = 'The connected-account limit has been reached. Please contact support.'
-        } else if (has('WRONG_CREDENTIALS', 'INVALID_CREDENTIALS', 'AUTHENTICATION_FAILED', 'AUTHENTICATION')) {
-          code = 'WRONG_CREDENTIALS'
-          message =
-            `Your broker rejected this login. Check that the account number and password are the ` +
-            `${wantPlatform} trading password (not the investor password), and that "${finalServer}" ` +
-            `is the server name exactly as MetaTrader shows it. If the account is ` +
-            `${wantPlatform === 'MT5' ? 'MT4' : 'MT5'}, switch the platform tab and try again.`
-        } else if (codes.some((c) => c.includes('SERVER'))) {
-          code = 'UNKNOWN_SERVER'
-          message =
-            `"${finalServer}" was not recognised as a ${wantPlatform} server. Copy it exactly ` +
-            `as it appears in MetaTrader under Tools -> Options -> Server.`
-        }
-
-        // Broker credentials are never echoed back to the client.
-        return { errorResponse: json({ success: false, code, error: message, details: detail }, status) }
-      }
-
-      const created = await createRes.json().catch(() => ({}))
-      const id = created?.id == null ? '' : String(created.id)
-      if (!id) {
-        return { errorResponse: json({ success: false, code: 'NO_ACCOUNT_ID', error: 'MetaCopier did not return an account id.' }, 502) }
-      }
-      return { id }
     }
 
-    /**
-     * Starts the account and waits for the broker session to actually come up.
-     *
-     * Returning "connected" the instant the account is registered -- which this
-     * function used to do implicitly -- is why a signal fired in the first minute
-     * after a reconnect failed with `[ACCOUNT_IS_NOT_CONNTECTED]`: the account
-     * existed, the MT4/MT5 session behind it did not. Up to ~24s of polling
-     * turns that window from a failed trade into a "still connecting" state the
-     * app can show honestly.
-     */
-    const startAndVerify = async (id: string): Promise<'connected' | 'connecting' | 'wrong_credentials'> => {
-      await fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/actions/start`,
-        { method: 'POST', headers: mcHeaders }
-      ).catch((e) => console.warn('[MetaCopier] start failed (non-fatal):', e))
+    if (action === 'remove_account') {
+      const target = String(body?.account_id ?? '')
+      const row = (await liveAccounts()).find((a) => a.bridge_account_id === target)
+      if (!row) return json({ success: false, code: 'ACCOUNT_NOT_ON_LICENCE', error: 'That account is not linked to this licence.' }, 404)
+      // The primary is unlinked through the normal broker setup, which also
+      // clears the licence's own link; removing it here would leave that dangling.
+      if (row.is_primary) return json({ success: false, code: 'PRIMARY_ACCOUNT', error: 'Change your main account from Broker Setup.' }, 409)
+      // Stops the provider billing. A failure here still unlinks: a terminal we
+      // no longer trade on is a cost to chase, not a reason to keep trading it.
+      const stopped = await bridgeFor(row.provider, row.bridge_account_id, novaHost)?.disconnect().catch(() => false)
+      await novaHost.from('license_broker_accounts')
+        .update({ disconnected_at: new Date().toISOString(), status: 'disconnected' })
+        .eq('id', row.id)
+      if (!stopped) console.warn(`[metacopier-connect] ${row.provider} account ${row.bridge_account_id} unlinked but not stopped at the provider`)
+      return json({ success: true, code: 'REMOVED', account_id: target })
+    }
 
-      for (let i = 0; i < 6; i++) {
-        await new Promise((r) => setTimeout(r, 4000))
-        try {
-          const infoRes = await fetch(
-            `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}/information`,
-            { headers: mcHeaders },
-          )
-          if (!infoRes.ok) continue
-          const info = await infoRes.json()
-          if (info?.wrongCredentials === true) return 'wrong_credentials'
-          if (info?.connected === true) return 'connected'
-        } catch { /* keep waiting */ }
+    if (addAccount) {
+      const accounts = await liveAccounts()
+      if (accounts.length === 0) {
+        return json({ success: false, code: 'NO_PRIMARY_ACCOUNT', error: 'Connect your main account first.' }, 409)
       }
-      return 'connecting'
-    }
-
-    /** Fetches one MetaCopier account, or null if it does not exist / cannot be read. */
-    const fetchAccount = async (id: string): Promise<Record<string, unknown> | null> => {
-      try {
-        const r = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(id)}`, { headers: mcHeaders })
-        if (!r.ok) return null
-        return await r.json() as Record<string, unknown>
-      } catch { return null }
-    }
-
-    // ---- De-duplicate: one MetaCopier account per broker login --------------
-    //
-    // MetaCopier will hold two accounts for one MT4/MT5 login, and they fight
-    // over the broker session -- each one's connect knocks the other offline,
-    // which surfaces on trades as intermittent [ACCOUNT_IS_NOT_CONNTECTED] and
-    // [BROKER_REJECTION]. The old `failIfAccountExistsInProject: false` created a
-    // fresh duplicate on every reconnect.
-    //
-    // Three signals, cheapest and most authoritative first:
-    //   1. the id already stored on THIS licence -- if it still exists and still
-    //      points at the same login+server, this connect is a no-op: re-start it
-    //      and confirm it is up. Nothing is created.
-    //   2. any account in the project already registered for this login+server --
-    //      catches accounts made before ids were stored, or out of band.
-    //   3. neither -> register a new one.
-    let metacopierAccountId = ''
-    let reused = false
-
-    const priorId = String((license.metadata as Record<string, unknown> | null)?.metacopier_account_id ?? '').trim()
-    if (priorId) {
-      const prior = await fetchAccount(priorId)
-      if (prior) {
-        const sameLogin =
-          normalize(prior.loginAccountNumber) === normalize(wantLogin) &&
-          normalize(prior.loginServer) === normalize(finalServer)
-        if (sameLogin) {
-          metacopierAccountId = priorId
-          reused = true
-          console.log(`[MetaCopier] licence ${license.id} already holds account ${priorId} for this login -- reusing`)
-        } else {
-          // The licence is being pointed at a different broker login. The old
-          // account is now orphaned -- remove it so it cannot keep a stale
-          // session (and a provider charge) alive.
-          console.log(`[MetaCopier] licence ${license.id} switching login -- deleting old account ${priorId}`)
-          await deleteAccount(priorId)
-        }
+      if (accounts.length >= maxAccounts) {
+        return json({
+          success: false, code: 'ACCOUNT_LIMIT_REACHED',
+          error: `This licence can trade ${maxAccounts} account${maxAccounts === 1 ? '' : 's'}. Remove one or add more accounts to your plan.`,
+          max_accounts: maxAccounts,
+        }, 403)
+      }
+      const login = String(account_number ?? '').replace(/\s+/g, '')
+      if (accounts.some((a) => a.login === login && a.server.toLowerCase() === String(server).trim().toLowerCase())) {
+        return json({ success: false, code: 'ACCOUNT_ALREADY_LINKED', error: 'That account is already linked to this licence.' }, 409)
       }
     }
 
-    if (!metacopierAccountId) {
-      try {
-        const listRes = await fetch(`${METACOPIER_BASE}/rest/api/v1/accounts`, { headers: mcHeaders })
-        if (listRes.ok) {
-          const raw = await listRes.json()
-          // Bare array from the accounts endpoint today; unwrap the common
-          // pagination envelopes too so a shape change does not silently turn the
-          // de-dup off and let a duplicate through.
-          const all: unknown[] = Array.isArray(raw)
-            ? raw
-            : Array.isArray(raw?.content) ? raw.content
-            : Array.isArray(raw?.data) ? raw.data
-            : Array.isArray(raw?.accounts) ? raw.accounts
-            : []
-          const matches = (all as Record<string, unknown>[]).filter((a) =>
-            normalize(a.loginAccountNumber) === normalize(wantLogin) &&
-            normalize(a.loginServer) === normalize(finalServer)
-          )
-          matches.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-            String(a.created ?? '').localeCompare(String(b.created ?? '')))
-
-          if (matches.length === 1) {
-            // Exactly one -- reuse it. A stale password on it is caught by the
-            // verify step below and repaired there.
-            metacopierAccountId = String(matches[0].id)
-            reused = true
-            console.log(`[MetaCopier] reusing existing account ${metacopierAccountId} for login ${wantLogin}`)
-          } else if (matches.length > 1) {
-            // Already in a contending state. Clear them all and build one clean
-            // account, so the outcome does not depend on which duplicate wins.
-            console.warn(`[MetaCopier] ${matches.length} duplicate accounts for login ${wantLogin} -- clearing`)
-            for (const a of matches) await deleteAccount(String(a.id))
-          }
-        }
-      } catch (e) {
-        console.warn(`[MetaCopier] account list failed (will create fresh): ${(e as Error).message}`)
-      }
+    if (serversOnly) {
+      const list = await bridge.servers(wantPlatform)
+      if (!list) return json({ success: false, code: 'SERVER_LIST_UNAVAILABLE', error: 'Could not load the server list.' }, 502)
+      const q = String(body?.query ?? '').trim()
+      const servers = q
+        ? list.filter((s) => normalize(s).includes(normalize(q))).slice(0, 50)
+        : list.slice(0, 50)
+      return json({ success: true, platform: wantPlatform, total: list.length, servers })
     }
 
-    if (!metacopierAccountId) {
-      const r = await resolveAndCreate()
-      if ('errorResponse' in r) return r.errorResponse
-      metacopierAccountId = r.id
-    }
+    // ---- Link the account ----------------------------------------------------
+    // De-duplication, slot reclaim, server-name repair and the wait for the
+    // session to come up are all the adapter's: they are how ONE provider
+    // behaves, not what linking means.
+    const result = await bridge.connect({
+      licenseKey: key,
+      login: String(account_number ?? ''),
+      password: String(password ?? ''),
+      server: String(server ?? ''),
+      platform: wantPlatform,
+      region: region_name ?? null,
+      // An added account replaces nothing, so it must not be handed the
+      // primary's id to tear down.
+      priorAccountId: addAccount ? null : resolveLink(priorMetadata)?.accountId ?? null,
+    })
 
-    let linkState = await startAndVerify(metacopierAccountId)
-
-    // A reused account whose stored password no longer works: the credentials
-    // cannot be edited in place, so drop it and register the login fresh once.
-    if (linkState === 'wrong_credentials' && reused) {
-      console.log(`[MetaCopier] reused account ${metacopierAccountId} has stale credentials -- recreating`)
-      await deleteAccount(metacopierAccountId)
-      reused = false
-      const r = await resolveAndCreate()
-      if ('errorResponse' in r) return r.errorResponse
-      metacopierAccountId = r.id
-      linkState = await startAndVerify(metacopierAccountId)
-    }
-
-    if (linkState === 'wrong_credentials') {
+    if (!result.ok) {
+      // Broker credentials are never echoed back to the client.
       return json({
         success: false,
-        code: 'WRONG_CREDENTIALS',
-        error:
-          `Your broker rejected this login. Check that the account number and password are the ` +
-          `${wantPlatform} trading password (not the investor password), and that "${finalServer}" ` +
-          `is the server name exactly as MetaTrader shows it.`,
-      }, 400)
+        ...(result.code ? { code: result.code } : {}),
+        error: result.error,
+        ...(result.extra ?? {}),
+      }, result.status)
     }
+
+    const accountId = result.accountId
+    const linkState = result.state
+    const reused = result.reused
 
     // ---- Record the link, WITHOUT storing broker credentials ----------------
     // Kept on the licence rather than broker_accounts: app users authenticate by
     // licence key and have no auth.users row, but broker_accounts.user_id is a
     // NOT NULL FK to auth.users. Binding here also lets metacopier-execute
     // resolve the account server-side instead of trusting the client.
+    //
+    // Re-read rather than reusing the licence row from the top: the connect
+    // above can take half a minute, and a stale copy written back would undo
+    // anything that changed the metadata in the meantime.
     const { data: current } = await novaHost
       .from('licenses')
       .select('metadata')
       .eq('id', license.id)
       .maybeSingle()
 
-    const metadata = (current?.metadata ?? {}) as Record<string, unknown>
-    metadata.metacopier_account_id = metacopierAccountId
-    metadata.broker_server = finalServer
-    metadata.platform = wantPlatform
-    metadata.connected_at = new Date().toISOString()
-
     // What the verify step actually saw. `connected` means an order placed now
     // will reach the broker; `connecting` means the account is registered and
     // the session is still coming up -- the app shows that as a wait, not a
     // green light, and metacopier-execute holds signals that arrive during it.
-    metadata.metacopier_status = linkState
+    const metadata = withLink(
+      (current?.metadata ?? {}) as Record<string, unknown>,
+      provider,
+      accountId,
+      linkState,
+    )
+    metadata.broker_server = result.server
+    metadata.platform = result.platform
+    metadata.connected_at = new Date().toISOString()
     if (linkState === 'connected') {
-      metadata.metacopier_connected_verified_at = new Date().toISOString()
+      metadata.bridge_verified_at = new Date().toISOString()
+      // Compatibility copy for readers that predate the bridge.
+      if (provider === 'metacopier') metadata.metacopier_connected_verified_at = metadata.bridge_verified_at
     }
 
     // ---- What this broker calls its instruments -----------------------------
@@ -444,11 +253,44 @@ Deno.serve(async (req: Request) => {
     // standard account must be able to clear a stale ".m", and leaving the old
     // key in place would silently keep decorating symbols the new book does not
     // have.
+    // ---- An added account is a row of its own ---------------------------------
+    // The licence metadata stays the primary's. Nothing written above has been
+    // saved; for an added account it is simply not used.
+    if (addAccount) {
+      const { error: addErr } = await novaHost.from('license_broker_accounts').insert({
+        license_id: license.id,
+        provider,
+        bridge_account_id: accountId,
+        platform: result.platform === 'MT4' ? 'MT4' : 'MT5',
+        login: String(account_number ?? '').replace(/\s+/g, ''),
+        server: result.server,
+        label: body?.label ? String(body.label).slice(0, 40) : null,
+        is_primary: false,
+        symbol_suffix: suffix,
+        status: linkState,
+      })
+      if (addErr) {
+        // Linked at the provider but not recorded: stop it so it does not bill unseen.
+        console.error(`[metacopier-connect] add_account write failed for licence ${license.id}: ${addErr.message}`)
+        await bridgeFor(provider, accountId, novaHost)?.disconnect().catch(() => false)
+        return json({ success: false, code: 'LINK_NOT_SAVED', error: 'Your broker accepted the login but we could not save the connection. Please try again.' }, 500)
+      }
+      return json({
+        success: true,
+        code: linkState === 'connected' ? 'CONNECTED' : 'CONNECTING',
+        status: linkState,
+        account_id: accountId,
+        platform: result.platform,
+        primary: false,
+        message: 'Additional trading account connected.',
+      })
+    }
+
     metadata.symbol_suffix = suffix
     if (account_type) metadata.account_type = String(account_type).trim()
 
     console.log(
-      `[MetaCopier] licence ${license.id} symbol suffix = "${suffix}"` +
+      `[metacopier-connect] licence ${license.id} symbol suffix = "${suffix}"` +
       (suffix ? ` (orders will read e.g. XAUUSD${suffix})` : ' (bare symbol names)')
     )
 
@@ -457,7 +299,7 @@ Deno.serve(async (req: Request) => {
       .update({ metadata })
       .eq('id', license.id)
 
-    // The account now exists at MetaCopier but nothing points at it, so the app
+    // The account now exists at the provider but nothing points at it, so the app
     // would show NOT LINKED forever while the provider bills for it. Reported as
     // its own failure rather than thrown, because the generic 500 handler
     // returns a Postgres message that tells the user nothing and hides the fact
@@ -473,13 +315,41 @@ Deno.serve(async (req: Request) => {
       }, 500)
     }
 
+    // ---- Keep the primary row in step with the licence -----------------------
+    // Best-effort: the licence metadata is still the record for the primary,
+    // so a failure here costs only the multi-account view, not trading.
+    {
+      const login = String(account_number ?? '').replace(/\s+/g, '')
+      const now = new Date().toISOString()
+      // The old primary, and any added account that is this same login, retire.
+      await novaHost.from('license_broker_accounts')
+        .update({ is_primary: false, disconnected_at: now, status: 'replaced' })
+        .eq('license_id', license.id).eq('is_primary', true)
+      await novaHost.from('license_broker_accounts')
+        .update({ disconnected_at: now, status: 'replaced' })
+        .eq('license_id', license.id).eq('login', login).ilike('server', result.server).is('disconnected_at', null)
+      const { error: rowErr } = await novaHost.from('license_broker_accounts').upsert({
+        license_id: license.id,
+        provider,
+        bridge_account_id: accountId,
+        platform: result.platform === 'MT4' ? 'MT4' : 'MT5',
+        login,
+        server: result.server,
+        is_primary: true,
+        symbol_suffix: suffix,
+        status: linkState,
+        disconnected_at: null,
+      }, { onConflict: 'provider,bridge_account_id' })
+      if (rowErr) console.error(`[metacopier-connect] primary row sync failed for licence ${license.id}: ${rowErr.message}`)
+    }
+
     const connected = linkState === 'connected'
     return json({
       success: true,
       code: connected ? 'CONNECTED' : 'CONNECTING',
       status: linkState,
-      account_id: metacopierAccountId,
-      platform: wantPlatform,
+      account_id: accountId,
+      platform: result.platform,
       reused,
       message: connected
         ? 'Trading account connected.'

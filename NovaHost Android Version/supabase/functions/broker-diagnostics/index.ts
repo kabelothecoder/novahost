@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * Everything the broker will tell us about why an account is or is not able to
@@ -21,7 +20,7 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * trade 0.05 lots of Gold" looking identical from every screen we own.
  *
  * The information is all available; it is just on endpoints the executor has no
- * reason to call on the hot path:
+ * reason to call on the hot path. For a MetaCopier account those are:
  *
  *  - `/accounts/{id}` and `/information` -- is it connected, is it read-only,
  *    what is the free margin.
@@ -29,6 +28,10 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  *    instrument is tradeable at all right now.
  *  - `/logs` -- the broker's own account activity, which is where a rejection
  *    reason usually appears in words.
+ *
+ * The payloads are the provider's own, untranslated -- this is a support tool,
+ * and the raw answer is the point. Which provider's shape you get depends on
+ * the licence's `bridge_provider`.
  *
  * Read-only. It places nothing and changes nothing, so it is always safe to
  * call while diagnosing a live account.
@@ -45,11 +48,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -78,42 +76,23 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? {}) as Record<string, unknown>
-    const accountId = metadata.metacopier_account_id as string | undefined
-    if (!accountId) {
+    const link = resolveLink(metadata)
+    if (!link) {
       return json({ success: false, code: 'NO_ACCOUNT_LINKED', error: 'No trading account is connected.' }, 409)
     }
+    const accountId = link.accountId
 
-    const headers = { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' }
-
-    /** Fetch that reports its own failure instead of throwing the batch away. */
-    const get = async (path: string): Promise<unknown> => {
-      try {
-        const res = await fetch(`${METACOPIER_BASE}${path}`, { headers })
-        const text = await res.text()
-        if (!res.ok) return { _error: res.status, _body: text.slice(0, 500) }
-        return text ? JSON.parse(text) : null
-      } catch (e) {
-        return { _error: 'threw', _body: (e as Error).message }
-      }
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
     }
 
-    const acct = encodeURIComponent(accountId)
-
     // Asked together: each answers a different candidate cause, and a rejection
-    // is usually only explicable by looking at two of them side by side.
-    const [account, information, positions, logs, symbolSpec, quote] = await Promise.all([
-      get(`/rest/api/v1/accounts/${acct}`),
-      get(`/rest/api/v1/accounts/${acct}/information`),
-      get(`/rest/api/v1/accounts/${acct}/positions`),
-      get(`/rest/api/v1/accounts/${acct}/logs`),
-      symbol ? get(`/rest/api/v1/accounts/${acct}/symbols/${encodeURIComponent(symbol)}`) : Promise.resolve(null),
-      // The quote does double duty: it prices the margin calculation, and its
-      // absence or staleness is how a closed market announces itself. Those two
-      // causes of a bare [BROKER_REJECTION] call for opposite advice -- resize
-      // the trade, or wait for the session -- so guessing between them is worse
-      // than not answering.
-      symbol ? get(`/rest/api/v1/accounts/${acct}/quote/${encodeURIComponent(symbol)}`) : Promise.resolve(null),
-    ])
+    // is usually only explicable by looking at two of them side by side. The
+    // quote does double duty: it prices the margin calculation, and its absence
+    // or staleness is how a closed market announces itself.
+    const { account, information, positions, logs, symbol_spec: symbolSpec, quote } =
+      await bridge.diagnostics(symbol)
 
     return json({
       success: true,

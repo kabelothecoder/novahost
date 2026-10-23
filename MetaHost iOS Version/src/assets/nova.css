@@ -1,0 +1,233 @@
+/* =================================================================
+   NovaHost — NOVA LIGHT + APPLE GLASS
+   Ported from the Android / Claude Design onboarding system, adapted
+   to iOS materials: SF Pro type, translucent sheets, iOS easing.
+
+   Scoped under `.nova` so the obsidian glass.css system that the
+   other 11 views still use is left completely untouched.
+   ================================================================= */
+
+.nova {
+  /* -- Surfaces --------------------------------------------------- */
+  --nv-canvas:          #F4F7F9;   /* app background            */
+  --nv-art-top:         #F1F5FA;   /* top of every art gradient */
+  /* Deliberately NOT #FFFFFF. The sheet sits over the bottom of the art,
+     and blurring white over white produces no visible material — the
+     glass only reads if there is colour behind it to refract. */
+  --nv-art-bottom:      #EEF2FB;
+  --nv-surface:         #FFFFFF;   /* opaque cards              */
+  --nv-surface-field:   #FBFCFD;   /* input fill at rest        */
+  --nv-placeholder:     #F1F5FA;   /* wireframe blocks in art   */
+  --nv-skeleton:        #E4E9EF;
+  --nv-track:           #EBEEF2;   /* progress rail track       */
+  --nv-disabled-fill:   #EDF0F4;
+
+  /* -- Apple glass materials -------------------------------------- */
+  /* Thick — the step sheet. Body text still clears 4.5:1 because the
+     art behind it is a pale tint, never a photo.                   */
+  --nv-glass-thick:      rgba(255, 255, 255, 0.62);
+  --nv-glass-thick-blur: blur(36px) saturate(200%);
+  /* Regular — floating cards over art (signal card, notification). */
+  --nv-glass:            rgba(255, 255, 255, 0.60);
+  --nv-glass-blur:       blur(26px) saturate(200%);
+  /* Thin — pills and chips.                                        */
+  --nv-glass-thin:       rgba(255, 255, 255, 0.54);
+  --nv-glass-thin-blur:  blur(16px) saturate(200%);
+
+  /* The three edges that actually sell a glass material:
+     a bright specular lip on top, a faint dark seat on the bottom,
+     and a rim light around the whole shape.                        */
+  --nv-glass-hairline:   rgba(255, 255, 255, 0.75);
+  --nv-glass-seat:       rgba(20, 22, 26, 0.05);
+  --nv-glass-rim:        rgba(255, 255, 255, 0.45);
+  /* Colour bleeding out from under the material.                   */
+  --nv-glass-bleed:      0 -12px 40px rgba(92, 156, 230, 0.10);
+
+  /* -- Ink -------------------------------------------------------- */
+  --nv-ink:             #1A1D20;   /* headings, values          */
+  --nv-ink-2:           #5A6472;   /* body                      */
+  --nv-ink-3:           #8A94A6;   /* captions, placeholders    */
+  --nv-ink-disabled:    #A2ABB8;
+  --nv-on-accent:       #FFFFFF;
+
+  /* -- Borders ---------------------------------------------------- */
+  --nv-border:          #E2E8F0;
+  --nv-border-soft:     #E6E9ED;
+  --nv-border-input:    #E1E6EC;
+  --nv-border-strong:   #CBD5E1;
+  --nv-dot-border:      #D3DAE3;
+
+  /* -- Accent ----------------------------------------------------- */
+  --nv-accent:          #5C9CE6;
+  --nv-accent-violet:   #A288E3;
+  --nv-accent-grad:     linear-gradient(135deg, #A288E3, #5C9CE6);
+  --nv-accent-dim:      rgba(92, 156, 230, 0.12);
+  --nv-accent-selected: rgba(92, 156, 230, 0.08);
+
+  /* -- Status ----------------------------------------------------- */
+  --nv-success:         #2FA36B;
+  --nv-success-text:    #238055;
+  --nv-success-tint:    rgba(47, 163, 107, 0.10);
+  --nv-danger:          #D6455D;
+  --nv-danger-text:     #C13A52;
+  --nv-danger-tint:     rgba(214, 69, 93, 0.05);
+
+  /* -- Art incidentals -------------------------------------------- */
+  --nv-candle-idle:     #C9D3DE;
+  --nv-flow-line:       #B9C6D6;
+  --nv-phone-sleep:     #0B0D10;
+
+  /* -- Elevation -------------------------------------------------- */
+  --nv-shadow-card:     0 8px 18px rgba(20, 22, 26, 0.10);
+  --nv-shadow-raised:   0 16px 34px rgba(20, 22, 26, 0.14);
+  --nv-shadow-float:    0 24px 52px rgba(20, 22, 26, 0.16);
+  --nv-shadow-sheet:    0 -10px 30px rgba(20, 22, 26, 0.06);
+  --nv-shadow-cta:      0 10px 24px rgba(92, 156, 230, 0.28);
+
+  /* -- Type — SF Pro system stack --------------------------------- */
+  --nv-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+             "Segoe UI", system-ui, sans-serif;
+  --nv-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* -- Motion — iOS curves, not M3 -------------------------------- */
+  /* The sheet-presentation curve UIKit uses; replaces the design's
+     Material emphasised .2,0,0,1 throughout.                       */
+  --nv-ease:            cubic-bezier(0.32, 0.72, 0, 1);
+  --nv-ease-out:        cubic-bezier(0.22, 1, 0.36, 1);
+  --nv-spring:          cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* -- Safe areas — replacing the design's hardcoded 44px / 28px --- */
+  --nv-safe-top:        env(safe-area-inset-top, 0px);
+  --nv-safe-bottom:     env(safe-area-inset-bottom, 0px);
+
+  font-family: var(--nv-font);
+  color: var(--nv-ink);
+  /* glass.css sets body { letter-spacing: -0.02em } for the obsidian
+     system; SF Pro is already optically tracked, so reset it here and let
+     individual classes opt back in. */
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* =================================================================
+   Shared type scale
+   ================================================================= */
+.nv-step-label {
+  font-family: var(--nv-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nv-ink-3);
+}
+
+/* SF Pro Display needs less negative tracking than the design's
+   Space Grotesk did — it is already tight at this size. */
+.nv-title {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.16;
+  letter-spacing: -0.5px;
+  color: var(--nv-ink);
+}
+
+.nv-body {
+  font-size: 15px;
+  line-height: 23px;
+  color: var(--nv-ink-2);
+  text-wrap: pretty;
+}
+
+.nv-mono {
+  font-family: var(--nv-mono);
+  letter-spacing: 0.13em;
+}
+
+/* =================================================================
+   Glass materials
+   ================================================================= */
+.nv-glass {
+  background: var(--nv-glass);
+  -webkit-backdrop-filter: var(--nv-glass-blur);
+  backdrop-filter: var(--nv-glass-blur);
+  border: 0.5px solid var(--nv-glass-rim);
+  box-shadow:
+    inset 0  1px 0 var(--nv-glass-hairline),
+    inset 0 -1px 0 var(--nv-glass-seat),
+    var(--nv-shadow-raised);
+}
+
+.nv-glass-thin {
+  background: var(--nv-glass-thin);
+  -webkit-backdrop-filter: var(--nv-glass-thin-blur);
+  backdrop-filter: var(--nv-glass-thin-blur);
+  border: 0.5px solid var(--nv-glass-rim);
+  box-shadow:
+    inset 0  1px 0 var(--nv-glass-hairline),
+    inset 0 -1px 0 var(--nv-glass-seat),
+    var(--nv-shadow-card);
+}
+
+/* Any engine without backdrop-filter falls back to the design's
+   opaque white, so nothing ever renders unreadable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .nv-glass,
+  .nv-glass-thin {
+    background: var(--nv-surface);
+  }
+}
+
+/* =================================================================
+   Motion — the design's nh* keyframes, driven by iOS curves
+   ================================================================= */
+/* Ends at --nv-art-scale rather than `none`, so short viewports can shrink
+   the artwork without the animation stomping the transform on completion. */
+@keyframes nhArt {
+  from { opacity: 0; transform: scale(calc(var(--nv-art-scale, 1) * 0.94)) }
+  to   { opacity: 1; transform: scale(var(--nv-art-scale, 1)) }
+}
+@keyframes nhSheet   { from { opacity: 0; transform: translateY(26px) } to { opacity: 1; transform: none } }
+@keyframes nhUp      { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+@keyframes nhGlow    { 0%, 100% { transform: scale(1); opacity: .45 } 50% { transform: scale(1.14); opacity: .8 } }
+@keyframes nhEyes    { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+@keyframes nhCandle  { from { transform: scaleY(.15); opacity: 0 } to { transform: scaleY(1); opacity: 1 } }
+@keyframes nhFlow    { from { stroke-dashoffset: 30 } to { stroke-dashoffset: 0 } }
+@keyframes nhDraw    { from { stroke-dashoffset: 30 } to { stroke-dashoffset: 0 } }
+@keyframes nhPop     { from { opacity: 0; transform: scale(.55) } to { opacity: 1; transform: scale(1) } }
+@keyframes nhShake   { 0%, 100% { transform: translateX(0) } 22% { transform: translateX(-4px) } 46% { transform: translateX(4px) } 72% { transform: translateX(-2px) } }
+@keyframes nhFloat   { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-9px) } }
+@keyframes nhDim     { 0%, 12% { opacity: 0 } 30%, 86% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes nhTick    { 0%, 100% { transform: scaleY(.55) } 50% { transform: scaleY(1) } }
+@keyframes nhSpin    { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes nhSweepY  { 0% { transform: translateY(-78px); opacity: 0 } 14% { opacity: 1 } 86% { opacity: 1 } 100% { transform: translateY(294px); opacity: 0 } }
+@keyframes nhBracket { 0%, 100% { opacity: .35 } 50% { opacity: 1 } }
+/* Specular sweep travelling across a glass face — the highlight that tells
+   the eye the surface is polished rather than merely translucent. Driven by
+   background-position so it is clipped by the element's own border-radius
+   and needs no overflow:hidden, which repaints badly under backdrop-filter
+   in WebKit. */
+@keyframes nhSheen   { from { background-position: 190% 0 } to { background-position: -90% 0 } }
+/* Two counter-phased drifts for the colour pools living under a material.
+   translate3d keeps them on the compositor, so the blur above them is not
+   re-rasterised on every frame. */
+@keyframes nhDriftA  { 0%, 100% { transform: translate3d(0, 0, 0) scale(1) } 50% { transform: translate3d(4%, -5%, 0) scale(1.13) } }
+@keyframes nhDriftB  { 0%, 100% { transform: translate3d(0, 0, 0) scale(1.08) } 50% { transform: translate3d(-5%, 4%, 0) scale(1) } }
+
+/* Copy stagger — the design's 60 / 110 / 170 / 230ms cascade. */
+.nv-stagger > * { animation: nhUp 460ms var(--nv-ease) both; }
+.nv-stagger > *:nth-child(1) { animation-delay:  60ms; }
+.nv-stagger > *:nth-child(2) { animation-delay: 110ms; }
+.nv-stagger > *:nth-child(3) { animation-delay: 170ms; }
+.nv-stagger > *:nth-child(4) { animation-delay: 230ms; }
+.nv-stagger > *:nth-child(5) { animation-delay: 290ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nova *,
+  .nova *::before,
+  .nova *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

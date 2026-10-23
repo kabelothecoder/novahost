@@ -128,6 +128,24 @@ data class ChartVerdict(
      */
     @SerialName("symbol_on_chart") val symbolOnChart: String? = null,
     @SerialName("timeframe_on_chart") val timeframeOnChart: String? = null,
+    /**
+     * Whether the chart is still describing a live market.
+     *
+     * `analyze-chart` decides this, not the handset: it reads the terminal's own
+     * "Market closed" banner and the time axis under the last candle, and it is
+     * the only party here with a trustworthy clock.
+     *
+     * Nothing in this pipeline used to ask. A three-day-old gold screenshot
+     * produced a confident SELL at 4348.50, scored MODERATE, and armed the
+     * execute control -- price had run to 4403 within an hour of that chart's
+     * final candle. The reading was an accurate account of the image. Nobody
+     * had checked whether the image was an accurate account of the market.
+     */
+    val stale: Boolean = false,
+    @SerialName("stale_reason") val staleReason: String? = null,
+    /** Null when the time axis was cropped or illegible. Never zero for that. */
+    @SerialName("chart_age_minutes") val chartAgeMinutes: Int? = null,
+    @SerialName("market_closed") val marketClosed: Boolean = false,
     /** Server-side error envelope. Present instead of a reading, never alongside one. */
     val error: String? = null,
     val code: String? = null
@@ -575,13 +593,17 @@ object ScanSource {
             pattern = pattern,
             trendTimeframe = verdict.trendTimeframe ?: "higher-timeframe",
             trendBias = trendBias,
+            chartTimeframe = verdict.timeframeOnChart,
             keyLevel = verdict.keyLevel ?: entry,
             keyLevelTouches = verdict.keyLevelTouches ?: 0,
             timeframes = timeframes,
             events = events,
             narrative = narrative,
             intendedEntryType = verdict.entryType?.let { EntryType.from(it) },
-            entryNote = verdict.entryNote.orEmpty()
+            entryNote = verdict.entryNote.orEmpty(),
+            stale = verdict.stale,
+            staleReason = verdict.staleReason,
+            chartAgeMinutes = verdict.chartAgeMinutes
         )
     }
 
@@ -647,11 +669,11 @@ object ScanSource {
      * does or when the chart carries none.
      *
      * Worth checking because the failure is quiet and reads as a market
-     * condition rather than a mistake. An M5 chart scanned in Day mode produces
-     * a three-pip stop measured against Day's 10-22 pip volatility band, so the
-     * volatility check fails with "too quiet" -- a true sentence about the wrong
-     * thing. The market is not quiet; the mode does not match the chart. Nothing
-     * else in the pipeline can tell those apart.
+     * condition rather than a mistake. An M5 chart scanned as a Day trade gets a
+     * pending expiry and an event window sized for four hours hung off a setup
+     * that resolves in twenty minutes, and a stop measured against M5 candles
+     * judged as though the trade had all afternoon. Nothing else in the pipeline
+     * can tell that apart from an ordinary quiet market.
      */
     fun timeframeMismatch(verdict: ChartVerdict, mode: ScanMode): String? {
         val label = verdict.timeframeOnChart?.trim()?.takeIf { it.isNotBlank() } ?: return null

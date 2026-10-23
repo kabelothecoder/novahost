@@ -64,6 +64,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Wrong codes tolerated on one ticket before it is dead. */
 const MAX_CODE_ATTEMPTS = 5;
 
+/** How long a verified ticket lives while it waits for an admin and a payment. */
+const APPROVAL_WINDOW_HOURS = 72;
+
 /**
  * SHA-256 of a move code, to compare against the stored hash.
  *
@@ -228,6 +231,27 @@ serve(async (req: Request) => {
     const requested = String(body.product ?? "APP").trim().toUpperCase();
     // The six digits from request-device-move's email. Only a move needs one.
     const moveCode = String(body.move_code ?? "").trim();
+    // The mentor-issued key the iOS onboarding gates entry on. Required for an
+    // ios checkout (see the enforcement block below), optional for android/web
+    // to keep their existing flow working. Upper-cased to match `licenses`.
+    const licenseKey = String(body.license_key ?? body.licenseKey ?? "").trim().toUpperCase();
+
+    // Which client is paying, so payment-redirect knows what to send the
+    // browser back to. Android has a `metahost://` scheme to deep link into;
+    // the iOS PWA has nothing of the kind and needs a real page instead.
+    //
+    // Defaults to android because that is what every build predating this
+    // parameter sends, and their deep link must keep working. Anything
+    // unrecognised falls back to "web", which is the harmless branch -- a page
+    // rather than a scheme handoff that would dead-end in the browser.
+    //
+    // Constrained to a known token rather than interpolated: this value is
+    // pasted into return_url and cancel_url, which are then signed, and a raw
+    // string there is an attacker-shaped hole in the Payfast payload.
+    const rawPlatform = String(body.platform ?? "android").trim().toLowerCase();
+    const platform = rawPlatform === "android"
+      ? "android"
+      : (rawPlatform === "ios" ? "ios" : "web");
 
     if (!email || !androidId) {
       return json({ error: "Missing email or android_id" }, 400);
@@ -248,6 +272,46 @@ serve(async (req: Request) => {
     );
 
     const cleanEmail = email.toLowerCase();
+
+    // ── Licence key: required for ios, validated for anyone who sends one ────
+    //
+    // The iOS onboarding will not show a payment screen until a mentor-issued
+    // key has cleared `validate-license`, so a checkout request from it must
+    // carry that key and it must still be good. Enforced here as well as on the
+    // device because this endpoint is public and the only copy of the rule that
+    // matters is the one running while the money is about to move.
+    //
+    // Android and web are unchanged: they may omit `license_key` entirely. If
+    // they do send one it is still checked and recorded rather than trusted.
+    let validatedLicenseKey: string | null = null;
+    if (licenseKey) {
+      const { data: lic, error: licErr } = await novaHost
+        .from("licenses")
+        .select("status, expires_at")
+        .eq("license_key", licenseKey)
+        .maybeSingle();
+
+      if (licErr) {
+        console.error("[payfast] licence lookup failed:", licErr);
+        return json({ error: "Could not verify your licence key. Try again in a moment." }, 502);
+      }
+
+      const licenceExpired = lic?.expires_at != null && new Date(lic.expires_at) < new Date();
+      if (!lic || lic.status !== "active" || licenceExpired) {
+        return json(
+          { error: "That licence key is not active. Check it and try again.", code: "LICENSE_INVALID" },
+          400,
+        );
+      }
+      validatedLicenseKey = licenseKey;
+    }
+
+    if (platform === "ios" && !validatedLicenseKey) {
+      return json(
+        { error: "A valid licence key is required before checkout.", code: "LICENSE_REQUIRED" },
+        400,
+      );
+    }
 
     const { data: sub, error } = await novaHost
       .from("subscriptions")
@@ -299,17 +363,9 @@ serve(async (req: Request) => {
       }
 
       // Proof of mailbox control. Without it, R150 evicts a stranger.
-      if (!moveCode) {
-        return json({
-          route: "MOVE_CODE_REQUIRED",
-          move: eligibility,
-          message: "We'll email a 6-digit code to confirm this licence is yours.",
-        });
-      }
-
       const { data: ticket, error: ticketErr } = await novaHost
         .from("device_move_tickets")
-        .select("id, code_hash, attempts, expires_at")
+        .select("id, code_hash, attempts, verified_at, approval_status, decision_note")
         .eq("email", cleanEmail)
         .eq("target_device_id", androidId)
         .is("consumed_at", null)
@@ -324,37 +380,88 @@ serve(async (req: Request) => {
         return json({
           route: "MOVE_CODE_REQUIRED",
           move: eligibility,
-          message: "That code has expired. Request a new one.",
+          message: moveCode
+            ? "That code has expired. Request a new one."
+            : "We'll email a 6-digit code to confirm this licence is yours.",
         });
       }
 
-      if (ticket.attempts >= MAX_CODE_ATTEMPTS) {
+      // The code is checked once. A verified ticket is then waiting on an
+      // admin, and the app polls this same endpoint for the answer -- making the
+      // user retype a code they already used to ask "is it approved yet?" would
+      // be absurd, and the ticket is bound to this handset and this mailbox.
+      if (!ticket.verified_at) {
+        if (!moveCode) {
+          return json({
+            route: "MOVE_CODE_REQUIRED",
+            move: eligibility,
+            message: "Enter the 6-digit code we emailed you.",
+          });
+        }
+
+        if (ticket.attempts >= MAX_CODE_ATTEMPTS) {
+          return json({
+            route: "MOVE_CODE_REQUIRED",
+            move: eligibility,
+            message: "Too many wrong codes. Request a new one.",
+          });
+        }
+
+        if (await sha256Hex(moveCode) !== ticket.code_hash) {
+          await novaHost
+            .from("device_move_tickets")
+            .update({ attempts: ticket.attempts + 1 })
+            .eq("id", ticket.id);
+
+          return json({
+            route: "MOVE_CODE_INVALID",
+            move: eligibility,
+            message: `That code is not right. ${MAX_CODE_ATTEMPTS - ticket.attempts - 1} tries left.`,
+          });
+        }
+
+        // Verified. The ticket's life stretches from minutes to days: it now has
+        // to survive an admin's decision and a PayFast payment, not just an
+        // email round trip. The webhook consumes it when the money lands, so
+        // abandoning the Payfast page and coming back does not cost a new code.
+        await novaHost
+          .from("device_move_tickets")
+          .update({
+            verified_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + APPROVAL_WINDOW_HOURS * 60 * 60 * 1000).toISOString(),
+          })
+          .eq("id", ticket.id);
+      }
+
+      // ---- Admin approval ----------------------------------------------------
+      // Every move is reviewed. Nothing below this line is reachable until a
+      // person has approved this ticket in the admin console, and the webhook
+      // checks the same flag, so skipping this screen buys nothing.
+      if (ticket.approval_status === "pending") {
+        return json({
+          route: "MOVE_PENDING_APPROVAL",
+          move: eligibility,
+          message: "Your move request has been sent for review. You will get a reply shortly.",
+        });
+      }
+
+      if (ticket.approval_status === "rejected") {
+        return json({
+          route: "MOVE_REJECTED",
+          move: eligibility,
+          message: ticket.decision_note
+            ? `Your move request was declined: ${ticket.decision_note}`
+            : "Your move request was declined. Contact support if you think this is a mistake.",
+        });
+      }
+
+      if (ticket.approval_status !== "approved") {
         return json({
           route: "MOVE_CODE_REQUIRED",
           move: eligibility,
-          message: "Too many wrong codes. Request a new one.",
+          message: "That request is no longer valid. Start the move again.",
         });
       }
-
-      if (await sha256Hex(moveCode) !== ticket.code_hash) {
-        await novaHost
-          .from("device_move_tickets")
-          .update({ attempts: ticket.attempts + 1 })
-          .eq("id", ticket.id);
-
-        return json({
-          route: "MOVE_CODE_INVALID",
-          move: eligibility,
-          message: `That code is not right. ${MAX_CODE_ATTEMPTS - ticket.attempts - 1} tries left.`,
-        });
-      }
-
-      // Verified, not consumed. The webhook consumes it when the money lands,
-      // so abandoning the Payfast page and coming back does not cost a new code.
-      await novaHost
-        .from("device_move_tickets")
-        .update({ verified_at: new Date().toISOString() })
-        .eq("id", ticket.id);
 
       product = "REACTIVATE";
       route = "ACTIVE_NEW_DEVICE";
@@ -369,8 +476,12 @@ serve(async (req: Request) => {
     const payload: Record<string, string> = {
       merchant_id: MERCHANT_ID,
       merchant_key: MERCHANT_KEY,
-      return_url: `${novaHostUrl}/functions/v1/payment-redirect?status=success`,
-      cancel_url: `${novaHostUrl}/functions/v1/payment-redirect?status=cancel`,
+      // `platform` rides along so the redirect can tell an android deep link
+      // from a PWA that needs a page. It is inside the signed value, which is
+      // fine -- payfastEncode escapes the whole URL identically for the hash
+      // and for the outgoing query, exactly as it already did for `status`.
+      return_url: `${novaHostUrl}/functions/v1/payment-redirect?status=success&platform=${platform}`,
+      cancel_url: `${novaHostUrl}/functions/v1/payment-redirect?status=cancel&platform=${platform}`,
       notify_url: `${novaHostUrl}/functions/v1/payfast-webhook`,
       email_address: email,
       // amount BEFORE item_name. This object's declaration order IS the
@@ -382,6 +493,15 @@ serve(async (req: Request) => {
       custom_str2: androidId,
       custom_str3: cleanEmail,
     };
+
+    // custom_str4 carries the licence key back to payfast-webhook, which stamps
+    // it onto the subscription row as the audit link. Added ONLY when present:
+    // an empty pair here would be dropped from the signature string (blanks are
+    // skipped) but kept in the outgoing query, and a checkout URL whose query
+    // and signature disagree on one character is exactly the failure the
+    // encoder notes above exist to prevent. Sits right after custom_str3 so the
+    // signed field order stays custom_str1..4 in sequence.
+    if (validatedLicenseKey) payload.custom_str4 = validatedLicenseKey;
 
     // Built with the same encoder the signature was hashed with, rather than
     // through URLSearchParams. The two disagree on exactly the characters that

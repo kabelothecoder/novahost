@@ -27,7 +27,12 @@ object GuardrailStore {
     private const val PREFS = "nova_appearance"
 
     private const val KEY_MIN_RR = "guardrail_min_rr"
-    private const val KEY_MAX_STOP = "guardrail_max_stop_pips"
+    // Renamed with the units. The old `guardrail_max_stop_pips` value is left
+    // unread rather than migrated: it was a pip count, and there is no honest
+    // conversion from one to a candle multiple without knowing which instrument
+    // it was set against. Anyone who customised it starts again from a default
+    // that works on every symbol, which the old one did not.
+    private const val KEY_MAX_STOP = "guardrail_max_stop_atr"
     private const val KEY_MAX_LOSSES = "guardrail_max_losses"
     private const val KEY_EVENT_CLEARANCE = "guardrail_event_minutes"
 
@@ -43,7 +48,7 @@ object GuardrailStore {
     fun load(context: Context): GuardrailConfig = with(prefs(context)) {
         GuardrailConfig(
             minBlendedRR = getFloat(KEY_MIN_RR, GuardrailConfig.Defaults.minBlendedRR.toFloat()).toDouble(),
-            maxStopPips = getFloat(KEY_MAX_STOP, GuardrailConfig.Defaults.maxStopPips.toFloat()).toDouble(),
+            maxStopAtr = getFloat(KEY_MAX_STOP, GuardrailConfig.Defaults.maxStopAtr.toFloat()).toDouble(),
             maxConsecutiveLosses = getInt(KEY_MAX_LOSSES, GuardrailConfig.Defaults.maxConsecutiveLosses),
             minEventClearanceMinutes = getInt(KEY_EVENT_CLEARANCE, GuardrailConfig.Defaults.minEventClearanceMinutes)
         ).sanitised()
@@ -54,7 +59,7 @@ object GuardrailStore {
         val clean = config.sanitised()
         prefs(context).edit().apply {
             putFloat(KEY_MIN_RR, clean.minBlendedRR.toFloat())
-            putFloat(KEY_MAX_STOP, clean.maxStopPips.toFloat())
+            putFloat(KEY_MAX_STOP, clean.maxStopAtr.toFloat())
             putInt(KEY_MAX_LOSSES, clean.maxConsecutiveLosses)
             putInt(KEY_EVENT_CLEARANCE, clean.minEventClearanceMinutes)
         }.apply()

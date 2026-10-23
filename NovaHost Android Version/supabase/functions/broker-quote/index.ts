@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { openBridge, resolveLink, type Quote } from '../_shared/bridge/index.ts'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-
-const METACOPIER_BASE = 'https://api.metacopier.io'
 
 /**
  * The live price and contract spec for one instrument, from the user's own broker.
@@ -27,8 +26,8 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  *    broker quotes, the minimum lot it will accept -- none of that is knowable
  *    from OANDA, and all of it changes the numbers on the plan screen.
  *
- * MetaCopier is already paid for and is connected to the actual account the
- * order will reach, so it answers both questions at once.
+ * The broker bridge is already connected to the actual account the order will
+ * reach, so it answers both questions at once.
  *
  * ## What this replaces on the handset
  *
@@ -44,7 +43,8 @@ const METACOPIER_BASE = 'https://api.metacopier.io'
  * ## What it still does not answer
  *
  * ATR. MetaCopier exposes no candle, bar or OHLC endpoint -- the whole v1
- * surface is accounts, positions, symbols and a single live quote. Volatility
+ * surface is accounts, positions, symbols and a single live quote. (MetaRPC
+ * does have bars; that is a Phase 2b decision, not this function's.) Volatility
  * has to come from somewhere else, and the only source this product has that
  * has actually seen the price history is the chart screenshot itself.
  */
@@ -131,12 +131,6 @@ Deno.serve(async (req: Request) => {
     })
 
   try {
-    const METACOPIER_API_KEY = Deno.env.get('METACOPIER_API_KEY') ?? ''
-    if (!METACOPIER_API_KEY) {
-      console.error('[broker-quote] METACOPIER_API_KEY is not configured')
-      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
-    }
-
     const novaHost = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -171,14 +165,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (license.metadata ?? null) as Record<string, unknown> | null
-    const accountId = metadata?.metacopier_account_id as string | undefined
+    const link = resolveLink(metadata)
 
-    if (!accountId) {
+    if (!link) {
       return json({
         success: false,
         code: 'NO_ACCOUNT_LINKED',
         error: 'Connect your trading account to price this instrument.',
       }, 409)
+    }
+
+    const bridge = openBridge(link, novaHost)
+    if (!bridge) {
+      return json({ success: false, code: 'SERVER_MISCONFIGURED', error: 'Server misconfiguration.' }, 500)
     }
 
     const { data: cfg } = await novaHost
@@ -191,33 +190,32 @@ Deno.serve(async (req: Request) => {
     const candidates = symbolCandidates(cleanPair, metadata, (cfg?.broker_symbol ?? null) as string | null)
 
     // ---- Ask the broker -----------------------------------------------------
-    // Walked in the same order the executor would. A 404 means this book does
-    // not carry that name and the next one is worth trying; anything else is a
-    // property of the account rather than the name, so the walk stops.
-    let quote: Record<string, unknown> | null = null
+    // Walked in the same order the executor would. UNKNOWN_SYMBOL means this
+    // book does not carry that name and the next one is worth trying; anything
+    // else is a property of the account rather than the name, so the walk stops.
+    let quote: Quote | null = null
     let usedName: string | null = null
     let lastStatus = 0
     let lastDetail = ''
+    let lastCode = ''
 
     for (const candidate of candidates) {
-      const res = await fetch(
-        `${METACOPIER_BASE}/rest/api/v1/accounts/${encodeURIComponent(accountId)}/quote/${encodeURIComponent(candidate)}`,
-        { headers: { 'X-API-KEY': METACOPIER_API_KEY, 'Accept': 'application/json' } }
-      )
+      const read = await bridge.quote(candidate)
 
-      if (res.ok) {
-        quote = await res.json().catch(() => null)
+      if (read.ok) {
+        quote = read.data
         usedName = candidate
         break
       }
 
-      lastStatus = res.status
-      lastDetail = await res.text()
-      if (res.status !== 404 && !/SYMBOL|NOT_FOUND/i.test(lastDetail)) break
+      lastStatus = read.status
+      lastDetail = read.detail
+      lastCode = read.code
+      if (read.code !== 'UNKNOWN_SYMBOL') break
     }
 
     if (!quote || !usedName) {
-      const disconnected = /NOT_CONNECTED|OFFLINE|DISCONNECT|ACCOUNT_WAS_DELETED/i.test(lastDetail)
+      const disconnected = lastCode === 'ACCOUNT_DISCONNECTED'
       console.error(`[broker-quote] ${cleanPair} failed ${lastStatus}: ${lastDetail}`)
       return json({
         success: false,
@@ -229,12 +227,13 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    const bid = Number(quote.bid)
-    const ask = Number(quote.ask)
-    const info = (quote.symbolInfo ?? {}) as Record<string, unknown>
+    // null -> NaN, so a missing side reads as "not quoted", never as a price of 0.
+    const bid = quote.bid ?? NaN
+    const ask = quote.ask ?? NaN
+    const info = quote.spec
 
-    const digits = Number(info.digits)
-    const points = Number(info.points)
+    const digits = info?.digits ?? NaN
+    const points = info?.point ?? NaN
     const pipSize = pipSizeFrom(digits, points)
 
     // Mid rather than bid. The scanner prices a plan, not a fill, and quoting
@@ -258,14 +257,14 @@ Deno.serve(async (req: Request) => {
       digits: Number.isFinite(digits) ? digits : null,
       point: Number.isFinite(points) ? points : null,
       pip_size: pipSize > 0 ? pipSize : null,
-      base_currency: info.baseCurrency ?? null,
-      quote_currency: info.quoteCurrency ?? null,
-      contract_size: Number(info.lotSize) || null,
-      min_volume: Number(info.minimalVolume) || null,
-      volume_step: Number(info.stepVolume) || null,
-      max_volume: Number(info.maximalVolume) || null,
-      tradeable: info.disabled !== true,
-      timestamp: quote.timestamp ?? null,
+      base_currency: info?.baseCurrency ?? null,
+      quote_currency: info?.quoteCurrency ?? null,
+      contract_size: info?.contractSize || null,
+      min_volume: info?.minVolume || null,
+      volume_step: info?.stepVolume || null,
+      max_volume: info?.maxVolume || null,
+      tradeable: info?.disabled !== true,
+      timestamp: quote.timestamp,
     })
 
   } catch (err) {

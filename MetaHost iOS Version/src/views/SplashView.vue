@@ -29,18 +29,24 @@ import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 /**
- * @description SplashView — acts as the entry gate for the app.
- * After 1.5 s it hands off to OnboardingView for new users.
- * The router's Smart Shield guard will intercept and redirect
- * to /activate if the user has already completed onboarding but
- * lacks a valid license, or straight to /home if fully licensed.
+ * @description SplashView — the app's entry point. After 1.5 s it hands off to
+ * the router's Smart Shield guard, which redirects to /unlock (no validated
+ * licence key), /payment (key but unpaid) or /home (fully in), per the locks
+ * in router/index.js.
+ *
+ * It used to push to /onboarding unconditionally and let the guard sort it
+ * out. The guard could not: it passed `onboarding` through without looking at
+ * ONBOARDING_COMPLETED, so every launch re-entered the setup wizard. That is
+ * fixed in the guard — this asks for the right destination as well, so a
+ * returning user never downloads the wizard chunk to be redirected out of it.
  */
 const router = useRouter()
 let timer = null
 
 onMounted(() => {
   timer = setTimeout(() => {
-    router.push('/onboarding')
+    const done = localStorage.getItem('ONBOARDING_COMPLETED') === 'true'
+    router.push(done ? '/home' : '/onboarding')
   }, 1500)
 })
 

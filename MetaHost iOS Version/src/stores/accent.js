@@ -1,17 +1,11 @@
 import { reactive, watch } from 'vue'
 import { secStorage } from '../utils/secStorage.js'
+import { SWATCHES, DEFAULT_ACCENT, swatchByName } from './palette.js'
 
-// 8 accent colors — Crimson is first (default)
-export const SWATCHES = [
-  { name: 'Crimson', hex: '#FF003C', rgb: '255, 0, 60'    },
-  { name: 'Cyan',    hex: '#00E5FF', rgb: '0, 229, 255'   },
-  { name: 'Violet',  hex: '#7C3AED', rgb: '124, 58, 237'  },
-  { name: 'Emerald', hex: '#00FF87', rgb: '0, 255, 135'   },
-  { name: 'Gold',    hex: '#FFB800', rgb: '255, 184, 0'   },
-  { name: 'Ice',     hex: '#A5F3FC', rgb: '165, 243, 252' },
-  { name: 'Plasma',  hex: '#E879F9', rgb: '232, 121, 249' },
-  { name: 'Amber',   hex: '#FB923C', rgb: '251, 146, 60'  },
-]
+// The palette moved to ./palette.js so `theme.js` (command.css) and this
+// store (glass.css) cannot drift apart. Re-exported because nine views
+// and SettingsView import SWATCHES from here — that contract is kept.
+export { SWATCHES }
 
 export const VIDEO_BG_OPTIONS = [
   { id: 'mesh',      name: 'Nebula Mesh',   type: 'canvas' },
@@ -27,12 +21,12 @@ export const VIDEO_BG_OPTIONS = [
 // ── Identity bootstrap from secStorage ─────────────────────────────────────
 // Priority: Robot license accent → user manual pick (which is also stored via secStorage now) → default Amber
 const savedRobotAccent = secStorage.getItem('ACCENT_COLOR')
-const activeAccentName = savedRobotAccent || 'Amber'
-const initialAccent    = SWATCHES.find(s => s.name === activeAccentName) || SWATCHES[0]
+const initialAccent    = swatchByName(savedRobotAccent || DEFAULT_ACCENT)
 
 // Robot identity from license
 const savedRobotName   = secStorage.getItem('ROBOT_NAME')  || 'MetaBot'
 const savedAvatarUrl   = secStorage.getItem('AVATAR_URL')  || ''
+const savedVideoUrl    = secStorage.getItem('VIDEO_URL')   || ''
 
 // Allowed trading symbols from license
 const initialAllowedSymbols = secStorage.getItem('ALLOWED_SYMBOLS', true) || []
@@ -40,12 +34,12 @@ const initialAllowedSymbols = secStorage.getItem('ALLOWED_SYMBOLS', true) || []
 export const accent = reactive({
   current:     initialAccent,
   videoBg:     VIDEO_BG_OPTIONS[0],
-  isListening: false,
-  isSpeaking:  false,
   micVolume:   0,
   // ── Robot identity (synced from license) ──────────────────
   robotName:   savedRobotName,
   avatarUrl:   savedAvatarUrl,
+  // The mentor's loop video (https URL), played over the art on Home.
+  videoUrl:    savedVideoUrl,
   isHighProb:  false,
   allowedSymbols: initialAllowedSymbols,
   // ── Broker Connection (Cloud Bridge) ─────────────
@@ -68,9 +62,18 @@ watch(
     // Persist choice
     secStorage.setItem('ACCENT_COLOR', swatch.name)
 
-    // Sync Meta Theme Color for iOS Status Bar & PWA
-    const metaTheme = document.querySelector('meta[name="theme-color"]')
-    if (metaTheme) metaTheme.setAttribute('content', swatch.hex)
+    /* `theme-color` is NOT set here any more — App.vue owns it.
+     *
+     * It used to be pointed at the accent hex, and on an installed handset
+     * that colour is what iOS paints the chrome around the web view with.
+     * A Crimson or Magenta robot therefore asked the OS for a bright band
+     * across the bottom of every screen, under an app whose canvas is
+     * near-black. It also raced theme.js, which was setting the same tag to
+     * the canvas tone, so which colour won depended on whether the accent or
+     * the scheme changed last.
+     *
+     * One writer, and it follows the ground the page actually paints:
+     * see the `--app-ground` watchEffect in App.vue. */
   },
   { immediate: true }
 )
@@ -84,6 +87,11 @@ watch(
 watch(
   () => accent.avatarUrl,
   (url) => { secStorage.setItem('AVATAR_URL', url) }
+)
+
+watch(
+  () => accent.videoUrl,
+  (url) => { secStorage.setItem('VIDEO_URL', url) }
 )
 
 watch(

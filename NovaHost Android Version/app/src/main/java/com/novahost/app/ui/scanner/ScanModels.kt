@@ -26,18 +26,18 @@ import kotlin.math.roundToInt
 // -- Inputs -----------------------------------------------------------------
 
 /**
- * The horizon the user picked, and the volatility band that follows from it.
+ * The horizon the user picked.
  *
- * The band is part of the mode rather than a global constant because "ATR 14
- * pips" is a calm hour on a day trade and a dead one on a swing. Screen 02
- * scores volatility against this band, so the same chart legitimately scores
- * differently under Scalp and under Swing.
+ * This used to carry an ATR band in pips as well — `4.0..12.0` on a scalp and so
+ * on — and [ConfluenceEngine.volatilityCheck] scored against it. Those numbers
+ * described an FX major and failed every metal, index and crypto pair outright;
+ * the check is a stop-to-ATR ratio now, which needs no per-mode constant because
+ * a ratio carries no units. The fields are gone rather than left unread, so
+ * nothing can quietly start scoring against them again.
  */
 enum class ScanMode(
     val label: String,
     val timeframes: String,
-    val atrFloorPips: Double,
-    val atrCeilingPips: Double,
     /** How long the trade is expected to stay open. Feeds the event-window check. */
     val windowMinutes: Int,
     /**
@@ -52,9 +52,9 @@ enum class ScanMode(
     val chartFloorMinutes: Int,
     val chartCeilingMinutes: Int
 ) {
-    SCALP("Scalp", "M5-M15", 4.0, 12.0, 45, chartFloorMinutes = 1, chartCeilingMinutes = 30),
-    DAY("Day", "H1-H4", 10.0, 22.0, 240, chartFloorMinutes = 15, chartCeilingMinutes = 1440),
-    SWING("Swing", "H4-D1", 18.0, 60.0, 1440, chartFloorMinutes = 60, chartCeilingMinutes = 100_000)
+    SCALP("Scalp", "M5-M15", 45, chartFloorMinutes = 1, chartCeilingMinutes = 30),
+    DAY("Day", "H1-H4", 240, chartFloorMinutes = 15, chartCeilingMinutes = 1440),
+    SWING("Swing", "H4-D1", 1440, chartFloorMinutes = 60, chartCeilingMinutes = 100_000)
 }
 
 /**
@@ -342,6 +342,13 @@ data class ScanReading(
     /** The timeframe whose trend the pattern is being checked against. */
     val trendTimeframe: String,
     val trendBias: Bias,
+    /**
+     * The timeframe printed on the chart itself. Null when it was cropped out.
+     *
+     * Carried so [ConfluenceEngine.trendCheck] can tell a real higher-timeframe
+     * confirmation from the chart agreeing with itself -- see that function.
+     */
+    val chartTimeframe: String? = null,
     /** The nearest structural level, and how well tested it is. */
     val keyLevel: Double,
     val keyLevelTouches: Int,
@@ -362,7 +369,11 @@ data class ScanReading(
      */
     val intendedEntryType: EntryType? = null,
     /** The model's one line on why the entry sits where it does. */
-    val entryNote: String = ""
+    val entryNote: String = "",
+    /** The server's staleness verdict. See [ChartVerdict.stale]. */
+    val stale: Boolean = false,
+    val staleReason: String? = null,
+    val chartAgeMinutes: Int? = null
 )
 
 // -- Ladder -----------------------------------------------------------------
@@ -408,6 +419,10 @@ data class TradePlan(
     val stop: Double,
     val stopPips: Double,
     val riskAmount: Double,
+    /** What [riskAmount] is a slice of, in USD. Kept so a rule can say "of your balance". */
+    val balance: Double = 0.0,
+    /** The user's per-trade risk, in percent. [riskAmount] is this much of [balance]. */
+    val riskPercent: Double = 0.0,
     val totalLots: Double,
     val legs: List<TradeLeg>,
     val preset: AllocationPreset,
@@ -513,6 +528,16 @@ data class TradePlan(
     val totalReward: Double get() = legs.sumOf { it.estimatedPl }
 
     /**
+     * The legs that carry volume, and so the only ones sent.
+     *
+     * A small position cannot fill three targets: 0.01 lots is one order, and
+     * the legs it cannot reach sit at zero. Every count and every send loop
+     * reads this rather than [legs], or the screen promises orders that will
+     * never exist.
+     */
+    val fundedLegs: List<TradeLeg> get() = legs.filter { it.lots > 0.0 }
+
+    /**
      * What the stop actually costs, as opposed to what was budgeted.
      *
      * [riskAmount] is the intent (balance x risk%). This is the outcome after
@@ -577,10 +602,11 @@ object TradePlanner {
         if (totalLots <= 0.0) return null
 
         val sign = if (reading.direction == Direction.BUY) 1 else -1
+        val split = splitLots(totalLots, preset.splits)
 
         val legs = LADDER_R.mapIndexed { index, r ->
             val allocation = preset.splits[index]
-            val lots = floorLots(totalLots * allocation)
+            val lots = split[index]
             val targetPips = stopPips * r
             TradeLeg(
                 name = "TP" + (index + 1),
@@ -599,6 +625,8 @@ object TradePlanner {
             stop = reading.stop,
             stopPips = stopPips,
             riskAmount = riskAmount,
+            balance = balance,
+            riskPercent = riskPercent,
             totalLots = totalLots,
             legs = legs,
             preset = preset,
@@ -623,10 +651,38 @@ object TradePlanner {
      * The 0.01 floor is the one case that can still exceed the budget, because
      * it is the smallest position a broker will accept and there is nothing
      * below it to round to. [TradePlan.actualRisk] reports what that really
-     * costs rather than repeating the budget back.
+     * costs rather than repeating the budget back, and the budget guardrail
+     * blocks the plan when it is more than the user said they would lose.
      */
     private fun floorLots(value: Double): Double =
         (floor(value * 100) / 100.0).coerceAtLeast(0.01)
+
+    /**
+     * Shares [total] across the legs in whole 0.01 steps, summing to exactly [total].
+     *
+     * Each slice used to go through [floorLots] on its own, which promotes
+     * anything under 0.01 back up to 0.01 -- so a 0.01 position became three
+     * 0.01 orders. 0.03 lots went to the broker under a header that said 0.01,
+     * and on a R1,008 gold account that was R784 at risk against a 1% budget,
+     * with no rule anywhere comparing the two.
+     *
+     * Largest remainder instead: floor every slice, then hand the leftover
+     * steps to the slices the floor cut deepest, earliest target first on a
+     * tie. A leg that ends on zero carries no volume and is not sent -- see
+     * [TradePlan.fundedLegs].
+     */
+    private fun splitLots(total: Double, splits: List<Double>): List<Double> {
+        val steps = (total * 100).roundToInt()
+        val exact = splits.map { it * steps }
+        val shares = exact.map { floor(it).toInt() }.toMutableList()
+        var spare = steps - shares.sum()
+        for (i in exact.indices.sortedByDescending { exact[it] - shares[it] }) {
+            if (spare <= 0) break
+            shares[i]++
+            spare--
+        }
+        return shares.map { it / 100.0 }
+    }
 }
 
 // -- Confluence -------------------------------------------------------------
@@ -672,6 +728,12 @@ object ConfluenceEngine {
 
     private const val POINTS_PER_CHECK = 20
 
+    /** Stop-to-ATR bounds. See [volatilityCheck] for why these are a ratio.
+     *  Shared with the iOS engine's `STOP_ATR_BAND`, so one chart grades the
+     *  same on both handsets. */
+    internal const val STOP_ATR_FLOOR = 1.0
+    internal const val STOP_ATR_CEILING = 8.0
+
     /** How close to a level still counts as "on" it, as a fraction of the stop distance. */
     private const val KEY_LEVEL_TOLERANCE = 0.85
 
@@ -693,7 +755,7 @@ object ConfluenceEngine {
         val checks = listOf(
             rewardCheck(plan),
             trendCheck(reading),
-            volatilityCheck(instrument, mode),
+            volatilityCheck(instrument, plan),
             keyLevelCheck(instrument, reading, plan),
             eventCheck(reading, mode, calendarAvailable)
         )
@@ -719,7 +781,37 @@ object ConfluenceEngine {
         )
     }
 
+    /**
+     * Does something the setup cannot see agree with it?
+     *
+     * The qualifier is the whole check, and it used to be missing. `analyze-chart`
+     * defines `trend_bias` as the bias of "the highest timeframe legible on this
+     * chart" -- and on a single-timeframe screenshot, which is what people
+     * actually send, the highest legible timeframe IS the chart's own. So a
+     * bearish Change of Character on M15 was scored against an M15 bearish bias
+     * and awarded a full twenty points for agreeing with itself. A live scan
+     * printed it plainly: `Change of Character - M15 bearish`, ticked, +20.
+     * There is no confirmation in that row. One reading of one chart, counted
+     * twice.
+     *
+     * Confirmation has to come from a wider timeframe than the entry's. Where it
+     * does not, this fails and says why -- rather than the alternative, which is
+     * awarding the points and letting the user believe two things agreed.
+     */
     private fun trendCheck(reading: ScanReading): ConfluenceCheck {
+        val chartMinutes = ScanSource.timeframeMinutes(reading.chartTimeframe)
+        val biasMinutes = ScanSource.timeframeMinutes(reading.trendTimeframe)
+
+        if (chartMinutes != null && biasMinutes != null && biasMinutes <= chartMinutes) {
+            return ConfluenceCheck(
+                title = "Pattern aligns with a higher timeframe",
+                detail = reading.trendTimeframe + " is the chart's own timeframe - " +
+                    "nothing wider confirms this setup",
+                passed = false,
+                points = 0
+            )
+        }
+
         val passed = reading.trendBias.agreesWith(reading.direction)
         val trend = reading.trendBias.label.lowercase()
         return ConfluenceCheck(
@@ -742,26 +834,58 @@ object ConfluenceEngine {
      * "too quiet for the band" is a statement about volatility, and this check
      * would be making it without having seen any.
      */
-    private fun volatilityCheck(instrument: Instrument, mode: ScanMode): ConfluenceCheck {
+    /**
+     * Does the stop have room to breathe, without being so wide the target is
+     * unreachable?
+     *
+     * ## Why this is a ratio and not a pip band
+     *
+     * This check used to compare the chart's ATR against [ScanMode]'s pip band --
+     * 4-12 on a scalp, 10-22 on a day trade, 18-60 on a swing. Every one of those
+     * numbers describes an FX major and nothing else. Gold's pip size here is
+     * 0.1, so an ordinary $3.50 candle measures 35 pips and fails the Day band;
+     * on the iOS engine, where gold's pip is 0.01, the same candle measured 350
+     * against the same 10-22 and the check printed `ATR ~350.0p vs the 10-22p
+     * band` with a red cross. It could not have passed. Neither could an index
+     * or a crypto pair.
+     *
+     * The stop-to-ATR ratio asks what the band was reaching for, in units that
+     * cancel. Both figures are pips of the same instrument, so the ratio is the
+     * same number whatever the pip size is -- which removes the whole class of
+     * bug rather than retuning a constant per instrument:
+     *
+     *  - Under [STOP_ATR_FLOOR], the stop sits inside a single candle's ordinary
+     *    range. Normal two-way movement takes it out before the setup has been
+     *    wrong about anything.
+     *  - Over [STOP_ATR_CEILING], a 1R target needs that many candles of one-way
+     *    movement. The R:R on paper is real; reaching it inside the trade's
+     *    horizon is not.
+     */
+    private fun volatilityCheck(instrument: Instrument, plan: TradePlan): ConfluenceCheck {
         val atr = instrument.atrPips
-        val band = trimmed(mode.atrFloorPips) + "-" + trimmed(mode.atrCeilingPips) + "p"
+        val title = "Stop clears the chart's noise"
 
-        if (atr < 0.0) {
+        // A negative ATR is ScanSource.buildInstrument's "nobody measured one"
+        // marker. An unmeasured ATR must read as unverified rather than as a
+        // verdict -- this check would be making a statement about volatility
+        // without having seen any.
+        if (atr <= 0.0 || plan.stopPips <= 0.0) {
             return ConfluenceCheck(
-                title = "Volatility moderate",
+                title = title,
                 detail = "ATR not measured - the chart's candles were not legible enough",
                 passed = false,
                 points = 0
             )
         }
 
-        val passed = atr >= mode.atrFloorPips && atr <= mode.atrCeilingPips
+        val ratio = plan.stopPips / atr
+        val passed = ratio >= STOP_ATR_FLOOR && ratio <= STOP_ATR_CEILING
         return ConfluenceCheck(
-            title = "Volatility moderate",
-            detail = when {
-                passed -> "ATR " + trimmed(atr) + "p inside the " + band + " band"
-                atr < mode.atrFloorPips -> "ATR " + trimmed(atr) + "p - too quiet for the " + band + " band"
-                else -> "ATR " + trimmed(atr) + "p - above the " + band + " band"
+            title = title,
+            detail = "Stop is " + trimmed(ratio) + "x the average candle" + when {
+                passed -> ""
+                ratio < STOP_ATR_FLOOR -> " - inside the noise"
+                else -> " - too wide for the target to be reached"
             },
             passed = passed,
             points = if (passed) POINTS_PER_CHECK else 0
@@ -855,7 +979,24 @@ data class GuardrailOutcome(
     val detail: String,
     val severity: RuleSeverity,
     /** The measured figure, printed on the right of the row. */
-    val reading: String
+    val reading: String,
+    /**
+     * What would actually clear this rule, for the blocked screen.
+     *
+     * That screen used to say "rebalance toward the further targets" whatever
+     * had blocked it -- advice that fixes an R:R shortfall and nothing else.
+     * Told to a stale chart or an account too small for the stop, it sends the
+     * user to tap a button that cannot change the outcome.
+     */
+    val remedy: String? = null,
+    /** True when changing the allocation preset can clear this rule. */
+    val retunable: Boolean = false,
+    /**
+     * True when this failure makes every other figure meaningless -- the chart
+     * is old, or it is a chart of something else. Such a rule gets the blocked
+     * screen's summary to itself.
+     */
+    val voidsPlan: Boolean = false
 )
 
 /**
@@ -867,7 +1008,19 @@ data class GuardrailOutcome(
  */
 data class GuardrailConfig(
     val minBlendedRR: Double = 1.5,
-    val maxStopPips: Double = 50.0,
+    /**
+     * Ceiling on the stop, as a multiple of the chart's own average candle.
+     *
+     * Replaces a `maxStopPips = 50.0` that only ever described an FX major.
+     * Gold's ordinary ten-dollar stop is 100 pips at this app's pip size and
+     * every metal, index and crypto plan the scanner ever produced tripped the
+     * rule -- a warning that fires on everything is a warning users learn to
+     * scroll past, and then it is not there for the real one.
+     *
+     * Shares [ConfluenceEngine.STOP_ATR_CEILING], so the guardrail and the
+     * confluence check cannot drift apart and disagree about the same stop.
+     */
+    val maxStopAtr: Double = ConfluenceEngine.STOP_ATR_CEILING,
     val maxConsecutiveLosses: Int = 3,
     val minEventClearanceMinutes: Int = 30
 ) {
@@ -881,13 +1034,13 @@ data class GuardrailConfig(
      *
      *  - A minimum R:R below 1 makes the reward check pass on a plan that risks
      *    more than it targets, which is not a guardrail.
-     *  - A zero stop limit blocks every trade ever; 1000 pips is past the point
-     *    where the rule expresses anything.
+     *  - A stop limit below one candle-range blocks every trade ever; past
+     *    thirty it is no longer expressing anything.
      *  - A loss streak of zero locks the engine before the first trade.
      */
     fun sanitised(): GuardrailConfig = copy(
         minBlendedRR = minBlendedRR.coerceIn(1.0, 10.0),
-        maxStopPips = maxStopPips.coerceIn(1.0, 1000.0),
+        maxStopAtr = maxStopAtr.coerceIn(1.0, 30.0),
         maxConsecutiveLosses = maxConsecutiveLosses.coerceIn(1, 20),
         minEventClearanceMinutes = minEventClearanceMinutes.coerceIn(0, 240)
     )
@@ -911,9 +1064,24 @@ data class GuardrailReport(
 
 object Guardrails {
 
+    /** The smallest volume a broker accepts. Mirrors [TradePlanner]'s floor. */
+    private const val MIN_LOT = 0.01
+
+    /**
+     * How far the chart's entry may sit from the live quote before it is
+     * judged a chart of a different instrument. A current chart is within a
+     * percent or two of the market, and stale ones are blocked separately; ten
+     * percent is beyond any intraday move on anything this app trades, while
+     * gold against the Nasdaq or US30 against the Nasdaq is off by more than
+     * forty.
+     */
+    private const val MAX_PRICE_GAP = 0.10
+
     /**
      * @param calendarAvailable false when the economic feed could not be read.
      *        The event rule warns rather than passing in that case.
+     * @param balanceIsStandIn true when neither the calculator nor a linked
+     *        broker supplied a balance, so [plan] is sized against a placeholder.
      */
     fun evaluate(
         plan: TradePlan,
@@ -921,10 +1089,156 @@ object Guardrails {
         config: GuardrailConfig,
         /** Null when the broker's trade history could not be read. Not zero. */
         consecutiveLosses: Int?,
-        calendarAvailable: Boolean
+        calendarAvailable: Boolean,
+        balanceIsStandIn: Boolean
     ): GuardrailReport {
         val minRrLabel = "1:" + trimmed(config.minBlendedRR)
 
+        /**
+         * Is the chart still the market?
+         *
+         * First in the list because it invalidates every rule under it. A stop
+         * distance, an R:R and a key level are all statements about a market
+         * that existed when the screenshot was taken, and none of them survives
+         * the screenshot being old.
+         *
+         * A BLOCK, and the only new one here. It has to be: the scan that
+         * prompted it read a gold chart whose last candle was three days back,
+         * whose terminal had "Market closed" printed on it, and returned a
+         * confident SELL that scored MODERATE and armed execute. Price had
+         * already rallied ninety dollars, within an hour of that final candle.
+         * The reading was a fair account of the chart. The chart was not a fair
+         * account of the market, and nothing in the app was looking.
+         */
+        val freshness = when {
+            reading.stale -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = (reading.staleReason ?: "This chart is not current.") +
+                    " Take a fresh screenshot and scan again.",
+                severity = RuleSeverity.BLOCK,
+                reading = "stale",
+                remedy = "Open your terminal, screenshot the same pair as it stands now, and scan that.",
+                voidsPlan = true
+            )
+            // An unchecked clock is not a clock that said "now". Warns rather
+            // than passing, the same rule the calendar and the loss streak
+            // follow above.
+            reading.chartAgeMinutes == null -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = "No readable time axis on this chart - its age could not be checked",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+            else -> GuardrailOutcome(
+                title = "Chart is current",
+                detail = "Last candle " + humanDuration(reading.chartAgeMinutes) + " old",
+                severity = RuleSeverity.PASS,
+                reading = humanDuration(reading.chartAgeMinutes)
+            )
+        }
+
+        /**
+         * Is the chart a picture of the instrument being traded?
+         *
+         * The label check beside the score only warns, and only when the chart
+         * prints a label. On 2026-10-01 a gold chart -- entries around 4180 --
+         * was scanned with NAS100 selected, where the Nasdaq trades near 25,000,
+         * and a NAS100 sell with its stop at 4183.5 reached the executor. A
+         * deleted broker account is what stopped it, not the app. Price is the
+         * one thing on a chart that cannot be mislabelled, so it is checked
+         * against the selected instrument's live quote.
+         */
+        val symbol = plan.instrument.symbol
+        val live = plan.instrument.price.takeIf { it > 0.0 }
+        val scale = if (live == null) {
+            GuardrailOutcome(
+                title = "Chart is " + symbol,
+                detail = "No live " + symbol + " price - could not confirm the chart shows this instrument",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+        } else {
+            val gap = abs(plan.entry - live) / live
+            if (gap > MAX_PRICE_GAP) {
+                GuardrailOutcome(
+                    title = "Chart is " + symbol,
+                    detail = "The chart's entry " + plan.instrument.formatPrice(plan.entry) + " is " +
+                        trimmed(gap * 100) + "% from " + symbol + "'s live " +
+                        plan.instrument.formatPrice(live) + " - this is a chart of a different instrument.",
+                    severity = RuleSeverity.BLOCK,
+                    reading = trimmed(gap * 100) + "% off",
+                    remedy = "Go back and select the pair this chart actually shows, or screenshot the " +
+                        symbol + " chart and scan that.",
+                    voidsPlan = true
+                )
+            } else {
+                GuardrailOutcome(
+                    title = "Chart is " + symbol,
+                    detail = "Entry is within " + trimmed(gap * 100) + "% of the live " +
+                        plan.instrument.formatPrice(live),
+                    severity = RuleSeverity.PASS,
+                    reading = "match"
+                )
+            }
+        }
+
+        /**
+         * Does the stop cost what the user said they would lose?
+         *
+         * The rule this screen was missing. Sizing floors to the 0.01 minimum and
+         * cannot go below it, so on a small account a wide stop risks many times
+         * the budget -- and nothing compared the two. A R1,008 gold account at 1%
+         * was shown a three-order plan risking R784, 78% of the balance, with
+         * every rule green. A BLOCK because it is the user's own number: a
+         * "proceed anyway" here is the account.
+         */
+        val riskLabel = trimmed(plan.riskPercent) + "%"
+        val budget = when {
+            // Sized against the placeholder, every lot on the plan describes an
+            // account the user does not have.
+            balanceIsStandIn -> GuardrailOutcome(
+                title = "Risk <= " + riskLabel + " of balance",
+                detail = "No balance to size against - this plan assumes a stand-in " +
+                    plan.money(plan.balance) + " account",
+                severity = RuleSeverity.BLOCK,
+                reading = "no balance",
+                remedy = "Type your real balance into the trade calculator, or link your broker, then scan again."
+            )
+            plan.actualRisk > plan.riskAmount * 1.001 -> {
+                val share = plan.actualRisk / plan.balance * 100
+                val atMinimum = plan.totalLots <= MIN_LOT + 1e-9
+                // The widest stop the budget pays for at the minimum lot.
+                val maxStop = plan.riskAmount / (MIN_LOT * plan.instrument.pipValuePerLot)
+                GuardrailOutcome(
+                    title = "Risk <= " + riskLabel + " of balance",
+                    detail = String.format("%.2f", plan.totalLots) + " lots risks " +
+                        plan.money(plan.actualRisk) + " on this stop - " + trimmed(share) +
+                        "% of your " + plan.money(plan.balance) + " balance",
+                    severity = RuleSeverity.BLOCK,
+                    reading = trimmed(share) + "%",
+                    remedy = if (atMinimum) {
+                        "0.01 lots is the smallest order a broker accepts, and on this " +
+                            trimmed(plan.stopPips) + "-pip stop it already risks more than your " +
+                            riskLabel + ". At this balance, " + riskLabel + " covers a stop of about " +
+                            trimmed(maxStop) + " pips on " + symbol + ". This setup does not fit this account."
+                    } else {
+                        "This plan is larger than your risk setting allows. Scan again once the calculator matches your account."
+                    }
+                )
+            }
+            else -> GuardrailOutcome(
+                title = "Risk <= " + riskLabel + " of balance",
+                detail = "Risks " + plan.money(plan.actualRisk) + " - " +
+                    trimmed(plan.actualRisk / plan.balance * 100) + "% of balance",
+                severity = RuleSeverity.PASS,
+                reading = trimmed(plan.actualRisk / plan.balance * 100) + "%"
+            )
+        }
+
+        // Rebalancing only helps when every target is funded. On a position too
+        // small to reach them all, the shortfall is volume, not allocation.
+        val allFunded = plan.fundedLegs.size == plan.legs.size
+        val nearest = plan.fundedLegs.firstOrNull()
         val rr = GuardrailOutcome(
             title = "Blended R:R >= " + minRrLabel,
             detail = if (plan.blendedRR >= config.minBlendedRR) {
@@ -935,23 +1249,43 @@ object Guardrails {
             // A blocker, not a warning: this is the rule the whole ladder exists
             // to satisfy, so a plan that fails it is not a trade with a caveat.
             severity = if (plan.blendedRR >= config.minBlendedRR) RuleSeverity.PASS else RuleSeverity.BLOCK,
-            reading = plan.rewardLabel
+            reading = plan.rewardLabel,
+            remedy = if (allFunded || nearest == null) {
+                "Rebalance toward the further targets to lift the blended reward past your minimum."
+            } else {
+                String.format("%.2f", plan.totalLots) + " lots only reaches " + plan.fundedLegs.size +
+                    " of the " + plan.legs.size + " targets, and the nearest pays 1:" +
+                    trimmed(nearest.rMultiple) + ". The further targets need more volume than your risk setting buys."
+            },
+            retunable = allFunded
         )
 
-        val stop = GuardrailOutcome(
-            title = "Stop loss <= " + trimmed(config.maxStopPips) + " pips",
-            detail = if (plan.stopPips <= config.maxStopPips) {
-                trimmed(plan.stopPips) + "p - inside your limit"
-            } else {
-                trimmed(plan.stopPips) + "p - " +
-                    trimmed(plan.stopPips - config.maxStopPips) + "p wider than your limit"
-            },
-            // Warn, not block: a wide stop is already paid for by the smaller
-            // position the risk sizing hands back, so this is information rather
-            // than a veto.
-            severity = if (plan.stopPips <= config.maxStopPips) RuleSeverity.PASS else RuleSeverity.WARN,
-            reading = trimmed(plan.stopPips) + "p"
-        )
+        // Measured against the chart's own candles rather than a pip count, for
+        // the reason GuardrailConfig.maxStopAtr sets out. Unknown when the model
+        // could not measure them: there is then no yardstick, and inventing one
+        // would warn or clear at random.
+        val stopAtr = plan.instrument.atrPips.takeIf { it > 0.0 }?.let { plan.stopPips / it }
+        val stop = when {
+            stopAtr == null -> GuardrailOutcome(
+                title = "Stop <= " + trimmed(config.maxStopAtr) + "x the average candle",
+                detail = "The chart's candles could not be measured",
+                severity = RuleSeverity.WARN,
+                reading = "unknown"
+            )
+            else -> GuardrailOutcome(
+                title = "Stop <= " + trimmed(config.maxStopAtr) + "x the average candle",
+                detail = if (stopAtr <= config.maxStopAtr) {
+                    trimmed(stopAtr) + "x - inside your limit"
+                } else {
+                    trimmed(stopAtr) + "x - the target needs more candles than the trade has"
+                },
+                // Warn, not block: a wide stop is already paid for by the smaller
+                // position the risk sizing hands back, so this is information rather
+                // than a veto.
+                severity = if (stopAtr <= config.maxStopAtr) RuleSeverity.PASS else RuleSeverity.WARN,
+                reading = trimmed(stopAtr) + "x"
+            )
+        }
 
         // Null is not zero. An unread streak warns rather than passing: this rule
         // spent its whole life being handed a literal 0, so it rendered green,
@@ -1006,7 +1340,7 @@ object Guardrails {
             )
         }
 
-        return GuardrailReport(listOf(rr, stop, streak, event))
+        return GuardrailReport(listOf(freshness, scale, budget, rr, stop, streak, event))
     }
 }
 

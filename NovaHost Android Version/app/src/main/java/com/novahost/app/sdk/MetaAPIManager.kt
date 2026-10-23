@@ -4,13 +4,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import io.github.jan.supabase.functions.functions
-import io.github.jan.supabase.realtime.realtime
-import io.github.jan.supabase.realtime.channel
-import io.github.jan.supabase.realtime.postgresChangeFlow
-import io.github.jan.supabase.realtime.PostgresAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import com.novahost.app.BuildConfig
 import io.ktor.client.request.header
@@ -113,11 +108,33 @@ object MetaAPIManager {
     private val _isSynchronized = MutableStateFlow(false)
     val isSynchronized: StateFlow<Boolean> = _isSynchronized
 
+    /**
+     * The linked account's balance, in [accountCurrency] -- not in dollars.
+     *
+     * Zero means "not read yet", never "the account is empty". Sizing code must
+     * treat the two differently: a screen that reads 0.0 as a real balance is
+     * how the scanner ended up falling through to a stand-in $10,000.
+     */
     private val _balance = MutableStateFlow(0.0)
     val balance: StateFlow<Double> = _balance
 
     private val _equity = MutableStateFlow(0.0)
     val equity: StateFlow<Double> = _equity
+
+    /**
+     * What [balance] and [equity] are denominated in.
+     *
+     * Travels with the figure, always. Every live account on this platform is
+     * ZAR, and a rand balance handed to a calculator that assumes dollars sizes
+     * every position about eighteen times too large -- with nothing on screen
+     * to contradict it. Defaults to USD only until the first successful read.
+     */
+    private val _accountCurrency = MutableStateFlow("USD")
+    val accountCurrency: StateFlow<String> = _accountCurrency
+
+    /** True once [refreshAccount] has actually heard back from the broker. */
+    private val _balanceIsLive = MutableStateFlow(false)
+    val balanceIsLive: StateFlow<Boolean> = _balanceIsLive
 
     private val _logs = MutableStateFlow<List<String>>(listOf(">> System idle..."))
     val logs: StateFlow<List<String>> = _logs
@@ -479,31 +496,88 @@ object MetaAPIManager {
     }
 
 
-    fun startBalanceSync(accountId: String) {
-        managerScope.launch {
-            try {
-                val channel = NovaHostBackend.client.realtime.channel("broker-$accountId")
-                val changes = channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
-                    table = "broker_accounts"
-                    // Assuming account_id is the primary key or unique identifier
-                }
-                
-                channel.subscribe()
-                
-                changes.collect { action ->
-                    val record = action.record
-                    val newBalance = record["balance"]?.toString()?.toDoubleOrNull() ?: 0.0
-                    val newEquity = record["equity"]?.toString()?.toDoubleOrNull() ?: 0.0
-                    
-                    // Filter by accountId if multiple accounts could exist in one channel
-                    if (record["account_id"]?.toString() == accountId) {
-                        _balance.value = newBalance
-                        _equity.value = newEquity
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("NovaHost", "[BrokerConn] Balance Sync failed: ${e.message}", e)
+    /**
+     * Reads the linked account's real balance from the broker.
+     *
+     * ## What this replaces
+     *
+     * `startBalanceSync` subscribed to Postgres UPDATE events on
+     * `broker_accounts` and did nothing else -- no initial read, and no fallback.
+     * That table has never held a row and nothing in this codebase inserts one,
+     * so the events it waited for could not occur and [balance] stayed at its
+     * 0.0 initial value on every install that ever ran. It was also called from
+     * exactly one place, the broker-connect screen, so even a working
+     * subscription would have died with the process.
+     *
+     * A permanently-zero balance is not a harmless default. The scanner sizes
+     * through `typed balance -> this -> a stand-in $10,000`, so every subscriber
+     * who did not type their own figure had positions sized against ten thousand
+     * dollars they do not have -- about 0.3 lots of gold on an account holding
+     * R596, on every single scan.
+     *
+     * ## Failure is not zero
+     *
+     * A failed read leaves [balance] exactly as it was and returns false.
+     * Overwriting a good figure with 0.0 because the network blinked would
+     * reintroduce the same bug through a different door.
+     */
+    suspend fun refreshAccount(context: android.content.Context): Boolean {
+        val licenseKey = context
+            .getSharedPreferences("metahost_prefs", android.content.Context.MODE_PRIVATE)
+            .getString("license_key", null)
+            ?.trim()
+            ?.uppercase()
+
+        if (licenseKey.isNullOrBlank()) return false
+
+        return try {
+            val payload = kotlinx.serialization.json.Json.encodeToString(
+                BrokerAccountRequest.serializer(),
+                BrokerAccountRequest(license_key = licenseKey)
+            )
+
+            val response = NovaHostBackend.client.httpClient.post(
+                "${BuildConfig.NOVAHOST_API_URL}/functions/v1/broker-account"
+            ) {
+                header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                header(HttpHeaders.Authorization, "Bearer ${BuildConfig.NOVAHOST_API_KEY}")
+                header("apikey", BuildConfig.NOVAHOST_API_KEY)
+                // The broker is queried live, so this is slower than a database
+                // read -- but a sizing screen is waiting, so it cannot hang.
+                timeout { requestTimeoutMillis = 15_000 }
+                setBody(payload)
             }
+
+            val parsed = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                .decodeFromString<BrokerAccountResponse>(response.body<String>())
+
+            if (!parsed.success) {
+                android.util.Log.w(
+                    "NovaHost",
+                    "[BrokerAccount] ${parsed.code ?: response.status.value}: ${parsed.error ?: "unavailable"}"
+                )
+                return false
+            }
+
+            // A balance of zero from a broker that answered is a real answer --
+            // an empty account -- but it is not one worth sizing against, and
+            // letting it through would put the scanner straight back on the
+            // stand-in. Treated as "nothing to size with" rather than as data.
+            val live = parsed.balance?.takeIf { it > 0.0 } ?: return false
+
+            _balance.value = live
+            _equity.value = parsed.equity?.takeIf { it > 0.0 } ?: live
+            _accountCurrency.value = parsed.currency.uppercase()
+            _balanceIsLive.value = true
+
+            android.util.Log.i(
+                "NovaHost",
+                "[BrokerAccount] balance ${parsed.currency} $live (equity ${_equity.value})"
+            )
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("NovaHost", "[BrokerAccount] read failed: ${e.message}")
+            false
         }
     }
 

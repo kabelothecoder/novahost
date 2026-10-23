@@ -4,9 +4,60 @@
     {
       "name": "mentor-portal",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "MetaHost Portal/lumin-dash",
+      "runtimeArgs": [
+        "run",
+        "dev:portal"
+      ],
+      "cwd": "MetaHost Portal",
       "port": 8080
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:landing"
+      ],
+      "cwd": "MetaHost Portal",
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:admin"
+      ],
+      "cwd": "MetaHost Portal",
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "novahost-ios",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "cwd": "MetaHost iOS Version",
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "novahost-ios-https",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:https",
+        "--",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "cwd": "MetaHost iOS Version",
+      "port": 5199,
+      "url": "https://localhost:5199"
     }
   ]
 }
