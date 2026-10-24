@@ -112,7 +112,7 @@ const instruction = computed(() => {
   }
   return cancelled.value
     ? 'Switch back to the NovaHost app to pick up where you left off.'
-    : 'Switch back to the NovaHost app — it checks again the moment it comes to the front, and unlocks itself.'
+    : 'Switch back to the NovaHost app — it checks again the moment it comes to the front, then asks for your licence key.'
 })
 
 /**

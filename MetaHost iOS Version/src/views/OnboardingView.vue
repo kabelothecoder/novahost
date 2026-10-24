@@ -57,10 +57,6 @@
           {{ ctaLabel }}
         </NovaCta>
       </template>
-
-      <template v-if="step === INSTALL_STEP" #secondary>
-        <NovaTextButton @click="finish">Skip for now</NovaTextButton>
-      </template>
     </NovaSheet>
   </div>
 </template>
@@ -84,6 +80,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useKeyboardInset } from '../composables/useKeyboardInset.js'
+import { needsHomeScreenInstall } from '../utils/install.js'
 
 import NovaProgressRail from '../components/nova/NovaProgressRail.vue'
 import NovaArtPane      from '../components/nova/NovaArtPane.vue'
@@ -91,7 +88,6 @@ import NovaSheet        from '../components/nova/NovaSheet.vue'
 import NovaCta          from '../components/nova/NovaCta.vue'
 import NovaNameField    from '../components/nova/NovaNameField.vue'
 import NovaStyleOption  from '../components/nova/NovaStyleOption.vue'
-import NovaTextButton   from '../components/nova/NovaTextButton.vue'
 
 import WelcomeArt         from '../components/nova/art/WelcomeArt.vue'
 import VisionArt          from '../components/nova/art/VisionArt.vue'
@@ -114,23 +110,24 @@ const VAULT_STEP  = 6
 const INSTALL_STEP = 7
 
 /**
- * Step 08 only exists for iPhone/iPad users in Safari who have not already
- * added the app. Anyone launching from the home screen, or on desktop or
- * Android, never sees it and the flow stays 7 steps.
+ * iPhone/iPad in a Safari tab: welcome, then straight to the install steps,
+ * and nothing after them. Not skippable — the tab cannot pay or run the app
+ * (see utils/install.js), and the Home Screen app keeps separate storage, so
+ * any name or style typed here would be lost on install anyway. The full
+ * wizard runs once they open it from the Home Screen, where this is false.
  */
-const needsInstallStep = (() => {
-  if (typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent || ''
-  // iPadOS 13+ reports as a Mac, so check for touch as well.
-  const isIOS = /iphone|ipad|ipod/i.test(ua) ||
-    (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
-  const standalone = window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true
-  return isIOS && !standalone
-})()
+const needsInstallStep = needsHomeScreenInstall()
 
-const TOTAL = needsInstallStep ? 8 : 7
-const LAST_STEP = needsInstallStep ? INSTALL_STEP : VAULT_STEP
+/** The steps actually walked, in order. */
+const SEQUENCE = needsInstallStep
+  ? [0, INSTALL_STEP]
+  : [0, 1, 2, 3, 4, 5, VAULT_STEP]
+
+const TOTAL = SEQUENCE.length
+const LAST_STEP = SEQUENCE[SEQUENCE.length - 1]
+
+/** Set once they tap "I've added it" in the tab — the cue to go and open it. */
+const installNudged = ref(false)
 
 const INSTALL_STEPS = [
   'Tap the <b>Share</b> icon in Safari’s toolbar',
@@ -178,8 +175,8 @@ const COPY = [
   // 07 is dual-state; title/body resolved below.
   { title: '', body: '', cta: 'Enter NovaHost' },
   {
-    title: 'One last thing.',
-    body: 'NovaHost runs best as a real app — full screen, no browser bar, and it keeps your session alive between visits.',
+    title: 'Add NovaHost to your Home Screen.',
+    body: 'NovaHost only runs as an app — full screen, alerts on, and your licence locked to this phone. Add it, then open it from your Home Screen to finish setup.',
     cta: 'I’ve added it',
   },
 ]
@@ -221,7 +218,7 @@ const notifPreview = computed(() => {
 })
 
 // ── Step chrome ───────────────────────────────────────────────
-const pct    = computed(() => Math.round(((step.value + 1) / TOTAL) * 100))
+const pct    = computed(() => Math.round(((SEQUENCE.indexOf(step.value) + 1) / TOTAL) * 100))
 const isTall = computed(() =>
   step.value === 4 || step.value === 5 || step.value === INSTALL_STEP
 )
@@ -283,10 +280,13 @@ const title = computed(() =>
 )
 
 const body = computed(() => {
+  if (step.value === INSTALL_STEP && installNudged.value) {
+    return 'Now close this Safari tab and open NovaHost from your Home Screen. Setup continues there.'
+  }
   if (step.value !== VAULT_STEP) return COPY[step.value].body
   return locked.value
-    ? 'This NovaHost license is now locked to this device. It will not run anywhere else.'
-    : 'For enterprise-grade security, this NovaHost license is locking exclusively to this physical device.'
+    ? 'NovaHost is now locked to this device. Your access and your licence will not run anywhere else.'
+    : 'For enterprise-grade security, NovaHost is locking exclusively to this physical device.'
 })
 
 const ctaLabel = computed(() => COPY[step.value].cta)
@@ -315,8 +315,15 @@ onUnmounted(() => clearTimeout(lockTimer))
 function advance () {
   if (!canAdvance.value) return
 
-  if (step.value < LAST_STEP) {
-    step.value += 1
+  if (step.value !== LAST_STEP) {
+    step.value = SEQUENCE[SEQUENCE.indexOf(step.value) + 1]
+    return
+  }
+
+  // The tab never finishes: there is nowhere for it to go. It only points
+  // the user at the Home Screen icon they just made.
+  if (needsInstallStep) {
+    installNudged.value = true
     return
   }
 

@@ -145,6 +145,75 @@ const STRATEGY_BRIEFS: Record<string, string> = {
 };
 
 /**
+ * Per-style rulebooks. The style used to reach the model as one sentence ("they
+ * are scanning for a scalp trade") and changed nothing about how a chart was
+ * read, so a scalp and a swing came back with the same stops and targets.
+ * `minRR` is enforced after the read as well as asked for, because a model
+ * asked for 2R will sometimes hand back 1.4R and call it fine.
+ */
+const STYLES: Record<string, { label: string; htf: string; ltf: string; minRR: number; brief: string }> = {
+  scalp: {
+    label: "scalp", htf: "H1", ltf: "M5", minRR: 1.5,
+    brief:
+      "Style: SCALP, held minutes to an hour. Take the trend from the H1 (or the highest timeframe " +
+      "visible) and only trade with it. Time the entry on M5-M15 at a fresh sweep, an untested zone " +
+      "or a retest -- never chase a candle that has already run. The stop sits about one average " +
+      "candle range beyond the structure. The first target must be at least 1.5 times the risk. " +
+      "If the M15/H1 trend is against the only setup, say so and return low confidence.",
+  },
+  day: {
+    label: "day trade", htf: "H4", ltf: "M15", minRR: 2,
+    brief:
+      "Style: DAY TRADE, opened and closed inside one trading day. Take the bias from the H4. Work " +
+      "from the previous day's high and low and the Asian session range as the key levels. Time the " +
+      "entry on M15-H1. The target must be reachable today -- do not aim past the previous day's high " +
+      "or low unless it has already broken. The first target must be at least 2 times the risk.",
+  },
+  swing: {
+    label: "swing", htf: "D1", ltf: "H4", minRR: 2.5,
+    brief:
+      "Style: SWING, held for days. Only trade with the daily and weekly trend. Use daily and weekly " +
+      "levels; time the entry on H4. The stop goes beyond a daily structure point, not inside it. " +
+      "The first target must be at least 2.5 times the risk.",
+  },
+};
+const styleFor = (mode: string) => {
+  const m = mode.toLowerCase();
+  if (m.startsWith("scalp")) return STYLES.scalp;
+  if (m.startsWith("swing")) return STYLES.swing;
+  return STYLES.day;
+};
+
+/**
+ * Deriv's synthetic indices run 24/7 off a random number generator: no
+ * sessions, no news, no weekend gap. Volatility indices (V75, V100, the 1s
+ * variants) are supported. Boom/Crash and Step are not -- Boom/Crash spike in
+ * one direction by design and Step moves in fixed increments, and none of the
+ * strategy briefs reads either honestly.
+ */
+// Weltrade's FX Vol / SFX Vol are the same kind of random-walk index and are
+// read the same way. Its directional and fixed-pattern products -- PainX and
+// GainX (Boom/Crash-style jumps), FlipX, SwitchX, BreakX, TrendX, and the
+// growth models PlusX, FiboX, QuadX -- move by rule, not structure, so they are
+// refused with Boom, Crash and Step.
+const VOLATILITY_RE = /\b(VOLATILITY\s*\d+|V\s?\d{2,3}|R_\d{2,3}|1HZ\d{2,3}V?|S?FX\s?VOL\w*)\b/i;
+const UNSUPPORTED_SYNTHETIC_RE = /(BOOM|CRASH|\bSTEP\b|PAINX|GAINX|FLIPX|SWITCHX|BREAKX|TRENDX|PLUSX|FIBOX|QUADX)/i;
+const UNSUPPORTED_MSG =
+  "That index moves by fixed rules (spikes, flips or set growth), so the scanner can't read it. " +
+  "Volatility indices like V75, V100 and FX Vol are supported.";
+
+const SYNTHETIC_BRIEF =
+  "Instrument: this is a synthetic volatility index (V75, V100, FX Vol and similar). If it is SFX Vol, expect a spike roughly every 30 minutes and keep the stop outside one. It trades 24/7 with no " +
+  "sessions, no news and no fundamental drivers -- do not mention London, New York, Asia or news. " +
+  "Size the stop from the candles themselves (average candle range), since pips and sessions do not " +
+  "apply. Structure, ranges and sweeps still work the same way.";
+
+const EXPLAIN_INSTRUCTION = `Explanations: write explain_normal and explain_pro. Both are read aloud by the app's robot voice, so write for the ear: short sentences, no bullet points, no symbols like "@" or "->", prices written as numbers.
+explain_normal is for a beginner, about 60 words, four beats in order: what you saw, the plan (buy or sell, where to enter, where the stop goes), where the target is, and what would cancel the idea. No jargon at all -- not "order block", "FVG", "liquidity", "CHoCH", "BOS", "CRT". Say "price swept below the recent low and came back" instead.
+explain_pro is for an experienced trader, about 60 words, and may use the strategy's own vocabulary and timeframe names.
+Never mention any person, mentor or robot provider. If the setup is weak or missed, say so plainly in both.`;
+
+/**
  * The exact shape the engine consumes.
  *
  * Gemini's `responseSchema` is an OpenAPI 3.0 subset, and it differs from the
@@ -286,6 +355,18 @@ const RESPONSE_SCHEMA = {
         "Two or three plain sentences: what the chart shows, why this direction, and the clearest " +
         "argument against it. Written for the trader, not about the model.",
     },
+    htf_symbol_on_chart: {
+      type: "string",
+      nullable: true,
+      description: "Symbol printed on the HIGHER-timeframe screenshot, verbatim. Null if only one image was sent or none is visible.",
+    },
+    htf_timeframe_on_chart: {
+      type: "string",
+      nullable: true,
+      description: "Timeframe printed on the HIGHER-timeframe screenshot. Null if only one image was sent or none is visible.",
+    },
+    explain_normal: { type: "string", description: "Plain-language spoken explanation, see instructions." },
+    explain_pro: { type: "string", description: "Trader-language spoken explanation, see instructions." },
   },
   required: [
     "chart_readable", "unreadable_reason", "symbol_on_chart", "timeframe_on_chart",
@@ -293,6 +374,7 @@ const RESPONSE_SCHEMA = {
     "direction", "confidence", "entry", "entry_type", "entry_note", "sl", "tp", "patterns",
     "trend_bias", "trend_timeframe", "key_level", "key_level_touches",
     "average_candle_range", "timeframes", "narrative",
+    "htf_symbol_on_chart", "htf_timeframe_on_chart", "explain_normal", "explain_pro",
   ],
   propertyOrdering: [
     "chart_readable", "unreadable_reason", "symbol_on_chart", "timeframe_on_chart",
@@ -300,6 +382,7 @@ const RESPONSE_SCHEMA = {
     "direction", "confidence", "entry", "entry_type", "entry_note", "sl", "tp", "patterns",
     "trend_bias", "trend_timeframe", "key_level", "key_level_touches",
     "average_candle_range", "timeframes", "narrative",
+    "htf_symbol_on_chart", "htf_timeframe_on_chart", "explain_normal", "explain_pro",
   ],
 };
 
@@ -350,6 +433,10 @@ interface Reading {
   average_candle_range: number | null;
   timeframes: Array<{ timeframe: string; bias: string; note: string }>;
   narrative: string;
+  htf_symbol_on_chart: string | null;
+  htf_timeframe_on_chart: string | null;
+  explain_normal: string;
+  explain_pro: string;
 }
 
 /**
@@ -452,6 +539,28 @@ Deno.serve(async (req: Request) => {
     const mode = String(body.mode ?? body.trading_mode ?? "").trim();
     const strategyKey = String(body.strategy ?? "SMC").trim().toUpperCase();
     const strategyBrief = STRATEGY_BRIEFS[strategyKey] ?? STRATEGY_BRIEFS.SMC;
+    const style = styleFor(mode || "day");
+
+    // Optional higher-timeframe screenshot. CRT cannot be read from one chart --
+    // the range candle lives on the higher timeframe and the sweep on the lower
+    // -- so it is required there and merely encouraged everywhere else.
+    const rawHtf = String(body.htfImageBase64 ?? "");
+    const htfImage = rawHtf ? decodeImage(rawHtf) : null;
+    if (rawHtf && !htfImage) {
+      return json({ error: "The higher-timeframe image could not be read. Use a PNG or JPEG under 5 MB." }, 400);
+    }
+    // Only builds that can send a second chart say so; an older Android build
+    // scanning CRT keeps working on one chart (capped confidence) until it updates.
+    if (strategyKey === "CRT" && !htfImage && body.htf_capable === true) {
+      return json({
+        error: `CRT needs two screenshots: the ${style.htf} chart for the range and the ${style.ltf} chart for the entry.`,
+        code: "NEED_HTF",
+      }, 400);
+    }
+    if (UNSUPPORTED_SYNTHETIC_RE.test(pair)) {
+      return json({ error: UNSUPPORTED_MSG, code: "UNSUPPORTED_SYMBOL" }, 422);
+    }
+    const syntheticByPair = VOLATILITY_RE.test(pair);
 
     // ---- Entitlement --------------------------------------------------------
     // The scanner is a separate R349 purchase and this endpoint spends quota on
@@ -472,7 +581,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: sub, error: subErr } = await novaHost
       .from("subscriptions")
-      .select("has_scanner, device_id")
+      .select("has_scanner, device_id, is_premium, is_lifetime, subscription_expiry, scan_credits, free_scan_month")
       .eq("email", email)
       .maybeSingle();
 
@@ -481,13 +590,28 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Could not check your scanner access. Try again." }, 503);
     }
 
-    if (!sub?.has_scanner) {
-      return json({ error: "The AI chart scanner is not unlocked on this email.", code: "SCANNER_LOCKED" }, 403);
+    // Three ways in: the old R349 unlock (unlimited), the one free scan a month
+    // that active app access carries, or a bought credit (SCANS20). Checked
+    // here so the Gemini call is never made for someone with nothing to
+    // spend; the actual spend happens only after a reading comes back, so a
+    // failed scan costs nothing.
+    const appActive = sub?.is_lifetime === true || (sub?.is_premium === true &&
+      (!sub?.subscription_expiry || new Date(sub.subscription_expiry) > new Date()));
+    const freeAvailable = appActive && sub?.free_scan_month !== new Date().toISOString().slice(0, 7);
+    const canScan = sub?.has_scanner === true || freeAvailable || (sub?.scan_credits ?? 0) > 0;
+
+    if (!canScan) {
+      return json({
+        error: sub?.has_scanner === false && (sub?.scan_credits ?? 0) === 0 && appActive
+          ? "You've used this month's free scan. Buy 20 scans to keep going."
+          : "The AI chart scanner is not unlocked on this email.",
+        code: "SCANNER_LOCKED",
+      }, 403);
     }
 
     // Same one-email-one-device rule check-subscription-status applies. Fails
     // closed: an unbound row is not yet a licence to spend.
-    if (sub.device_id && sub.device_id !== deviceId) {
+    if (sub?.device_id && sub.device_id !== deviceId) {
       return json({ error: "The scanner is active on another device.", code: "DEVICE_MISMATCH" }, 403);
     }
 
@@ -499,7 +623,14 @@ Deno.serve(async (req: Request) => {
     const nowUtc = new Date();
     const context = [
       pair ? `The trader has selected ${pair} in the app.` : null,
-      mode ? `They are scanning for a ${mode.toLowerCase()} trade.` : null,
+      `They are scanning for a ${style.label} trade.`,
+      htfImage
+        ? `Two screenshots are attached. The FIRST is the higher timeframe (expected ${style.htf}) -- ` +
+          `read trend, range and key levels from it. The SECOND is the entry timeframe (expected ` +
+          `${style.ltf}) -- time the entry, stop and every other single-chart field from it. ` +
+          `Report the first image's symbol and timeframe in htf_symbol_on_chart and htf_timeframe_on_chart.`
+        : `Only one screenshot is attached; set htf_symbol_on_chart and htf_timeframe_on_chart to null.`,
+      "If the chart is a Deriv Volatility index (V75, V100 and the like), apply the synthetic-index rules.",
       `The current time in UTC is ${nowUtc.toISOString().slice(0, 16)} ` +
         `(year ${nowUtc.getUTCFullYear()}). Use that year for last_candle_iso ` +
         `unless doing so would date the chart in the future.`,
@@ -522,12 +653,15 @@ Deno.serve(async (req: Request) => {
         // The strategy rides on the system instruction so it frames the whole
         // read, rather than arriving as one more sentence in the user turn.
         systemInstruction: {
-          parts: [{ text: BASE_INSTRUCTION + "\n\n" + strategyBrief }],
+          parts: [{
+            text: [BASE_INSTRUCTION, strategyBrief, style.brief, SYNTHETIC_BRIEF, EXPLAIN_INSTRUCTION].join("\n\n"),
+          }],
         },
         contents: [
           {
             role: "user",
             parts: [
+              ...(htfImage ? [{ inline_data: { mime_type: htfImage.mediaType, data: htfImage.data } }] : []),
               { inline_data: { mime_type: image.mediaType, data: image.data } },
               { text: context },
             ],
@@ -702,6 +836,44 @@ Deno.serve(async (req: Request) => {
         ? `The last candle on this chart is about ${describeAge(ageMinutes!)} old.`
         : null;
 
+    // ---- Style and instrument checks ---------------------------------------
+    // Each one blocks the execute control the same way a stale chart does: the
+    // reading is still shown, the order is not armed.
+    const blocks: string[] = [];
+    const chartSymbol = `${reading.symbol_on_chart ?? ""} ${reading.htf_symbol_on_chart ?? ""}`;
+    if (UNSUPPORTED_SYNTHETIC_RE.test(chartSymbol)) {
+      return json({ error: UNSUPPORTED_MSG, code: "UNSUPPORTED_SYMBOL" }, 422);
+    }
+    const synthetic = syntheticByPair || VOLATILITY_RE.test(chartSymbol);
+
+    const norm = (s: string | null) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (htfImage && reading.symbol_on_chart && reading.htf_symbol_on_chart &&
+        !norm(reading.symbol_on_chart).includes(norm(reading.htf_symbol_on_chart).slice(0, 6)) &&
+        !norm(reading.htf_symbol_on_chart).includes(norm(reading.symbol_on_chart).slice(0, 6))) {
+      blocks.push(`The two screenshots show different symbols (${reading.htf_symbol_on_chart} and ${reading.symbol_on_chart}).`);
+    }
+    if (htfImage && reading.timeframe_on_chart && reading.htf_timeframe_on_chart &&
+        norm(reading.timeframe_on_chart) === norm(reading.htf_timeframe_on_chart)) {
+      blocks.push(`Both screenshots are ${reading.timeframe_on_chart}. Send the ${style.htf} chart and the ${style.ltf} chart.`);
+    }
+
+    const risk = Math.abs(reading.entry - reading.sl);
+    const rr = risk > 0 ? Math.abs(reading.tp - reading.entry) / risk : 0;
+    if (rr < style.minRR) {
+      blocks.push(`The target is only ${rr.toFixed(1)}R. A ${style.label} needs at least ${style.minRR}R.`);
+    }
+
+    // Scalps live on London and New York liquidity. Synthetics have no sessions.
+    const utcHour = nowUtc.getUTCHours();
+    const weekend = [0, 6].includes(nowUtc.getUTCDay());
+    if (style === STYLES.scalp && !synthetic && (weekend || utcHour < 7 || utcHour >= 21)) {
+      blocks.push("Scalps only run during the London and New York sessions (07:00-21:00 UTC, weekdays).");
+    }
+
+    // One chart is a weaker read than two. Confidence is capped and the app is
+    // told why, so it can ask for the higher timeframe next time.
+    if (!htfImage && reading.confidence > 70) reading.confidence = 70;
+
     const usage = payload?.usageMetadata ?? {};
     console.log(
       `[analyze-chart] ${pair || "?"} ${strategyKey} ${reading.direction} ${reading.entry_type} ` +
@@ -711,7 +883,27 @@ Deno.serve(async (req: Request) => {
       `in=${usage.promptTokenCount} out=${usage.candidatesTokenCount}`
     );
 
+    // Spent only now that there is a reading to hand back. Locked in SQL, so
+    // two scans racing for the last credit cannot both take it -- the loser
+    // still gets its result (the Gemini call is already paid for) and the
+    // anomaly is logged.
+    let scansLeft: number | null = null;
+    const { data: spent, error: spendErr } = await novaHost.rpc("spend_scan", {
+      p_email: email,
+      p_free_ok: freeAvailable,
+    });
+    if (spendErr) console.error("[analyze-chart] spend_scan failed:", spendErr.message);
+    else if (!spent) console.warn("[analyze-chart] scan returned with nothing left to spend for " + email);
+    if (spent !== "unlimited") {
+      const { data: after } = await novaHost
+        .from("subscriptions").select("scan_credits").eq("email", email).maybeSingle();
+      scansLeft = after?.scan_credits ?? 0;
+    }
+
     return json({
+      /** What this scan used ('unlimited' | 'free' | 'credit') and what is left. */
+      scan_source: spent ?? null,
+      scan_credits: scansLeft,
       ...reading,
       // Mirrored so a client build that reads either name still parses this.
       action: reading.direction,
@@ -722,6 +914,16 @@ Deno.serve(async (req: Request) => {
       stale_reason: staleReason,
       /** Null when the time axis could not be read. See the note above. */
       chart_age_minutes: ageMinutes,
+      style: style.label,
+      min_rr: style.minRR,
+      rr: Math.round(rr * 10) / 10,
+      synthetic,
+      two_charts: !!htfImage,
+      /** Asks the app to suggest the higher-timeframe chart next time. */
+      htf_suggested: !htfImage ? style.htf : null,
+      /** True when the reading must not arm execute, for a reason other than age. */
+      blocked: blocks.length > 0,
+      block_reasons: blocks,
     });
 
   } catch (err) {

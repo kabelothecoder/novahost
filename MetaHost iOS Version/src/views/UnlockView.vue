@@ -53,10 +53,10 @@
           <span class="gate-card-sheen" aria-hidden="true"></span>
 
           <div class="gate-copy nv-stagger">
-            <p class="nv-step-label">The Vault</p>
-            <h1 class="nv-title gate-title">Activate your node</h1>
+            <p class="nv-step-label">Payment received</p>
+            <h1 class="nv-title gate-title">Activate your robot</h1>
             <p class="nv-body gate-body">
-              Enter the license key your mentor issued you. It binds to this device once activated.
+              Enter your licence key. No key yet? Request a code below and claim one on your robot provider's website.
             </p>
           </div>
 
@@ -120,6 +120,55 @@
               <NovaCta :disabled="!keyValid" @click="handleUnlock">Activate</NovaCta>
               <span v-if="keyValid" class="gate-cta-gloss" aria-hidden="true"></span>
             </div>
+          </div>
+
+          <!-- ── No key: claim one with a code ──────────────────────────── -->
+          <div class="gate-claim">
+            <div class="gate-or" aria-hidden="true"><span>or</span></div>
+
+            <button
+              v-if="!claim.code"
+              type="button"
+              class="gate-claim-btn"
+              :disabled="claim.busy"
+              @click="startClaim"
+            >
+              <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <rect x="2.5" y="4.5" width="15" height="11" rx="2.8" stroke="currentColor" stroke-width="1.6" />
+                <path d="M6 8.5 H7 M9.5 8.5 H10.5 M13 8.5 H14 M6 11.5 H14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span>{{ claim.busy ? 'Getting your code…' : 'Request a code' }}</span>
+            </button>
+
+            <div v-else class="gate-code" :class="{ 'gate-code-dead': claim.expired }" role="status" aria-live="polite">
+              <p class="gate-code-label">{{ claim.expired ? 'Code expired' : 'Your claim code' }}</p>
+              <button type="button" class="gate-code-value" :aria-label="`Copy code ${prettyCode}`" @click="copyCode">
+                {{ prettyCode }}
+              </button>
+              <p class="gate-code-meta">
+                <template v-if="claim.expired">Request a new one to keep going.</template>
+                <template v-else-if="claim.copied">Copied. </template>
+                <template v-if="!claim.expired">
+                  Expires in <b>{{ countdown }}</b>
+                </template>
+              </p>
+              <p v-if="!claim.expired" class="gate-code-help">
+                Enter it on your robot provider's website. Your key will appear here by itself — keep this screen open.
+              </p>
+              <p v-if="!claim.expired" class="gate-code-wait">
+                <span class="gate-step-spin" aria-hidden="true"></span>
+                <span>Waiting for your key</span>
+              </p>
+              <button v-if="claim.expired" type="button" class="gate-retry" :disabled="claim.busy" @click="startClaim">
+                {{ claim.busy ? 'Getting your code…' : 'New code' }}
+              </button>
+            </div>
+
+            <Transition name="gate-err">
+              <p v-if="claim.error" class="gate-error" role="alert">
+                <span>{{ claim.error }}</span>
+              </p>
+            </Transition>
           </div>
         </form>
 
@@ -186,29 +235,31 @@
 
 <script setup>
 /**
- * @description UnlockView — the licence-key gate the router drops every
- * unverified session onto, straight out of the onboarding wizard.
+ * @description UnlockView — the licence-key step, AFTER payment. The router
+ * sends a paid session with no validated key here.
  *
- * ONE door: a mentor-issued licence key. There is no email fallback — every
- * user validates a key here, and only then reaches the email + PayFast screen
- * (`payment`). The old "use my subscription email instead" path and its
- * check-subscription-status call are gone from this screen; entitlement is
- * proven by paying, on the next screen, not here.
+ * Two ways to a key:
+ *   typed      one the user already has, from their robot provider
+ *   claimed    "Request a code": a 30-minute code from request-claim-code,
+ *              typed on the robot provider's website, which redeems it through
+ *              the NovaHost API. This screen polls the code and activates the
+ *              key by itself the moment it exists.
  *
  * Two phases on one route:
- *   'key'         the input form
+ *   'key'         the input form and the claim code
  *   'validating'  a full-screen confirmation animation over the real
- *                 activateLicenseKey() call. On success it routes to
- *                 `payment`; on refusal it drops back to 'key'.
+ *                 activateLicenseKey() call. On success it routes to `home`;
+ *                 on refusal it drops back to 'key'.
  *
  * Material layers each sit directly on the bed so their backdrop-filter has
  * live colour to refract: the hero lens, the card and the footnote pill. The
  * field is a recess in the card's surface, not a fourth backdrop-filter — see
  * the git history of this file for why.
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { activateLicenseKey } from '../services/authService'
+import { requestClaimCode, claimCodeStatus, formatClaimCode } from '../services/claimService'
 import { useKeyboardInset } from '../composables/useKeyboardInset.js'
 import NovaLogoMark from '../components/nova/NovaLogoMark.vue'
 import NovaCta from '../components/nova/NovaCta.vue'
@@ -291,7 +342,7 @@ const CONFIRM_HOLD_MS = 850
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const verifyTitle = computed(() => {
-  if (verifyState.value === 'ok') return 'Node activated.'
+  if (verifyState.value === 'ok') return 'Robot activated.'
   if (verifyState.value === 'bad') return 'That key was not accepted.'
   return 'Confirming your license…'
 })
@@ -338,8 +389,10 @@ async function handleUnlock () {
     // payment. Guarded — a private-mode sessionStorage throw must not strand
     // the user on a finished animation.
     try { sessionStorage.setItem('MH_FRESH_ACTIVATION', '1') } catch { /* noop */ }
+    stopClaimPolling()
+    forgetClaim()
     await sleep(CONFIRM_HOLD_MS)
-    await goToPayment()
+    await goHome()
     return
   }
 
@@ -348,27 +401,159 @@ async function handleUnlock () {
 }
 
 /**
- * Hand off to the payment screen, and never leave the user parked on the
- * "Node activated" tick if the hand-off does not take. vue-router rejects a
- * push that the guard redirected or that duplicated the current route, so the
- * rejection itself is not the signal — `currentRoute` is.
+ * Into the app — payment already happened on the previous screen. Never leave
+ * the user parked on the "Robot activated" tick if the hand-off does not take.
+ * vue-router rejects a push that the guard redirected or that duplicated the
+ * current route, so the rejection itself is not the signal — `currentRoute` is.
  */
-async function goToPayment () {
+async function goHome () {
   try {
-    await router.push({ name: 'payment' })
+    await router.push({ name: 'home' })
   } catch { /* redirect / redundant-navigation rejections are expected */ }
 
-  if (router.currentRoute.value.name === 'payment') return
+  if (router.currentRoute.value.name !== 'unlock') return
 
   // Still on the gate. One retry through the router, then a hard hash set as
   // the last resort so a stale bundle or a wedged guard cannot dead-end here.
   try {
-    await router.replace({ name: 'payment' })
+    await router.replace({ name: 'home' })
   } catch { /* as above */ }
 
-  if (router.currentRoute.value.name !== 'payment') {
-    window.location.hash = '#/payment'
+  if (router.currentRoute.value.name === 'unlock') {
+    window.location.hash = '#/home'
   }
+}
+
+// ── Claim code ────────────────────────────────────────────────────────────
+// No key yet: a 30-minute code the user types on their robot provider's
+// site. That site redeems it through the NovaHost API, and this screen polls
+// the code and activates the key the moment it exists — the user never has to
+// copy a key back by hand.
+const CLAIM_POLL_MS = 5000
+/** Kept across a reload: the user leaves for Safari to type the code, and
+ *  iOS may evict the app while they are gone. */
+const CLAIM_STORE = 'NH_CLAIM_CODE'
+
+const claim = reactive({
+  code: '',
+  expiresAt: 0,
+  expired: false,
+  busy: false,
+  copied: false,
+  error: '',
+})
+
+const now = ref(Date.now())
+let tickTimer = null
+let claimTimer = null
+
+const prettyCode = computed(() => formatClaimCode(claim.code))
+
+const countdown = computed(() => {
+  const left = Math.max(0, Math.round((claim.expiresAt - now.value) / 1000))
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+})
+
+function rememberClaim () {
+  try { localStorage.setItem(CLAIM_STORE, JSON.stringify({ code: claim.code, expiresAt: claim.expiresAt })) } catch { /* noop */ }
+}
+
+function forgetClaim () {
+  try { localStorage.removeItem(CLAIM_STORE) } catch { /* noop */ }
+}
+
+async function startClaim () {
+  if (claim.busy) return
+  claim.busy = true
+  claim.error = ''
+  const result = await requestClaimCode()
+  claim.busy = false
+
+  if (!result.ok) {
+    claim.error = result.message
+    return
+  }
+
+  claim.code = result.code
+  claim.expiresAt = Date.parse(result.expiresAt) || Date.now() + 30 * 60 * 1000
+  claim.expired = false
+  claim.copied = false
+  rememberClaim()
+  startClaimPolling()
+}
+
+async function copyCode () {
+  if (claim.expired) return
+  try {
+    await navigator.clipboard.writeText(claim.code)
+    claim.copied = true
+  } catch { /* the code is on screen to read; nothing to do */ }
+}
+
+function startClaimPolling () {
+  stopClaimPolling()
+  tickTimer = setInterval(() => {
+    now.value = Date.now()
+    if (claim.code && !claim.expired && now.value >= claim.expiresAt) {
+      // One last look: it may have been redeemed in the final seconds.
+      pollClaim().then(() => { if (!claim.expired && Date.now() >= claim.expiresAt) expireClaim() })
+    }
+  }, 1000)
+  claimTimer = setInterval(pollClaim, CLAIM_POLL_MS)
+}
+
+function stopClaimPolling () {
+  clearInterval(tickTimer)
+  clearInterval(claimTimer)
+  tickTimer = null
+  claimTimer = null
+}
+
+function expireClaim () {
+  claim.expired = true
+  stopClaimPolling()
+  forgetClaim()
+}
+
+let polling = false
+async function pollClaim () {
+  if (!claim.code || claim.expired || polling || phase.value !== 'key') return
+  if (document.visibilityState !== 'visible') return
+  polling = true
+  try {
+    const status = await claimCodeStatus(claim.code)
+    if (status.state === 'redeemed' && status.licenseKey) {
+      stopClaimPolling()
+      licenseKey.value = formatKey(status.licenseKey)
+      await handleUnlock()
+    } else if (status.state === 'expired' || status.state === 'unknown') {
+      expireClaim()
+    }
+  } finally {
+    polling = false
+  }
+}
+
+/** Coming back from Safari is exactly when the key has just been claimed. */
+function onClaimVisible () {
+  if (document.visibilityState === 'visible') {
+    now.value = Date.now()
+    pollClaim()
+  }
+}
+
+function restoreClaim () {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CLAIM_STORE) || 'null')
+    if (saved && saved.code && saved.expiresAt > Date.now()) {
+      claim.code = saved.code
+      claim.expiresAt = saved.expiresAt
+      startClaimPolling()
+      pollClaim()
+    } else {
+      forgetClaim()
+    }
+  } catch { forgetClaim() }
 }
 
 function resetToKey () {
@@ -383,9 +568,15 @@ function resetToKey () {
 // linger. Reset it whenever the view is (re)shown.
 onMounted(() => {
   if (phase.value !== 'key') resetToKey()
+  restoreClaim()
+  document.addEventListener('visibilitychange', onClaimVisible)
 })
 
-onUnmounted(() => clearInterval(stepTimer))
+onUnmounted(() => {
+  clearInterval(stepTimer)
+  stopClaimPolling()
+  document.removeEventListener('visibilitychange', onClaimVisible)
+})
 </script>
 
 <style scoped>
@@ -919,6 +1110,70 @@ onUnmounted(() => clearInterval(stepTimer))
     linear-gradient(100deg, transparent 44%, rgba(255, 255, 255, 0.32) 50%, transparent 56%);
   background-size: 100% 100%, 300% 100%;
   animation: nhSheen 5200ms ease-in-out 2000ms infinite;
+}
+
+/* ── Claim code ──────────────────────────────────────────────────────── */
+.gate-claim { position: relative; margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+
+.gate-or {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--nv-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--nv-ink-3);
+}
+.gate-or::before, .gate-or::after { content: ''; flex: 1; height: 1px; background: rgba(20, 22, 26, 0.08); }
+
+.gate-claim-btn {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  min-height: 50px;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 156, 230, 0.4);
+  background: rgba(92, 156, 230, 0.1);
+  color: var(--nv-accent);
+  font-family: inherit; font-size: 15px; font-weight: 600;
+  cursor: pointer;
+  transition: transform 140ms var(--nv-ease-out), background-color 140ms linear;
+}
+.gate-claim-btn:active { transform: scale(0.98); background: rgba(92, 156, 230, 0.18); }
+.gate-claim-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* The code itself is a recess, like the key field — it is the same kind of
+   thing, just read rather than typed. */
+.gate-code {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 14px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(116, 134, 160, 0.11);
+  box-shadow: inset 0 2px 5px rgba(20, 22, 26, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.66);
+  text-align: center;
+  animation: nhUp 380ms var(--nv-ease) both;
+}
+
+.gate-code-label {
+  margin: 0;
+  font-family: var(--nv-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--nv-ink-3);
+}
+
+.gate-code-value {
+  border: 0; background: transparent; padding: 2px 6px; cursor: pointer;
+  font-family: var(--nv-mono);
+  font-size: 30px; font-weight: 600; letter-spacing: 0.12em;
+  color: var(--nv-ink);
+  font-variant-numeric: tabular-nums;
+}
+.gate-code-value:active { opacity: 0.6; }
+.gate-code-dead .gate-code-value { color: var(--nv-ink-disabled); text-decoration: line-through; cursor: default; }
+
+.gate-code-meta { margin: 0; font-size: 13px; color: var(--nv-ink-2); font-variant-numeric: tabular-nums; }
+.gate-code-meta b { font-weight: 600; color: var(--nv-ink); }
+
+.gate-code-help { margin: 2px 0 0; font-size: 12.5px; line-height: 17.5px; color: var(--nv-ink-3); text-wrap: pretty; }
+
+.gate-code-wait {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin: 4px 0 0;
+  font-size: 12.5px; font-weight: 500; color: var(--nv-accent);
 }
 
 /* ── Footnote ────────────────────────────────────────────────────────── */

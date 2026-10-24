@@ -68,6 +68,11 @@ function offlineGrace() {
   const stamp = secStorage.getItem('CHECKED_AT')
   if (!stamp) return { within: false, daysLeft: null, since: null }
 
+  /* Grace covers silence, not a 30-day window that has run out. Offline past
+     the end date is locked, the same as a server "expired" would be. */
+  const ends = Date.parse(secStorage.getItem('ACCESS_EXPIRES') || '')
+  if (Number.isFinite(ends) && ends < Date.now()) return { within: false, daysLeft: 0, since: null }
+
   const since = new Date(stamp)
   if (Number.isNaN(since.getTime())) return { within: false, daysLeft: null, since: null }
 
@@ -122,8 +127,15 @@ export const authState = reactive({
   /** Move eligibility, present only alongside a 'device_mismatch'. */
   move: null,
 
-  /** Scanner entitlement rides along on the same answer. */
+  /** Scanner entitlement rides along on the same answer. `hasScanner` is the
+   *  old R349 unlock (unlimited); everyone else spends credits or the one
+   *  free scan a month that active access carries. */
   hasScanner: secStorage.getItem('HAS_SCANNER') === 'true',
+  scanCredits: Number(secStorage.getItem('SCAN_CREDITS')) || 0,
+  freeScanAvailable: secStorage.getItem('FREE_SCAN') === 'true',
+
+  /** When 30-day access runs out (ISO), or null for lifetime / unknown. */
+  accessExpiresAt: null,
 
   /**
    * True when `isVerified` is being carried by the offline grace rather than by
@@ -144,110 +156,105 @@ export const authState = reactive({
 /**
  * Restores a session on cold start, in the order the flow is gated:
  *
- *   1. Licence key — the entry gate. No stored key, or a key the server now
- *      rejects, and the session has nothing; the router guard sends it to
- *      /unlock. A network miss on a key that was valid last time is trusted,
- *      so a dead connection never locks someone out of what they hold.
- *   2. Payment — the Home gate. The key is good but entitlement still has to
- *      be paid for: with no email on file the guard routes to /payment; with
- *      one, its entitlement is re-checked against check-subscription-status.
- *
- * A validated key never implies payment and a payment is never checked before
- * the key — the two are strictly sequential here, the same order the UI walks.
+ *   1. Payment — checked first. With no email on file nothing has been bought
+ *      and the guard routes to /plan; with one, its entitlement is re-checked
+ *      against check-subscription-status (with the offline grace below).
+ *   2. Licence key — only once paid. The key is claimed after payment, so an
+ *      unpaid session has none to check. A rejected key is cleared and the
+ *      guard sends the session to /unlock; a network miss on a key that was
+ *      valid last time is trusted.
  */
 export async function initializeAuth() {
   authState.isVerifying = true
 
   try {
-    const storedKey = secStorage.getItem('LICENSE_KEY')
-    if (!storedKey) {
-      authState.keyValidated = false
-      authState.isVerified = false
-      return
-    }
-
-    // ── 1. The key ──────────────────────────────────────────────────────────
-    const keyResult = await activateLicenseKey(storedKey)
-
-    if (keyResult.rejected) {
-      // A definite server refusal — the key is gone. Clear it and let the
-      // guard drop the session back on the gate.
-      secStorage.removeItem('LICENSE_KEY')
-      secStorage.removeItem('LICENSE_VALID')
-      authState.keyValidated = false
-      authState.isVerified = false
-      return
-    }
-
-    if (!keyResult.success) {
-      // Could not ask (network, timeout). Trust the last real answer if there
-      // was one; otherwise treat the key as unproven and gate on it.
-      if (secStorage.getItem('LICENSE_VALID') !== 'true') {
-        authState.keyValidated = false
-        authState.isVerified = false
-        return
-      }
-      authState.keyValidated = true
-    }
-    // On success activateLicenseKey() has already set keyValidated + identity.
-
-    // ── 2. Payment ─────────────────────────────────────────────────────────
-    if (!authState.email) {
-      // Key is good, nothing bought yet. Guard routes to /payment.
-      authState.isVerified = false
-      return
-    }
-
-    /* An email on file means the server confirmed this purchase at some point
-       — VERIFIED_EMAIL is written nowhere else. A build that predates the
-       grace never stamped CHECKED_AT, so stamp it now rather than denying the
-       window to everyone who upgrades: the confirmation it represents really
-       did happen, we just never wrote down when. */
-    if (!secStorage.getItem('CHECKED_AT')) {
-      secStorage.setItem('CHECKED_AT', new Date().toISOString())
-    }
-
-    const subResult = await verifySubscription(authState.email)
-    if (subResult.success) {
-      authState.isVerified = true
-      return
-    }
-
-    if (subResult.rejected) {
-      /* The server answered no. That ends it — grace covers silence, never a
-         refusal. The email is still kept: PaymentView prefills it and acts on
-         `reason` to offer a purchase or a device move, and making them retype
-         it helps nobody. */
-      authState.isVerified = false
-      authState.offline = false
-      authState.graceDaysLeft = null
-      secStorage.removeItem('VERIFIED_EMAIL')
-      return
-    }
-
-    /* Could not ask — flat network, captive portal, timeout. This is where a
-       paying customer used to be dropped on the payment screen with an empty
-       email field, because the old code treated silence as a refusal AND
-       deleted VERIFIED_EMAIL on the way out. Both were wrong: the purchase is
-       lifetime, and nothing about it changed because a plane took off. */
-    const grace = offlineGrace()
-
-    if (grace.within) {
-      authState.isVerified = true
-      authState.offline = true
-      authState.graceDaysLeft = grace.daysLeft
-      return
-    }
-
-    /* Out of grace. Locked, which is the point of the window having an end —
-       but the email survives so the next launch with a signal re-checks it
-       automatically instead of asking for it again. */
-    authState.isVerified = false
-    authState.offline = true
-    authState.graceDaysLeft = 0
+    await restorePayment()
+    if (authState.isVerified) await restoreKey()
   } finally {
     authState.isVerifying = false
   }
+}
+
+async function restoreKey() {
+  const storedKey = secStorage.getItem('LICENSE_KEY')
+  if (!storedKey) {
+    authState.keyValidated = false
+    return
+  }
+
+  const keyResult = await activateLicenseKey(storedKey)
+
+  if (keyResult.rejected) {
+    // A definite server refusal — the key is gone. Clear it and let the
+    // guard drop the session back on the gate.
+    secStorage.removeItem('LICENSE_KEY')
+    secStorage.removeItem('LICENSE_VALID')
+    authState.keyValidated = false
+    return
+  }
+
+  if (!keyResult.success) {
+    // Could not ask (network, timeout). Trust the last real answer if there
+    // was one; otherwise treat the key as unproven and gate on it.
+    authState.keyValidated = secStorage.getItem('LICENSE_VALID') === 'true'
+  }
+  // On success activateLicenseKey() has already set keyValidated + identity.
+}
+
+async function restorePayment() {
+  if (!authState.email) {
+    // Nothing bought yet. Guard routes to /plan.
+    authState.isVerified = false
+    return
+  }
+
+  /* An email on file means the server confirmed this purchase at some point
+     — VERIFIED_EMAIL is written nowhere else. A build that predates the
+     grace never stamped CHECKED_AT, so stamp it now rather than denying the
+     window to everyone who upgrades: the confirmation it represents really
+     did happen, we just never wrote down when. */
+  if (!secStorage.getItem('CHECKED_AT')) {
+    secStorage.setItem('CHECKED_AT', new Date().toISOString())
+  }
+
+  const subResult = await verifySubscription(authState.email)
+  if (subResult.success) {
+    authState.isVerified = true
+    return
+  }
+
+  if (subResult.rejected) {
+    /* The server answered no. That ends it — grace covers silence, never a
+       refusal. The email is still kept: PaymentView prefills it and acts on
+       `reason` to offer a purchase or a device move, and making them retype
+       it helps nobody. */
+    authState.isVerified = false
+    authState.offline = false
+    authState.graceDaysLeft = null
+    secStorage.removeItem('VERIFIED_EMAIL')
+    return
+  }
+
+  /* Could not ask — flat network, captive portal, timeout. This is where a
+     paying customer used to be dropped on the payment screen with an empty
+     email field, because the old code treated silence as a refusal AND
+     deleted VERIFIED_EMAIL on the way out. Both were wrong: the purchase is
+     lifetime, and nothing about it changed because a plane took off. */
+  const grace = offlineGrace()
+
+  if (grace.within) {
+    authState.isVerified = true
+    authState.offline = true
+    authState.graceDaysLeft = grace.daysLeft
+    return
+  }
+
+  /* Out of grace. Locked, which is the point of the window having an end —
+     but the email survives so the next launch with a signal re-checks it
+     automatically instead of asking for it again. */
+  authState.isVerified = false
+  authState.offline = true
+  authState.graceDaysLeft = 0
 }
 
 /**
@@ -313,6 +320,14 @@ export async function verifySubscription(email) {
 
     authState.hasScanner = data.has_scanner === true
     secStorage.setItem('HAS_SCANNER', String(data.has_scanner === true))
+
+    // Scans and the 30-day window ride on the same answer (iOS only).
+    authState.scanCredits = Number(data.scan_credits) || 0
+    authState.freeScanAvailable = data.free_scan_available === true
+    authState.accessExpiresAt = data.subscription_expiry || null
+    secStorage.setItem('ACCESS_EXPIRES', authState.accessExpiresAt || '')
+    secStorage.setItem('SCAN_CREDITS', String(authState.scanCredits))
+    secStorage.setItem('FREE_SCAN', String(authState.freeScanAvailable))
 
     if (data.is_premium === true) {
       authState.isVerified = true
@@ -512,6 +527,7 @@ export function logout() {
      the strength of the previous owner's purchase. */
   secStorage.removeItem('CHECKED_AT')
   secStorage.removeItem('MAX_OFFLINE_DAYS')
+  secStorage.removeItem('ACCESS_EXPIRES')
   // The key door too. Leaving these behind means initializeAuth restores the
   // session on the next launch and the sign-out silently did nothing.
   secStorage.removeItem('LICENSE_KEY')

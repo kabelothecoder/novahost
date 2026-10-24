@@ -229,10 +229,31 @@
             </div>
           </div>
 
+          <!-- Higher timeframe first: it is what the entry chart is read against. -->
+          <div class="sc-kicker">{{ tfPair.htf }} CHART · {{ htfRequired ? 'REQUIRED FOR CRT' : 'RECOMMENDED' }}</div>
+          <input ref="htfInput" type="file" hidden accept="image/*" @change="onHtfFile" />
+          <button v-if="!htfPreview" class="sc-drop" :class="{ 'is-soft': !htfRequired }" @click="pickHtf">
+            <span class="ms">add_photo_alternate</span>
+            <span class="sc-drop-t">Add the {{ tfPair.htf }} chart</span>
+            <span class="mono sc-drop-s">{{ htfRequired ? 'CRT reads the range candle from it' : 'trend and key levels · stronger read' }}</span>
+          </button>
+          <div v-else class="sc-file is-ok">
+            <img :src="htfPreview" alt="" class="sc-file-img" />
+            <span class="sc-file-copy">
+              <span class="mono">{{ htfName }}</span>
+              <span class="is-buy">{{ tfPair.htf }} · higher timeframe</span>
+            </span>
+            <span class="sc-file-acts">
+              <button class="sc-link" @click="pickHtf">Replace</button>
+              <button v-if="!htfRequired" class="sc-link" @click="htfPreview = null">Remove</button>
+            </span>
+          </div>
+
+          <div class="sc-kicker">{{ tfPair.ltf }} CHART · ENTRY</div>
           <input ref="fileInput" type="file" hidden accept="image/*" @change="onFile" />
           <button v-if="!preview" class="sc-drop" @click="pickFile">
             <span class="ms">add_photo_alternate</span>
-            <span class="sc-drop-t">Choose screenshot</span>
+            <span class="sc-drop-t">Add the {{ tfPair.ltf }} chart</span>
             <span class="mono sc-drop-s">landscape chart screenshot</span>
           </button>
           <div v-else-if="isLandscape" class="sc-file is-ok">
@@ -369,6 +390,25 @@
               <p class="sc-note">{{ resultSizeNote }}</p>
             </div>
           </template>
+
+          <div v-if="explainText" class="sc-card">
+            <div class="sc-card-top">
+              <span class="sc-kicker">IN PLAIN WORDS</span>
+              <span class="sc-seg" role="group" aria-label="Explanation style">
+                <button :class="{ 'is-on': !explainPro }" @click="setExplain('Normal')">Normal</button>
+                <button :class="{ 'is-on': explainPro }" @click="setExplain('Pro')">Pro</button>
+              </span>
+            </div>
+            <p class="sc-body">{{ explainText }}</p>
+            <button class="sc-btn is-quiet is-sm" :disabled="speaking === 'load'" @click="toggleSpeak">
+              <span class="ms">{{ speaking === 'play' ? 'stop' : speaking === 'load' ? 'progress_activity' : 'volume_up' }}</span>
+              {{ speaking === 'play' ? 'Stop' : speaking === 'load' ? 'Getting the voice…' : 'Listen' }}
+            </button>
+          </div>
+
+          <p v-if="reading.htf_suggested" class="sc-note">
+            Read from one chart, so confidence is capped at 70. Add the {{ reading.htf_suggested }} chart next time for a stronger read.
+          </p>
 
           <div class="sc-card is-quiet">
             <div>
@@ -586,7 +626,28 @@
           </span>
           <h2 class="sc-h2">{{ placed.title }}</h2>
           <p class="sc-lede">{{ placed.body }}</p>
-          <button class="sc-cta" @click="placed.ok ? doneHome() : closeSheet()">{{ placed.ok ? 'Done' : 'Back to the plan' }}</button>
+
+          <!-- Same trade on the licence's other linked accounts, only on a yes. -->
+          <template v-if="placed.ok && otherAccounts.length">
+            <div class="sc-kicker">ALSO PLACE ON YOUR OTHER {{ otherAccounts.length === 1 ? 'ACCOUNT' : 'ACCOUNTS' }}?</div>
+            <button
+              v-for="a in otherAccounts" :key="a.account_id"
+              class="sc-opt" :class="{ 'is-on': copyPick[a.account_id] }"
+              :disabled="!!copyDone[a.account_id] || copying"
+              @click="copyPick[a.account_id] = !copyPick[a.account_id]"
+            >
+              <span class="sc-opt-copy">
+                <span class="sc-opt-t">{{ a.label || a.server || 'Account' }} ···{{ String(a.login || '').slice(-4) }}</span>
+                <span class="sc-opt-d">{{ copyDone[a.account_id] ? copyDone[a.account_id].message : `${scaledLot(a).toFixed(2)} lot each · ×${a.lot_multiplier || 1} of this account` }}</span>
+              </span>
+              <span class="sc-radio" :class="{ 'is-on': copyPick[a.account_id] }"><span></span></span>
+            </button>
+            <button v-if="copyPending" class="sc-cta" :disabled="copying" @click="copyToOthers">
+              {{ copying ? 'Placing…' : `Place on ${copyPending} more` }}
+            </button>
+          </template>
+
+          <button :class="placed.ok && copyPending ? 'sc-btn is-quiet' : 'sc-cta'" @click="placed.ok ? doneHome() : closeSheet()">{{ placed.ok ? (copyPending ? 'No thanks, done' : 'Done') : 'Back to the plan' }}</button>
         </template>
       </div>
     </template>
@@ -606,7 +667,8 @@ import { loadQuote, loadAccount } from '../services/brokerService.js'
 import { authState } from '../services/authService'
 import { haptic } from '../composables/useSpeech.js'
 import ScannerPaywall from '../components/ScannerPaywall.vue'
-import { scanChart, sendPlan, preflight } from '../services/scannerService.js'
+import { scanChart, sendPlan, preflight, listLinkedAccounts, speakText } from '../services/scannerService.js'
+import { prefs } from '../stores/settingsPrefs.js'
 import { buildLadder, scoreConfluence, checkGuardrails, MIN_LOT } from '../services/confluence.js'
 import { loadRates, convert, signFor } from '../services/fxRates.js'
 import { loadPlan, normaliseSymbol } from '../services/symbolPlanService.js'
@@ -622,9 +684,11 @@ import { devScannerUnlocked } from '../utils/devGate.js'
 
 const router = useRouter()
 
-/* `analyze-chart` is the real gate. This only decides what to draw. */
+/* `analyze-chart` is the real gate. This only decides what to draw: the old
+   unlimited unlock, this month's free scan, or a bought credit. */
 const hasScanner = computed(
-  () => authState.hasScanner || (import.meta.env.DEV && devScannerUnlocked())
+  () => authState.hasScanner || authState.freeScanAvailable || authState.scanCredits > 0 ||
+    (import.meta.env.DEV && devScannerUnlocked())
 )
 
 const FLOW = ['symbol', 'style', 'strategy', 'size', 'chart', 'scan', 'result']
@@ -885,8 +949,30 @@ const guideRules = computed(() => [
   'Turn your phone sideways before you take the screenshot. Portrait shots cut the price history short.',
   'Show at least 100 candles.',
   'Keep the price scale on the right, and the time axis along the bottom, in view.',
-  `One timeframe per shot. ${styleObj.value.tfs[1]} works best for ${styleObj.value.name.toLowerCase()}.`,
+  `One timeframe per shot: ${tfPair.value.htf} for the bigger picture, ${tfPair.value.ltf} for the entry.`,
 ])
+
+/* The two charts per style. Matches STYLES in `analyze-chart`, which checks
+   the timeframes printed on each screenshot against these. */
+const TF_PAIRS = { scalp: { htf: 'H1', ltf: 'M5' }, day: { htf: 'H4', ltf: 'M15' }, swing: { htf: 'D1', ltf: 'H4' } }
+const tfPair = computed(() => TF_PAIRS[mode.value] || TF_PAIRS.day)
+/* CRT's range candle lives on the higher timeframe; it can't be read from one chart. */
+const htfRequired = computed(() => strategy.value === 'CRT')
+const htfInput = ref(null)
+const htfPreview = ref(null)
+const htfName = ref('')
+
+function pickHtf() { htfInput.value?.click() }
+function onHtfFile(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+  htfName.value = file.name || 'screenshot'
+  const fr = new FileReader()
+  fr.onload = ev => { htfPreview.value = ev.target.result }
+  fr.onerror = () => flash('That file isn’t an image I can read.')
+  fr.readAsDataURL(file)
+}
 
 function pickFile() { fileInput.value?.click() }
 
@@ -960,7 +1046,8 @@ async function startScan() {
   tickEvery(250)
   haptic(30)
   try {
-    const data = await scanChart(preview.value, mode.value, strategy.value)
+    stopSpeak()
+    const data = await scanChart(preview.value, mode.value, strategy.value, htfPreview.value)
     if (mine !== scanSeq) return
     reading.value = data
     const scanned = normaliseSymbol(data?.symbol_on_chart || '')
@@ -990,9 +1077,51 @@ function cancelScan() {
 }
 
 function scanAgain() {
+  stopSpeak()
   preview.value = null
+  htfPreview.value = null
   screen.value = 'chart'
 }
+
+/* ── Explanation and voice ───────────────────────────────────────────
+   `analyze-chart` writes both versions; the toggle only picks one, and it is
+   the same preference as Settings → Chart scanner → Explanations. */
+const explainPro = computed(() => prefs.scanExplain === 'Pro')
+const explainText = computed(() => {
+  const r = reading.value
+  if (!r) return ''
+  return (explainPro.value ? r.explain_pro : r.explain_normal) || r.explain_normal || ''
+})
+function setExplain(v) {
+  if (prefs.scanExplain === v) return
+  prefs.scanExplain = v
+  stopSpeak()
+  haptic(15)
+}
+
+const speaking = ref('') // '' | 'load' | 'play'
+let voicePlayer = null
+function stopSpeak() {
+  if (voicePlayer) { voicePlayer.pause(); voicePlayer.onended = null }
+  speaking.value = ''
+}
+async function toggleSpeak() {
+  if (speaking.value === 'play') { stopSpeak(); return }
+  /* Safari only lets audio play when it starts inside the tap, and the voice
+     arrives seconds later. The element is created and played (silently) now,
+     then handed the real clip. */
+  if (!voicePlayer) voicePlayer = new Audio()
+  voicePlayer.play().catch(() => {})
+  speaking.value = 'load'
+  const text = explainText.value
+  const res = await speakText(text)
+  if (speaking.value !== 'load' || text !== explainText.value) return
+  if (!res.ok) { speaking.value = ''; flash(res.message); return }
+  voicePlayer.src = res.src
+  voicePlayer.onended = () => { speaking.value = '' }
+  voicePlayer.play().then(() => { speaking.value = 'play' }).catch(() => { speaking.value = ''; flash('Tap Listen again to play.') })
+}
+onUnmounted(stopSpeak)
 
 /* ── Result ──────────────────────────────────────────────────────── */
 /* The chart's instrument wins over the pick. If the model could not read a
@@ -1205,8 +1334,15 @@ function fitLotFor(n) {
   return per > 0 ? Number((Math.floor(budgetQ / per / MIN_LOT) * MIN_LOT).toFixed(2)) : null
 }
 
+/* The server's own style and instrument checks: minimum R:R for the style,
+   scalp session hours, two screenshots of different symbols or the same
+   timeframe. Each blocks placing exactly like a red guardrail does. */
+const serverBlocks = computed(() => (reading.value?.block_reasons || []).map((d, i) => ({
+  id: `srv${i}`, t: 'Doesn’t fit the rules for this style', d, fix: 'Scan again', run: scanAgain,
+})))
+
 /* Every red item comes with a real way forward, or with none. */
-const blocks = computed(() => guards.value.blocks.map(b => {
+const blocks = computed(() => [...serverBlocks.value, ...guards.value.blocks.map(b => {
   const out = { id: b.id, t: b.label, d: [b.detail, b.remedy].filter(Boolean).join(' '), fix: '', run: null }
   if (b.id === 'stale' || b.id === 'scale') {
     out.fix = 'Scan a fresh chart'
@@ -1234,7 +1370,7 @@ const blocks = computed(() => guards.value.blocks.map(b => {
     out.run = scanAgain
   }
   return out
-}))
+})])
 
 /* ── Order type sheet ────────────────────────────────────────────── */
 const orderOpts = computed(() => {
@@ -1260,12 +1396,13 @@ function pickOrder(k) {
 const sending = ref(false)
 const placed = ref(null)
 
-const slideOk = computed(() => isTrade.value && plan.value.valid && !!pair.value && !guards.value.blocked && !sending.value)
+const anyBlock = computed(() => guards.value.blocked || serverBlocks.value.length > 0)
+const slideOk = computed(() => isTrade.value && plan.value.valid && !!pair.value && !anyBlock.value && !sending.value)
 const slideLabel = computed(() => {
   if (sending.value) return 'Sending…'
   if (!isTrade.value) return 'No trade to place'
   if (!plan.value.valid) return 'This plan can’t be placed'
-  if (guards.value.blocked) return 'Fix the red items first'
+  if (anyBlock.value) return 'Fix the red items first'
   return `Slide to place ${orderName.value}`
 })
 
@@ -1291,6 +1428,7 @@ async function execute() {
     return
   }
   const res = await sendPlan(order, 'ladder')
+  lastOrder = order
   const n = res.placed?.length || 0
   finishPlace({
     ok: res.ok,
@@ -1302,9 +1440,49 @@ async function execute() {
   })
 }
 
+/* ── Copy to the licence's other accounts ────────────────────────────
+   Asked, never automatic. The main account is the one `broker-execute`
+   resolves with no `account_id`; the rest are offered after it succeeds,
+   each at its own lot multiplier. */
+const linked = ref([])
+const otherAccounts = computed(() => linked.value.filter(a => !a.primary && a.status !== 'removed'))
+const copyPick = reactive({})
+const copyDone = reactive({})
+const copying = ref(false)
+const copyPending = computed(() => otherAccounts.value.filter(a => copyPick[a.account_id] && !copyDone[a.account_id]).length)
+onMounted(async () => { linked.value = await listLinkedAccounts() })
+
+function scaledLot(a) {
+  const m = Number(a.lot_multiplier) > 0 ? Number(a.lot_multiplier) : 1
+  return Math.max(MIN_LOT, Math.floor((lotPer.value * m) / MIN_LOT) * MIN_LOT)
+}
+
+async function copyToOthers() {
+  if (copying.value || !lastOrder) return
+  copying.value = true
+  haptic(40)
+  for (const a of otherAccounts.value) {
+    if (!copyPick[a.account_id] || copyDone[a.account_id]) continue
+    const m = Number(a.lot_multiplier) > 0 ? Number(a.lot_multiplier) : 1
+    const legs = lastOrder.legs.map(l => ({ ...l, lot: l.lot > 0 ? Math.max(MIN_LOT, Math.floor((l.lot * m) / MIN_LOT) * MIN_LOT) : 0 }))
+    const order = { ...lastOrder, legs, totalLot: legs.reduce((s, l) => s + l.lot, 0) }
+    const res = await sendPlan(order, 'ladder', null, a.account_id)
+    copyDone[a.account_id] = { ok: res.ok, message: res.ok ? 'Placed' : `Not placed: ${res.message}` }
+  }
+  copying.value = false
+  const all = otherAccounts.value.filter(a => copyDone[a.account_id])
+  const okN = all.filter(a => copyDone[a.account_id].ok).length
+  updateScan(historyId, { copies: all.map(a => ({ account: a.account_id, ...copyDone[a.account_id] })) })
+  flash(okN === all.length ? `Placed on ${okN} more ${okN === 1 ? 'account' : 'accounts'}` : `${okN} of ${all.length} placed. See each account for why.`)
+}
+
+let lastOrder = null
+
 function finishPlace(r) {
   sending.value = false
   placed.value = r
+  for (const k of Object.keys(copyPick)) delete copyPick[k]
+  for (const k of Object.keys(copyDone)) delete copyDone[k]
   sheet.value = 'placed'
   updateScan(historyId, { sent: { ok: r.ok, message: r.message } })
   history.value = loadHistory()
@@ -1435,9 +1613,12 @@ const cta = computed(() => {
     case 'strategy': return { label: 'Continue', off: false, go: () => { screen.value = 'size' } }
     case 'size': return { label: 'Continue', off: false, go: () => { screen.value = 'chart' } }
     default: {
-      const blocked = !preview.value || (!isLandscape.value && !allowPortrait.value)
+      const needHtf = htfRequired.value && !htfPreview.value
+      const blocked = !preview.value || needHtf || (!isLandscape.value && !allowPortrait.value)
       return {
-        label: !preview.value ? 'Add a screenshot to scan' : blocked ? 'Add a landscape screenshot' : `Scan ${symbol.value}`,
+        label: needHtf ? `Add the ${tfPair.value.htf} chart for CRT`
+          : !preview.value ? `Add the ${tfPair.value.ltf} chart to scan`
+          : blocked ? 'Add a landscape screenshot' : `Scan ${symbol.value}`,
         off: blocked,
         go: startScan,
       }
@@ -1487,7 +1668,11 @@ function sessionLabel() {
 function goBack() {
   if (sheet.value) { closeSheet(); return }
   if (screen.value === 'scan') { cancelScan(); return }
-  if (screen.value === 'fund' || screen.value === 'history') { screen.value = returnTo.value || 'symbol'; return }
+  if (screen.value === 'fund' || screen.value === 'history') {
+    /* Opened straight from the Home news card: Back goes home. */
+    if (returnTo.value === 'home') { router.push('/home'); return }
+    screen.value = returnTo.value || 'symbol'; return
+  }
   const prev = BACK[screen.value]
   if (prev && hasScanner.value) screen.value = prev
   else router.push('/home')
@@ -1513,6 +1698,8 @@ function loadSymbolQuotes() {
 }
 
 onMounted(async () => {
+  /* /scanner?screen=fund is the Home news card's deep link. */
+  if (router.currentRoute.value.query.screen === 'fund') { returnTo.value = 'home'; screen.value = 'fund' }
   fxTable.value = await loadRates()
   refreshFleet().catch(() => {})
   refreshAccount()
@@ -1784,6 +1971,13 @@ button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent
 .sc-drop .ms { font-size: 28px; color: var(--cc-ink-3) }
 .sc-drop-t { font-size: 15px; font-weight: 600 }
 .sc-drop-s { font-size: 11.5px; color: var(--cc-ink-4) }
+.sc-drop.is-soft { min-height: 0; padding-block: 16px; border-style: dashed; opacity: 0.85 }
+.sc-seg { display: inline-flex; padding: 2px; border-radius: 9999px; background: rgba(var(--cc-accent-rgb), 0.08) }
+.sc-seg button {
+  height: 26px; padding: 0 12px; border: 0; border-radius: 9999px; background: transparent;
+  color: var(--cc-ink-3); font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.sc-seg button.is-on { background: rgba(var(--cc-accent-rgb), 0.22); color: var(--cc-ink) }
 .sc-file { border-radius: 20px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; font-size: 13.5px }
 .sc-file.is-ok { background: var(--cc-buy-dim); border: 1px solid rgba(63, 214, 168, 0.35) }
 .sc-file.is-bad { flex-direction: column; align-items: stretch; gap: 10px; background: var(--cc-sell-dim); border: 1px solid rgba(224, 84, 78, 0.4) }

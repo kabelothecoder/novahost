@@ -50,7 +50,7 @@ const DEFAULTS = {
   marginOn: true, marginMin: '50%',
   tgtOn: true, tgtProfit: 'R1 500', tgtLoss: 'R750', tgtReset: '00:00', tgtVoice: true,
   killLong: true, killVoice: true, killAction: 'Close all trades', review: '30 s',
-  scanStyle: 'Ask every time', scanSource: 'Live chart', scanNews: true, scans: 38,
+  scanStyle: 'Ask every time', scanExplain: 'Normal', scanSource: 'Live chart', scanNews: true, scans: 38,
   newsBrief: true, newsEarly: '15 min',
   ev_nfp: true, ev_cpi: true, ev_fomc: true, ev_gdp: false, ev_pmi: false, ev_retail: true,
   newsMine: true, newsAlert: true, newsVoice: false,

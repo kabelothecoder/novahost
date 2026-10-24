@@ -5,6 +5,7 @@ import { authState, initializeAuth } from '../services/authService.js'
 // its call site below makes Rollup drop this import from any production
 // build. Delete this line and the marked block together.
 import { devGateBypassActive } from '../utils/devGate.js'
+import { needsHomeScreenInstall } from '../utils/install.js'
 
 const routes = [
   {
@@ -18,6 +19,12 @@ const routes = [
     name: 'unlock',
     component: () => import('../views/UnlockView.vue'),
     meta: { public: true }
+  },
+  {
+    /* The two value screens that sell the plan, right before checkout. */
+    path: '/plan',
+    name: 'plan',
+    component: () => import('../views/PlanView.vue'),
   },
   {
     path: '/payment',
@@ -106,15 +113,18 @@ export const router = createRouter({
 
 // ── Smart Shield Guard ────────────────────────────────────────────────────────
 //
-// Onboarding wizard → licence-key gate (/unlock) → email + PayFast (/payment)
-// → home. Two sequential locks after the wizard:
+// Home Screen install → onboarding wizard → value screens (/plan) → email +
+// PayFast (/payment) → licence key, typed or claimed by code (/unlock) → home.
 //
-//   keyValidated  the mentor-issued key has cleared validate-license
-//   isVerified    a paid, device-matched purchase (check-subscription-status)
+// Pay first, key second. The key is claimed AFTER paying (request-claim-code),
+// so no mentor key is ever issued to someone who has not paid. Two sequential
+// locks after the wizard:
 //
-// Neither is skippable and the order is fixed: no key ⇒ /unlock, key but
-// unpaid ⇒ /payment, both ⇒ the app. `/payment` is NOT reachable without a
-// validated key — the checkout itself refuses one that does not carry a key.
+//   isVerified    a paid, in-date, device-matched purchase (check-subscription-status)
+//   keyValidated  a licence key has cleared validate-license
+//
+// Neither is skippable: unpaid ⇒ /plan (or straight to /payment for a renewal
+// or a device move), paid but no key ⇒ /unlock, both ⇒ the app.
 router.beforeEach(async (to, from, next) => {
   if (to.name === 'splash') return next()
 
@@ -139,6 +149,14 @@ router.beforeEach(async (to, from, next) => {
   // and the check below would sit a paying customer down in front of the
   // setup wizard. The screen verifies nothing, so there is nothing to guard.
   if (to.name === 'payment-return') return next()
+
+  // ── Lock −1: the Home Screen ──────────────────────────────────────────────
+  // An iPhone in a Safari tab gets the install steps and nothing else — above
+  // all, no checkout, which would bind the purchase to a device id the
+  // installed app never presents. See utils/install.js.
+  if (needsHomeScreenInstall()) {
+    return to.name === 'onboarding' ? next() : next({ name: 'onboarding' })
+  }
 
   // ── Lock 0: the wizard ────────────────────────────────────────────────────
   //
@@ -174,30 +192,27 @@ router.beforeEach(async (to, from, next) => {
     await initializeAuth()
   }
 
-  // ── Lock 1: the licence key ───────────────────────────────────────────────
-  // Nothing past the gate is reachable without one — `payment` included, since
-  // generate-payfast-checkout refuses an ios checkout that carries no key.
+  // ── Lock 1: payment ───────────────────────────────────────────────────────
+  // No active purchase (none yet, 30 days run out, or one that lives on
+  // another device — PaymentView reads authState.reason to show buy, renew or
+  // move). A first-time buyer sees the value screens first; someone renewing
+  // or moving has already seen them and goes straight to checkout.
+  if (!authState.isVerified) {
+    if (to.name === 'plan' || to.name === 'payment') return next()
+    const returning = authState.reason === 'expired' || authState.reason === 'device_mismatch'
+    return next({ name: returning ? 'payment' : 'plan' })
+  }
+
+  // ── Lock 2: the licence key ───────────────────────────────────────────────
+  // Paid. Now the key — typed, or claimed with a code from a mentor's site.
   if (!authState.keyValidated) {
     return to.name === 'unlock' ? next() : next({ name: 'unlock' })
   }
-  // Key is in — the gate is behind them. Send them on to whichever lock is next.
-  if (to.name === 'unlock') {
-    return next({ name: authState.isVerified ? 'home' : 'payment' })
-  }
 
-  // ── Lock 2: payment ───────────────────────────────────────────────────────
-  // Key validated, no active purchase (or one that lives on another device —
-  // PaymentView reads authState.reason to show buy vs move). Checkout is the
-  // only place to go.
-  if (!authState.isVerified) {
-    return to.name === 'payment' ? next() : next({ name: 'payment' })
-  }
-  // Fully in. Don't strand a verified user on the purchase screen — the
-  // scanner add-on is sold in place by ScannerPaywall.vue, nothing routes here.
-  // `onboarding` rides along for the same reason: a finished wizard is not a
-  // screen anyone should land on again, and falling through to next() would
-  // render it over the top of a fully activated app.
-  if (to.name === 'payment' || to.name === 'onboarding') {
+  // Fully in. None of the gate screens is a destination any more — falling
+  // through to next() would render one over the top of an activated app. The
+  // scanner's scan packs are sold in place by ScannerPaywall.vue.
+  if (['unlock', 'plan', 'payment', 'onboarding'].includes(to.name)) {
     return next({ name: 'home' })
   }
 

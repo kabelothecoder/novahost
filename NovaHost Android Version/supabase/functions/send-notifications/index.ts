@@ -141,27 +141,47 @@ function wanted(kind: string, sub: Sub): boolean {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-function emailHtml(title: string, body: string, robot: string, accent: string, url: string): string {
-  return `<!doctype html><html><body style="margin:0;background:#0E0E11;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+function emailHtml(title: string, body: string, robot: string, accent: string, url: string, art: string): string {
+  // Light-only on purpose: Gmail/Outlook dark mode half-inverts a dark email into
+  // grey mush. A white card with dark ink survives inversion intact.
+  // The robot name appears once (header row) — the title is usually the same
+  // name, so it is only repeated when it says something different.
+  const showTitle = title.trim().toLowerCase() !== robot.trim().toLowerCase()
+  return `<!doctype html><html><head><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>
+<body style="margin:0;background:#F2F4F7;padding:28px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+<div style="display:none;max-height:0;overflow:hidden">${esc(body)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:440px;background:#17171C;border:1px solid #2A2A33;border-radius:24px;overflow:hidden">
-<tr><td style="height:4px;background:${accent}"></td></tr>
-<tr><td align="center" style="padding:32px 28px 8px">
-<img src="${APP_URL}/robot_avatar.png" width="96" height="96" alt="${esc(robot)}" style="display:block;border-radius:48px;border:2px solid ${accent}">
-<div style="margin-top:14px;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:${accent};font-weight:700">${esc(robot)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:460px">
+<tr><td style="padding:0 4px 14px;font-size:13px;font-weight:800;letter-spacing:.4px;color:#1A1D20">NovaHost</td></tr>
+</table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:460px;background:#FFFFFF;border:1px solid #E4E7EC;border-radius:20px">
+<tr><td style="padding:22px 24px 0">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="vertical-align:middle"><img src="${art}" width="44" height="44" alt="" style="display:block;border-radius:22px;border:2px solid ${accent}"></td>
+<td style="vertical-align:middle;padding-left:12px">
+<div style="font-size:15px;font-weight:700;color:#1A1D20;line-height:20px">${esc(robot)}</div>
+<div style="font-size:12px;color:#8A94A6;line-height:16px"><span style="display:inline-block;width:7px;height:7px;border-radius:4px;background:${accent};margin-right:6px"></span>Your trading robot</div>
+</td></tr></table>
 </td></tr>
-<tr><td style="padding:8px 28px 4px;text-align:center;color:#F4F4F6;font-size:20px;line-height:28px;font-weight:700">${esc(title)}</td></tr>
-<tr><td style="padding:4px 28px 24px;text-align:center;color:#A6A6B3;font-size:15px;line-height:22px">${esc(body)}</td></tr>
-<tr><td align="center" style="padding:0 28px 32px">
-<a href="${APP_URL}${url}" style="display:inline-block;background:${accent};color:#0E0E11;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:9999px">Open NovaHost</a>
+<tr><td style="padding:20px 24px 0"><div style="height:1px;background:#EEF0F3"></div></td></tr>
+${showTitle ? `<tr><td style="padding:20px 24px 0;color:#1A1D20;font-size:20px;line-height:27px;font-weight:700">${esc(title)}</td></tr>` : ''}
+<tr><td style="padding:${showTitle ? '8px' : '20px'} 24px 0;color:#3D4450;font-size:16px;line-height:24px">${esc(body)}</td></tr>
+<tr><td style="padding:24px 24px 24px">
+<a href="${APP_URL}${url}" style="display:block;text-align:center;background:#1A1D20;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:15px;padding:14px 20px;border-radius:9999px">Open ${esc(robot)}</a>
 </td></tr>
 </table>
-<div style="max-width:440px;margin-top:16px;color:#6B6B78;font-size:12px;line-height:18px;text-align:center">
-You get these emails because notifications are not turned on in the NovaHost app on your iPhone. Turn them on in Settings › Notifications to get alerts on your phone instead.<br>NovaHost
-</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:460px">
+<tr><td style="padding:18px 8px 0;color:#8A94A6;font-size:12px;line-height:18px;text-align:center">
+Getting this by email because notifications are off in the NovaHost app.<br>Turn them on in <b style="color:#5C6370">Settings › Notifications</b> to get these on your phone instead.
+</td></tr></table>
 </td></tr></table></body></html>`
 }
 
+/** The robot's own art, served as a plain image by robot-art (mail clients strip data: URIs). */
+function artUrl(ea: { id?: string } | undefined): string {
+  const base = Deno.env.get('SUPABASE_URL') ?? ''
+  return ea?.id && base ? `${base}/functions/v1/robot-art?ea=${ea.id}` : `${APP_URL}/robot_avatar.png`
+}
 function safeAccent(v: unknown): string {
   const s = String(v ?? '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s : '#5C9CE6'
@@ -286,7 +306,7 @@ Deno.serve(async (req: Request) => {
         payload: {
           from: mailFrom, to: [to],
           subject: msg.title,
-          html: emailHtml(msg.title, msg.body, eaName, safeAccent(ea?.accent_color), msg.url),
+          html: emailHtml(msg.title, msg.body, eaName, safeAccent(ea?.accent_color), msg.url, artUrl(ea)),
           text: `${msg.title}\n\n${msg.body}\n\n${APP_URL}${msg.url}`,
         },
       })

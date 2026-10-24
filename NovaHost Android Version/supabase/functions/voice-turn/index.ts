@@ -117,6 +117,30 @@ Deno.serve(async (req: Request) => {
       return json({ success: false, code: 'DAILY_LIMIT', error: `That is today's ${DAILY_TURNS} voice chats used. Voice resets at midnight UTC.` }, 429)
     }
 
+    // ---- Speak-only ------------------------------------------------------------
+    // The scanner's explanation is already written by analyze-chart; it only
+    // needs a voice. No ASR, no Gemini -- just TTS in the robot's voice.
+    const speakText = String(fields.speak ?? '').trim().slice(0, 900)
+    if (speakText) {
+      const sea = (lic as any).expert_advisors ?? {}
+      const t = await fetch(`${FISH}/tts`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${fishKey()}`, 'Content-Type': 'application/json', model: TTS_MODEL },
+        body: JSON.stringify({ text: speakText, reference_id: sea.voice_id || ROBOT_VOICE, format: 'mp3', latency: 'balanced', normalize: true }),
+      })
+      let b64: string | null = null
+      if (t.ok) {
+        const buf = new Uint8Array(await t.arrayBuffer())
+        let bin = ''
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+        b64 = btoa(bin)
+      } else {
+        console.error('[voice-turn] speak TTS', t.status, (await t.text()).slice(0, 300))
+      }
+      await db.rpc('voice_usage_bump', { p_license: lic.id, p_asr: 0, p_tts: b64 ? new TextEncoder().encode(speakText).length : 0 })
+      return json({ success: true, mode: 'speak', transcript: '', reply: speakText, action: null, audio_b64: b64, audio_mime: 'audio/mpeg' })
+    }
+
     // ---- Hear -----------------------------------------------------------------
     let transcript = String(fields.text ?? '').trim().slice(0, 600)
     let asrSeconds = 0

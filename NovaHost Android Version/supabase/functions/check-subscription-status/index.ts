@@ -166,7 +166,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: sub, error } = await novaHost
       .from('subscriptions')
-      .select('id, email, is_premium, is_lifetime, has_scanner, device_id, subscription_expiry, token')
+      .select('id, email, is_premium, is_lifetime, has_scanner, device_id, subscription_expiry, token, scan_credits, free_scan_month')
       .eq('email', email)
       .maybeSingle()
 
@@ -295,6 +295,10 @@ Deno.serve(async (req: Request) => {
       has_scanner: sub.has_scanner === true,
       reason: 'active',
       token,
+      // iOS reads these three; older clients ignore them.
+      subscription_expiry: sub.is_lifetime ? null : (sub.subscription_expiry ?? null),
+      scan_credits: sub.scan_credits ?? 0,
+      free_scan_available: sub.free_scan_month !== nowIso.slice(0, 7),
       ...envelope,
     })
 

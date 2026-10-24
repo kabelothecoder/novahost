@@ -102,7 +102,7 @@ const route   = useRoute()
 // browser that has usually never seen this app: the dock would offer navigation
 // into an unverified session, and its robot avatar reads as a second, competing
 // subject on a screen that has one thing to say.
-const HIDE_DOCK = ['splash', 'onboarding', 'unlock', 'payment', 'payment-return']
+const HIDE_DOCK = ['splash', 'onboarding', 'plan', 'unlock', 'payment', 'payment-return']
 
 // Home layouts that render chrome-free.
 //
@@ -133,7 +133,7 @@ const showDock = computed(() => !HIDE_DOCK.includes(route.name) && route.name !=
 // black gradient and the bg video would otherwise sit behind — and blur
 // through — the frosted Nova materials on onboarding, the gate and the
 // PayFast landing screen.
-const LIGHT_ROUTES = ['onboarding', 'unlock', 'payment', 'payment-return']
+const LIGHT_ROUTES = ['onboarding', 'plan', 'unlock', 'payment', 'payment-return']
 const isLightRoute = computed(() => LIGHT_ROUTES.includes(route.name))
 
 // Routes on the command.css system. They paint their own opaque canvas

@@ -57,7 +57,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
    accepts either; `deviceId` is sent because this is not an Android handset
    and naming it otherwise would be a lie that the next reader has to
    untangle. */
-export async function scanChart(imageBase64, mode, strategy) {
+export async function scanChart(imageBase64, mode, strategy, htfImageBase64 = null) {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/analyze-chart`, {
     method: 'POST',
     headers: {
@@ -67,6 +67,11 @@ export async function scanChart(imageBase64, mode, strategy) {
     },
     body: JSON.stringify({
       imageBase64,
+      /* Higher-timeframe chart, read first by the model. Required for CRT,
+         encouraged for the rest. `htf_capable` tells the server this build can
+         send one, so it may refuse a one-chart CRT instead of guessing. */
+      ...(htfImageBase64 ? { htfImageBase64 } : {}),
+      htf_capable: true,
       trading_mode: mode || 'day',
       /* Which school of reading produces the setup. `analyze-chart` keys
          STRATEGY_BRIEFS off this and frames the whole read with it.
@@ -92,6 +97,13 @@ export async function scanChart(imageBase64, mode, strategy) {
     if (body?.error) {
       const err = new Error(String(body.error))
       err.code = body.code
+      /* Out of scans. Zeroing the cached balance is what swaps the scanner
+         for the scan-pack paywall — done here, on a refused scan, and never
+         on a successful one, so a result is not replaced mid-read. */
+      if (body.code === 'SCANNER_LOCKED') {
+        authState.scanCredits = 0
+        authState.freeScanAvailable = false
+      }
       throw err
     }
     const text = await res.text().catch(() => '')
@@ -148,7 +160,7 @@ function describe(data) {
  * everything (licence, allowance, cap, stops, symbol resolution) without
  * placing anything.
  */
-export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType, dryRun }) {
+export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType, dryRun, accountId }) {
   const licenseKey = secStorage.getItem('LICENSE_KEY')
   if (!licenseKey) return { ok: false, message: 'No licence key on this device.' }
   if (!pair) return { ok: false, message: 'No symbol to trade — the chart did not name one.' }
@@ -162,6 +174,8 @@ export async function placeOrder({ pair, side, volume, sl, tp, entry, orderType,
     tp: Number(tp),
     dry_run: !!dryRun,
   }
+  /* One of this licence's other linked accounts. Absent = the main one. */
+  if (accountId) body.account_id = accountId
   /* Only sent for pending orders. A MARKET order with an open_price is what
      produces MISSING_ENTRY_PRICE / ENTRY_OUTSIDE_BRACKET confusion. */
   if (orderType && orderType !== 'MARKET') {
@@ -257,7 +271,7 @@ export async function preflight(plan, mode) {
  * exactly which, because a partially-filled ladder the user cannot see is
  * worse than one that failed outright.
  */
-export async function sendPlan(plan, mode, onProgress) {
+export async function sendPlan(plan, mode, onProgress, accountId = null) {
   const legs = legsToSend(plan, mode)
 
   if (!legs.length) {
@@ -279,6 +293,7 @@ export async function sendPlan(plan, mode, onProgress) {
       tp: leg.price,
       entry: plan.entry,
       orderType: plan.orderType,
+      accountId,
     })
 
     if (res.ok) {
@@ -302,4 +317,41 @@ export async function sendPlan(plan, mode, onProgress) {
   }
 
   return { ok, placed, failed, message }
+}
+
+/**
+ * The licence's linked broker accounts, from `broker-connect`. Used after a
+ * scan is placed on the main account to offer the same trade on the others.
+ * Empty on any failure: the offer is a convenience, never a blocker.
+ */
+export async function listLinkedAccounts() {
+  const licenseKey = secStorage.getItem('LICENSE_KEY')
+  if (!licenseKey) return []
+  try {
+    let { data, error } = await supabase.functions.invoke('broker-connect', { body: { license_key: licenseKey, action: 'list_accounts' } })
+    if (error && !data && error.context && typeof error.context.json === 'function') {
+      try { data = await error.context.json() } catch { /* no body */ }
+    }
+    return data?.success ? (data.accounts || []) : []
+  } catch {
+    return []
+  }
+}
+
+/** Reads a scan explanation aloud in the robot's voice. Returns a playable
+ *  data URL, or null when voice is unavailable (the text is still on screen). */
+export async function speakText(text) {
+  const licenseKey = secStorage.getItem('LICENSE_KEY')
+  if (!licenseKey || !text) return { ok: false, message: 'Voice needs an active licence.' }
+  try {
+    let { data, error } = await supabase.functions.invoke('voice-turn', { body: { license_key: licenseKey, speak: text } })
+    if (error && !data && error.context && typeof error.context.json === 'function') {
+      try { data = await error.context.json() } catch { /* no body */ }
+    }
+    if (!data?.success) return { ok: false, message: data?.error || 'Voice is unavailable right now.' }
+    if (!data.audio_b64) return { ok: false, message: 'Voice is unavailable right now.' }
+    return { ok: true, src: `data:${data.audio_mime || 'audio/mpeg'};base64,${data.audio_b64}` }
+  } catch {
+    return { ok: false, message: 'No connection. Check your internet and try again.' }
+  }
 }

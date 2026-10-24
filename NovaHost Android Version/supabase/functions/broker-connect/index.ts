@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
     // need no credentials. The primary link (no action) behaves exactly as before.
     const action = String(body?.action ?? '')
     const addAccount = action === 'add_account'
-    const noCredentials = serversOnly || action === 'list_accounts' || action === 'remove_account'
+    const noCredentials = serversOnly || action === 'list_accounts' || action === 'remove_account' || action === 'reconnect'
 
     if (!license_key || (!noCredentials && (!account_number || !password || !server))) {
       return json({
@@ -131,6 +131,26 @@ Deno.serve(async (req: Request) => {
         .eq('id', row.id)
       if (!stopped) console.warn(`[broker-connect] ${row.provider} account ${row.bridge_account_id} unlinked but not stopped at the provider`)
       return json({ success: true, code: 'REMOVED', account_id: target })
+    }
+
+    // Brings an existing terminal back under the id we already hold. No
+    // password, and no second terminal: calling ConnectEx again for a login
+    // that is merely offline would bill it twice.
+    if (action === 'reconnect') {
+      const accounts = await liveAccounts()
+      const target = String(body?.account_id ?? '')
+      const row = target ? accounts.find((a) => a.bridge_account_id === target) : accounts.find((a) => a.is_primary)
+      if (!row) return json({ success: false, code: 'ACCOUNT_NOT_ON_LICENCE', error: 'That account is not linked to this licence.' }, 404)
+      const back = await bridgeFor(row.provider, row.bridge_account_id, novaHost)?.reconnect().catch(() => false)
+      if (!back) {
+        return json({
+          success: false, code: 'RECONNECT_FAILED',
+          error: 'We could not bring this account back. Update your login details to connect it again.',
+          account_id: row.bridge_account_id,
+        }, 502)
+      }
+      await novaHost.from('license_broker_accounts').update({ status: 'connected' }).eq('id', row.id)
+      return json({ success: true, code: 'RECONNECTED', account_id: row.bridge_account_id })
     }
 
     if (addAccount) {
@@ -333,6 +353,18 @@ Deno.serve(async (req: Request) => {
       const login = String(account_number ?? '').replace(/\s+/g, '')
       const now = new Date().toISOString()
       // The old primary, and any added account that is this same login, retire.
+      // The old primary's terminal was stopped by connect(); an added account
+      // on the same login has its own terminal, which must be stopped here or
+      // it keeps billing next to the new one.
+      const { data: sameLogin } = await novaHost.from('license_broker_accounts')
+        .select('provider, bridge_account_id')
+        .eq('license_id', license.id).eq('login', login).ilike('server', result.server)
+        .eq('is_primary', false).is('disconnected_at', null)
+      for (const dup of sameLogin ?? []) {
+        if (dup.bridge_account_id === accountId) continue
+        const stopped = await bridgeFor(dup.provider, dup.bridge_account_id, novaHost)?.disconnect().catch(() => false)
+        if (!stopped) console.warn(`[broker-connect] duplicate ${dup.provider} account ${dup.bridge_account_id} retired but not stopped at the provider`)
+      }
       await novaHost.from('license_broker_accounts')
         .update({ is_primary: false, disconnected_at: now, status: 'replaced' })
         .eq('license_id', license.id).eq('is_primary', true)

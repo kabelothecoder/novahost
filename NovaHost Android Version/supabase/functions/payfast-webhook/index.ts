@@ -8,6 +8,8 @@ import crypto from "node:crypto";
  *   LIFETIME     R599  -> is_lifetime = true, is_premium = true, expiry cleared
  *   SCANNER      R349  -> has_scanner = true
  *   REACTIVATION R150  -> device_id moved to the paying handset
+ *   MONTHLY      R349  -> is_premium, 30 days added to subscription_expiry (iOS)
+ *   SCANS20      R150  -> 20 added to scan_credits (iOS)
  *
  * The amount is verified against the price the product claims to be before any
  * entitlement is written. custom_str1 arrives back from the browser, so a
@@ -35,7 +37,16 @@ const EXPECTED_AMOUNT: Record<string, number> = {
   SUBSCRIPTION: 250,
   SCANNER: 350,
   REACTIVATION: 150,
+  // iOS only -- see generate-payfast-checkout.PRICES.
+  MONTHLY: 350,
+  SCANS20: 150,
 };
+
+/** Days one MONTHLY payment buys. */
+const MONTHLY_DAYS = 30;
+
+/** Scans one SCANS20 payment buys. */
+const SCAN_PACK_SIZE = 20;
 
 const PAYFAST_HOST = "www.payfast.co.za";
 
@@ -364,6 +375,85 @@ serve(async (req: Request) => {
           note: "App access purchased (LIFETIME).",
         });
       }
+
+    } else if (productType === "MONTHLY") {
+      const { data: existing, error: readErr } = await novaHost
+        .from("subscriptions")
+        .select("id, is_lifetime, subscription_expiry, device_id, token")
+        .eq("email", cleanEmail)
+        .maybeSingle();
+
+      if (readErr) {
+        console.error("[DB Error] MONTHLY lookup failed:", readErr.message);
+        return new Response("Database error", { status: 500 });
+      }
+
+      // A lifetime row already outranks 30 days. Taking the money is
+      // generate-payfast-checkout's job to prevent; if one gets through,
+      // nothing is downgraded and the refund is flagged.
+      if (existing?.is_lifetime === true) {
+        console.error("[MONTHLY] REFUND REQUIRED -- " + cleanEmail + " already has lifetime access. pf_payment_id=" + (pfPaymentId ?? "?"));
+        return new Response("OK", { status: 200 });
+      }
+
+      // Extended from whichever is later, so renewing early never loses days.
+      const currentExpiry = existing?.subscription_expiry ? new Date(existing.subscription_expiry) : null;
+      const base = currentExpiry && currentExpiry > new Date() ? currentExpiry : new Date();
+      const newExpiry = new Date(base.getTime() + MONTHLY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+      // Same device: keep the live session token. A new device (or a lapsed
+      // row with nothing bound) gets a fresh one, which is the eviction.
+      const sameDevice = !!deviceId && existing?.device_id === deviceId;
+      const upsertPayload: Record<string, unknown> = {
+        email: cleanEmail,
+        is_premium: true,
+        is_lifetime: false,
+        subscription_expiry: newExpiry,
+        updated_at: now,
+      };
+      if (deviceId && !sameDevice) {
+        upsertPayload.device_id = deviceId;
+        upsertPayload.device_bound_at = now;
+        upsertPayload.token = mintToken();
+        upsertPayload.token_issued_at = now;
+      }
+      if (licenseKeyFromCheckout) upsertPayload.license_key = licenseKeyFromCheckout;
+
+      const { error } = await novaHost
+        .from("subscriptions")
+        .upsert(upsertPayload, { onConflict: "email" });
+
+      if (error) {
+        console.error("[DB Error] MONTHLY upsert FAILED:", error.message);
+        return new Response("Database error", { status: 500 });
+      }
+
+      if (deviceId && !sameDevice) {
+        await novaHost.from("subscription_device_events").insert({
+          email: cleanEmail,
+          event: "bind",
+          old_device_id: existing?.device_id ?? null,
+          new_device_id: deviceId,
+          amount: paidAmount,
+          pf_payment_id: pfPaymentId ?? null,
+          note: "30-day access purchased (MONTHLY).",
+        });
+      }
+
+      console.log("[MONTHLY] SUCCESS - " + cleanEmail + " active until " + newExpiry);
+
+    } else if (productType === "SCANS20") {
+      const { data: total, error } = await novaHost.rpc("add_scan_credits", {
+        p_email: cleanEmail,
+        p_count: SCAN_PACK_SIZE,
+      });
+
+      if (error) {
+        console.error("[DB Error] SCANS20 credit FAILED:", error.message);
+        return new Response("Database error", { status: 500 });
+      }
+
+      console.log("[SCANS20] SUCCESS - " + cleanEmail + " now has " + total + " scans.");
 
     } else if (productType === "SCANNER") {
       // Upsert rather than update: the scanner can be bought against an email

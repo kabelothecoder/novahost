@@ -17,7 +17,7 @@
             <span class="pay-lens-gloss" aria-hidden="true"></span>
           </div>
           <div class="pay-head-copy nv-stagger">
-            <p class="nv-step-label">{{ isMove ? 'Device move' : 'The Vault' }}</p>
+            <p class="nv-step-label">{{ isMove ? 'Device move' : (isRenewal ? 'Renewal' : 'The Vault') }}</p>
             <h1 class="nv-title pay-title">{{ title }}</h1>
             <p class="nv-body pay-body">{{ body }}</p>
           </div>
@@ -179,8 +179,8 @@
           <span>Payment is handled by PayFast. NovaHost never sees your card details.</span>
         </p>
 
-        <button type="button" class="pay-back" @click="router.replace({ name: 'unlock' })">
-          Back to sign in
+        <button v-if="!isMove && !isRenewal" type="button" class="pay-back" @click="router.replace({ name: 'plan' })">
+          Back
         </button>
 
       </div>
@@ -236,24 +236,26 @@ const emailValid = computed(() =>
 /** The gate got a `device_mismatch`: they have paid, just not here. */
 const isMove = computed(() => authState.reason === 'device_mismatch')
 
+/** Their 30 days ran out — this is a renewal, not a first purchase. */
+const isRenewal = computed(() => authState.reason === 'expired')
+
 /**
- * Only app access is sold here.
+ * Only app access is sold here: 30 days at a time, paid again by hand. Scan
+ * packs are sold inside the scanner (ScannerPaywall.vue), where the user can
+ * see what they are buying.
  *
- * The R349 chart scanner used to sit alongside it and no longer does. It is an
- * add-on to a product the visitor has not bought yet, and asking someone at the
- * front door to price a feature they have never seen is a worse pitch than
- * showing it to them where it lives. It is sold inside the scanner screen
- * instead — see ScannerPaywall.vue, which runs this same checkout with
- * `product: 'SCANNER'`.
+ * The collected amount is a rand over the marketing price, the same rule the
+ * once-off products have always followed (R599 → R600.00), so this card shows
+ * both rather than let PayFast's page disagree with it.
  */
 const BUY_PLANS = [
   {
-    id: 'APP',
-    name: 'App access',
-    price: 'R599',
-    charged: 'R600.00',
-    note: 'Once-off · lifetime',
-    blurb: 'Unlocks NovaHost on this device — cloud execution, broker connect and live signals.',
+    id: 'MONTHLY',
+    name: '30 days of NovaHost',
+    price: 'R349',
+    charged: 'R350.00',
+    note: 'No auto-renew',
+    blurb: 'Cloud hosting for your robot, broker connect, trade alerts and 1 AI chart scan. Pay again when you want another 30 days.',
   },
 ]
 
@@ -269,7 +271,7 @@ const MOVE_PLAN = [
 ]
 
 const plans = computed(() => (isMove.value ? MOVE_PLAN : BUY_PLANS))
-const selected = ref(isMove.value ? 'REACTIVATE' : 'APP')
+const selected = ref(isMove.value ? 'REACTIVATE' : 'MONTHLY')
 
 const busy = ref(false)
 const notice = ref('')
@@ -291,13 +293,19 @@ const rejected = ref(false)  // admin said no
 
 const reasonValid = computed(() => reason.value.trim().length >= REASON_MIN)
 
-const title = computed(() => (isMove.value ? 'Move your licence.' : 'Get NovaHost.'))
+const title = computed(() => {
+  if (isMove.value) return 'Move your licence.'
+  return isRenewal.value ? 'Renew NovaHost.' : 'Get NovaHost.'
+})
 
 const body = computed(() => {
   if (isMove.value) {
     return 'This purchase is active on another device. Moving it releases that one and binds NovaHost here.'
   }
-  return 'One once-off payment, no subscription. Your purchase binds to this device and stays yours.'
+  if (isRenewal.value) {
+    return 'Your 30 days have run out. Pay for another 30 and your robot, broker and settings pick up where they left off.'
+  }
+  return 'R349 for 30 days, bound to this device. Nothing renews on its own. Your licence key comes next.'
 })
 
 const ctaLabel = computed(() => {
@@ -345,9 +353,9 @@ async function startCheckout () {
         email: cleanEmail,
         deviceId: getDeviceId(),
         product: selected.value,
-        // Gates the checkout server-side: generate-payfast-checkout refuses an
-        // ios request that does not carry a valid key, and payfast-webhook
-        // stamps it onto the subscription row as the audit link.
+        // Absent on a first purchase — the key is claimed after paying. A
+        // renewing user still has one, and the webhook records it as the
+        // audit link.
         license_key: secStorage.getItem('LICENSE_KEY') || undefined,
         // Decides what PayFast sends the browser back to. Android has a
         // `metahost://` scheme to deep link into; we do not, and being sent to
@@ -378,7 +386,7 @@ async function startCheckout () {
     switch (data.route) {
       case 'ACTIVE_SAME_DEVICE':
         // Already entitled here — nothing to sell, so let them in.
-        return finishIfEntitled('App access is already active on this device.')
+        return finishIfEntitled(data.message || 'App access is already active on this device.')
 
       // SCANNER_OWNED / ACTIVE_NEW_DEVICE_BLOCKED are not handled here: this
       // screen only ever asks for APP or REACTIVATE, so the function cannot
@@ -538,7 +546,9 @@ async function finishIfEntitled (fallbackMessage) {
   if (!email.value) return
   const result = await verifySubscription(email.value)
   if (result.success) {
-    router.replace({ name: 'home' })
+    // Paid. The guard sends them on to the licence key, or home if a
+    // renewing user already holds one.
+    router.replace({ name: authState.keyValidated ? 'home' : 'unlock' })
     return true
   }
   if (fallbackMessage) say(fallbackMessage, false)
@@ -557,11 +567,6 @@ function onVisible () {
 }
 
 onMounted(() => {
-  // Arriving without a validated licence key means the gate was skipped — it
-  // owns that step, and the checkout is refused without one anyway. The router
-  // guard already enforces this; the check here is defence in depth for a
-  // direct hash navigation.
-  if (!secStorage.getItem('LICENSE_KEY')) router.replace({ name: 'unlock' })
   document.addEventListener('visibilitychange', onVisible)
 })
 

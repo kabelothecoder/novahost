@@ -8,8 +8,10 @@ import crypto from "node:crypto";
  *   APP         R599  lifetime access to the app        -> subscriptions.is_lifetime
  *   SCANNER     R349  the AI chart scanner              -> subscriptions.has_scanner
  *   REACTIVATE  R150  move a paid email to a new device -> subscriptions.device_id
+ *   MONTHLY     R349  30 days of app access (iOS only)  -> subscriptions.subscription_expiry
+ *   SCANS20     R150  20 chart scans (iOS only)         -> subscriptions.scan_credits
  *
- * Nothing here is recurring any more. The R250/month subscription this function
+ * Nothing here is recurring any more. MONTHLY is renewed by paying again. The R250/month subscription this function
  * used to sell is gone: every product is a single payment, so the recurring
  * parameters (subscription_type / frequency / cycles) are never sent. Sending
  * them on a once-off is what makes Payfast set up a billing token, and a token
@@ -43,7 +45,16 @@ const PRICES = {
   APP: { amount: "600.00", item_name: "NovaHost App Access", custom_str1: "LIFETIME" },
   SCANNER: { amount: "350.00", item_name: "NovaHost AI Chart Scanner", custom_str1: "SCANNER" },
   REACTIVATE: { amount: "150.00", item_name: "NovaHost Device Reactivation", custom_str1: "REACTIVATION" },
+  // iOS only. 30 days of app access, paid again by hand -- NOT a PayFast
+  // subscription, so no recurring parameters (see the header).
+  MONTHLY: { amount: "350.00", item_name: "NovaHost 30 Days Access", custom_str1: "MONTHLY" },
+  // iOS only. 20 chart scans, added to subscriptions.scan_credits.
+  SCANS20: { amount: "150.00", item_name: "NovaHost 20 Chart Scans", custom_str1: "SCANS20" },
 } as const;
+
+/** A monthly row may be renewed this many days before it runs out. Earlier
+ *  than that is refused, so a double tap cannot buy two months by accident. */
+const RENEW_WINDOW_DAYS = 7;
 
 type ProductKey = keyof typeof PRICES;
 
@@ -262,8 +273,14 @@ serve(async (req: Request) => {
       return json({ error: "This device could not be identified." }, 400);
     }
 
-    if (requested !== "APP" && requested !== "SCANNER" && requested !== "REACTIVATE") {
+    if (!(requested in PRICES)) {
       return json({ error: `Unknown product "${requested}".` }, 400);
+    }
+
+    // The two iOS products are sold to the iOS PWA only. Android keeps the
+    // once-off R599 and the R349 scanner unlock exactly as before.
+    if ((requested === "MONTHLY" || requested === "SCANS20") && platform !== "ios") {
+      return json({ error: `"${requested}" is only sold in the iOS app.` }, 400);
     }
 
     const novaHost = createClient(
@@ -273,16 +290,12 @@ serve(async (req: Request) => {
 
     const cleanEmail = email.toLowerCase();
 
-    // ── Licence key: required for ios, validated for anyone who sends one ────
+    // ── Licence key: optional, validated for anyone who sends one ────────────
     //
-    // The iOS onboarding will not show a payment screen until a mentor-issued
-    // key has cleared `validate-license`, so a checkout request from it must
-    // carry that key and it must still be good. Enforced here as well as on the
-    // device because this endpoint is public and the only copy of the rule that
-    // matters is the one running while the money is about to move.
-    //
-    // Android and web are unchanged: they may omit `license_key` entirely. If
-    // they do send one it is still checked and recorded rather than trusted.
+    // iOS is now pay first, key second: the key is claimed AFTER payment (see
+    // request-claim-code), so an ios checkout no longer has to carry one. A
+    // renewing iOS user still sends theirs, and Android/web may as well; when
+    // present it is checked and recorded rather than trusted.
     let validatedLicenseKey: string | null = null;
     if (licenseKey) {
       const { data: lic, error: licErr } = await novaHost
@@ -306,16 +319,9 @@ serve(async (req: Request) => {
       validatedLicenseKey = licenseKey;
     }
 
-    if (platform === "ios" && !validatedLicenseKey) {
-      return json(
-        { error: "A valid licence key is required before checkout.", code: "LICENSE_REQUIRED" },
-        400,
-      );
-    }
-
     const { data: sub, error } = await novaHost
       .from("subscriptions")
-      .select("id, email, is_premium, is_lifetime, has_scanner, device_id")
+      .select("id, email, is_premium, is_lifetime, has_scanner, device_id, subscription_expiry")
       .eq("email", cleanEmail)
       .maybeSingle();
 
@@ -323,14 +329,49 @@ serve(async (req: Request) => {
       console.error("Database error:", error);
     }
 
-    const paid = sub?.is_lifetime === true || sub?.is_premium === true;
+    // A monthly row past its expiry is not "paid" -- it is a renewal. Without
+    // this an expired monthly user would be told "already active" and could
+    // never pay again. Lifetime rows have no expiry and are unaffected, so the
+    // android/web answer is unchanged.
+    const expiry = sub?.subscription_expiry ? new Date(sub.subscription_expiry) : null;
+    const monthlyLapsed = sub?.is_lifetime !== true && expiry !== null && expiry < new Date();
+    const paid = (sub?.is_lifetime === true || sub?.is_premium === true) && !monthlyLapsed;
     const deviceMatches = !sub?.device_id || sub.device_id === androidId;
 
     // ---- Decide which product this request actually needs ------------------
     let product: ProductKey;
     let route: string;
 
-    if (requested === "SCANNER") {
+    if (requested === "SCANS20") {
+      // Credits are spent by the scanner on a device-matched, paid email, so
+      // selling them anywhere else is selling something unusable.
+      if (!paid) {
+        return json({ route: "APP_REQUIRED", message: "Activate NovaHost on this device before buying scans." });
+      }
+      if (!deviceMatches) {
+        return json({ route: "ACTIVE_NEW_DEVICE_BLOCKED", message: "This email is active on another device. Move it across before buying scans." });
+      }
+      product = "SCANS20";
+      route = "SCANS_CHECKOUT";
+    } else if (requested === "MONTHLY" && sub?.is_lifetime === true && deviceMatches) {
+      return json({ route: "ACTIVE_SAME_DEVICE", message: "You have lifetime access on this device. There is nothing to renew." });
+    } else if (requested === "MONTHLY" && paid && deviceMatches) {
+      // Renewing early is allowed inside the window; the webhook adds 30 days
+      // to the current expiry, so no paid day is lost.
+      const daysLeft = expiry ? (expiry.getTime() - Date.now()) / DAY_MS : Infinity;
+      if (daysLeft > RENEW_WINDOW_DAYS) {
+        return json({
+          route: "ACTIVE_SAME_DEVICE",
+          expires_at: expiry?.toISOString() ?? null,
+          message: "Your access is active. You can renew in the last 7 days.",
+        });
+      }
+      product = "MONTHLY";
+      route = "RENEW";
+    } else if (requested === "MONTHLY" && !paid) {
+      product = "MONTHLY";
+      route = sub ? "RENEW" : "NEW_USER";
+    } else if (requested === "SCANNER") {
       if (sub?.has_scanner === true && deviceMatches) {
         return json({ route: "SCANNER_OWNED", message: "The scanner is already unlocked for this email." });
       }

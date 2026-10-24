@@ -46,15 +46,13 @@
     </ul>
 
     <!-- ═══ 3 · THE PRICE ═══════════════════════════════════════════ -->
+    <!-- Your plan carries one free scan a month; this is for the rest. -->
     <div class="sp-price cc-card">
       <span class="sp-price-copy">
-        <span class="sp-price-k cc-label">Once-off · add-on</span>
-        <!-- The collected amount is a rand over the marketing price to
-             absorb the card fee. Showing only the round number would put
-             a different figure here than on the PayFast page. -->
-        <span class="sp-price-s cc-caption">R350.00 at checkout</span>
+        <span class="sp-price-k cc-label">20 scans · never expire</span>
+        <span class="sp-price-s cc-caption">R7.50 a scan · 1 free scan with your plan each month</span>
       </span>
-      <span class="sp-price-v cc-figure">R349</span>
+      <span class="sp-price-v cc-figure">R150</span>
     </div>
 
     <Transition name="sp-note">
@@ -66,7 +64,7 @@
     <!-- ═══ 4 · CTA ═════════════════════════════════════════════════ -->
     <button type="button" class="sp-cta" :disabled="busy || !email" @click="startCheckout">
       <template v-if="!busy">
-        <span>Unlock Scanner</span>
+        <span>Buy 20 scans</span>
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="m13 3 9 9-9 9" /><path d="M22 12H3" />
@@ -87,8 +85,10 @@
 
 <script setup>
 /**
- * @description ScannerPaywall — the R349 chart-scanner add-on, sold where the
- * scanner lives rather than at the front door.
+ * @description ScannerPaywall — scan packs (20 for R150), sold where the
+ * scanner lives rather than at the front door. Shown once this month's free
+ * scan and any bought credits are spent; the old R349 unlimited unlock still
+ * bypasses it for anyone who bought one.
  *
  * It used to be a second plan card on PaymentView, the screen the sign-in gate
  * hands an unpaid visitor. That put a price on a feature the reader had never
@@ -172,10 +172,9 @@ async function startCheckout () {
       body: {
         email: email.value,
         deviceId: getDeviceId(),
-        product: 'SCANNER',
-        // Every ios checkout carries the licence key that gated entry —
-        // generate-payfast-checkout refuses one that does not. By the time the
-        // scanner is on screen the key is long since stored.
+        // A pack of 20, added to scan_credits. The old R349 unlimited unlock
+        // is no longer sold on iOS; anyone who bought it keeps it.
+        product: 'SCANS20',
         license_key: secStorage.getItem('LICENSE_KEY') || undefined,
         // Sends the payer to a page rather than the android `metahost://`
         // deep link, which in Safari is an invalid-address error.
@@ -198,10 +197,6 @@ async function startCheckout () {
     }
 
     switch (data.route) {
-      case 'SCANNER_OWNED':
-        // Already paid for — nothing to sell, so open it.
-        return refresh('The scanner is already unlocked for this email.')
-
       case 'ACTIVE_NEW_DEVICE_BLOCKED':
         // Buying here would leave them holding a scanner behind an app lock.
         // The function's own wording names the move, so it is shown as written.
@@ -221,16 +216,16 @@ async function startCheckout () {
 }
 
 /**
- * Re-asks the server and lifts the lock if the scanner is now owned.
+ * Re-asks the server and lifts the lock once there is something to scan with.
  *
- * `verifySubscription` reports on app access, not the add-on, so its return
- * value is not the answer here — `hasScanner` is what it refreshes on the way
- * through, and that is what this reads.
+ * `verifySubscription` reports on app access, not scans, so its return value
+ * is not the answer here — the scan fields it refreshes on the way through
+ * are what this reads.
  */
 async function refresh (fallbackMessage) {
   if (!email.value) return
   await verifySubscription(email.value)
-  if (authState.hasScanner) {
+  if (authState.hasScanner || authState.scanCredits > 0 || authState.freeScanAvailable) {
     emit('unlocked')
     return true
   }
