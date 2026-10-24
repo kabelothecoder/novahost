@@ -168,53 +168,68 @@
           <div class="rh-hero-in" :style="heroStyle"><RobotMedia :art="art" :video="video" :play="videoPlay" :allowed="videoAllowed" :media-style="mediaStyle" /></div>
         </div>
         <div class="rh-abs rh-nopt" style="left:0;right:0;top:0;height:140px;z-index:2;background:linear-gradient(180deg, rgba(0,0,0,.5), transparent)"></div>
-        <div class="rh-abs rh-nopt" style="left:0;right:0;bottom:0;height:380px;z-index:2;background:linear-gradient(180deg, rgba(6,6,9,0) 0%, rgba(6,6,9,.55) 40%, rgba(6,6,9,.88) 100%)"></div>
-        <div class="rh-abs rh-nopt" :style="{ left: 0, right: 0, bottom: 0, height: '300px', zIndex: 2, opacity: glowOp, transition: 'opacity .6s ease', background: 'radial-gradient(60% 50% at 50% 80%, color-mix(in srgb, var(--a) 22%, transparent), transparent 75%)' }"></div>
+        <div class="rh-abs rh-nopt" style="left:0;right:0;bottom:0;height:420px;z-index:2;background:linear-gradient(180deg, rgba(6,6,9,0) 0%, rgba(6,6,9,.5) 45%, rgba(6,6,9,.9) 100%)"></div>
+        <div class="rh-abs rh-nopt" :style="{ left: 0, right: 0, bottom: 0, height: '340px', zIndex: 2, opacity: glowOp, transition: 'opacity .6s ease', background: 'radial-gradient(70% 55% at 50% 85%, color-mix(in srgb, var(--a) 30%, transparent), transparent 75%)' }"></div>
 
+        <!-- Full-Bleed Styles 1a (glass sheet) + 3a (bare mic) + 4a–4c (news). -->
         <div class="rh-col rh-nopt" :style="colStyle">
-          <div class="rh-name rh-abs rh-name-b" :style="{ top: y(552, 'bot'), ...nameStyle(nmB), opacity: talking ? 0 : (running ? 1 : .7) }">
-            <div>{{ nmB.l1 }}</div>
-            <div v-if="nmB.two">{{ nmB.l2 }}</div>
+          <div class="rh-abs rh-thin-wrap" :style="{ top: y(556, 'bot'), opacity: talking ? 0 : (running ? 1 : .7) }">
+            <div class="rh-thin" :style="{ fontSize: thinSize, textShadow: thinGlow, animation: anim && running ? 'rhBreath 4s ease-in-out infinite' : 'none' }">{{ thinName }}</div>
+            <div class="rh-thin-by"><div class="rh-thin-rule"></div><span>POWERED BY</span><span class="rh-thin-b">NOVAHOST</span></div>
           </div>
-          <div class="rh-powered rh-abs" :style="{ left: '24px', width: '270px', top: y(674, 'bot'), height: '16px' }"><span>Powered by</span><span class="rh-powered-b">NovaHost</span></div>
 
           <template v-if="talking">
-            <div class="rh-wave" :style="{ top: y(608, 'bot'), background: waveBg, ...glassFx }">
+            <div class="rh-wave" :style="{ top: y(568, 'bot'), zIndex: 9, background: waveBg, ...glassFx }">
               <voice-wave :state="voice" :accent="accent" :mode="voiceMode" gap="320,48"></voice-wave>
             </div>
-            <div class="rh-hint" :style="{ left: '24px', top: y(584, 'bot'), color: hintColor }"><span class="ms" style="font-size:16px">chevron_left</span><div>{{ hintText }}</div></div>
+            <div class="rh-hint" :style="{ left: '24px', top: y(544, 'bot'), color: hintColor }"><span class="ms" style="font-size:16px">chevron_left</span><div>{{ hintText }}</div></div>
           </template>
-          <div class="rh-mic-wrap rh-pt" :style="{ left: '306px', top: y(606, 'bot'), width: '60px', height: '60px' }">
-            <div class="rh-mic-ring"><voice-ring :state="voice" :accent="accent" :mode="voiceMode"></voice-ring></div>
-            <div role="button" :aria-label="micLabel" class="rh-mic" :style="micStyle" @pointerdown="pttDown" @pointermove="pttMove" @pointerup="pttUp" @pointercancel="pttUp">
-              <span class="ms ms-fill" :style="{ fontSize: '28px', color: micIcon }">{{ micGlyph }}</span>
-            </div>
+          <div role="button" :aria-label="micLabel" class="rh-bare rh-pt" :style="{ top: y(626, 'bot') }" @pointerdown="pttDown" @pointermove="pttMove" @pointerup="pttUp" @pointercancel="pttUp">
+            <span class="ms" :style="bareStyle">{{ micGlyph }}</span>
           </div>
 
-          <div class="rh-bar rh-pt" :style="{ top: y(700, 'bot'), background: lite ? 'rgba(16,16,21,.95)' : 'rgba(14,14,19,.5)', ...trackStyle }">
-            <div role="button" :aria-label="symLabel" class="rh-barbtn" style="left:12px" @click="openSheet('symbols')">
-              <span class="ms" style="font-size:24px">candlestick_chart</span>
-              <div v-if="issues" class="rh-badge" style="right:-2px;top:-2px;border-color:#101014">{{ issues }}</div>
-            </div>
-            <div class="rh-bar-track">
-              <div class="rh-track-fill" :style="{ width: (prog * 128 + 56) + 'px', opacity: fillOp, borderRadius: '28px' }"></div>
-              <div class="rh-track-label" :style="{ padding: leftSide ? '0 54px 0 0' : '0 0 0 54px' }"><span :style="labelStyle">{{ label }}</span></div>
-              <div role="slider" :aria-label="knobLabel" aria-valuemin="0" aria-valuemax="1" :aria-valuenow="prog.toFixed(2)" class="rh-knob" :style="{ top: '4px', left: (4 + prog * 128) + 'px', width: '48px', height: '48px' }" @pointerdown="knobDown" @pointermove="knobMove" @pointerup="knobUp" @pointercancel="knobUp">
-                <div class="rh-knob-disc" :style="knobDisc"></div>
-                <div v-for="o in orbits(48)" :key="o.key" :style="o.style"><div v-if="o.dot" :style="o.dot"></div></div>
-                <svg width="48" height="48" viewBox="0 0 48 48" class="rh-ring">
-                  <circle cx="24" cy="24" r="21" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2.25" />
-                  <circle cx="24" cy="24" r="21" fill="none" stroke-width="2.25" stroke-linecap="round" stroke-dasharray="131.95" :stroke-dashoffset="(131.95 * (1 - ringFrac)).toFixed(2)" :style="ringStyle" />
-                </svg>
-                <span class="ms rh-knob-ic" :style="{ fontSize: '23px', color: knobIcon }">power_settings_new</span>
+          <div class="rh-sheet rh-pt" :style="{ top: y(680, 'bot'), left: -dx + 'px', width: W + 'px', ...sheetStyle }">
+            <div class="rh-sheet-edge" :style="{ opacity: glowOp }"></div>
+            <div class="rh-sheen" :style="{ opacity: running ? .9 : 0, animation: anim && running ? 'rhSheen 5.5s ease-in-out infinite' : 'none' }"></div>
+            <div class="rh-sheet-row">
+              <div role="button" :aria-label="news.aria" class="rh-news" :style="{ '--n': news.color }" @click="openNews">
+                <div class="rh-news-l1">
+                  <div class="rh-news-lvl">{{ news.lvl }}</div>
+                  <div class="rh-news-name">{{ news.name }}</div>
+                  <div style="flex:1"></div>
+                  <div class="rh-news-t">{{ news.when }}</div>
+                </div>
+                <div class="rh-news-l2">{{ news.sub }}</div>
+                <div v-if="news.frac != null" class="rh-news-bar">
+                  <div class="rh-news-fill" :style="{ width: (news.frac * 100).toFixed(1) + '%' }">
+                    <div class="rh-news-dot" :style="{ animation: anim ? 'rhPulse 1.6s ease-in-out infinite' : 'none' }"></div>
+                  </div>
+                </div>
+              </div>
+              <div role="button" :aria-label="symLabel" class="rh-sbtn" @click="openSheet('symbols')">
+                <span class="ms" style="font-size:22px">candlestick_chart</span>
+                <div v-if="issues" class="rh-badge" style="border-color:#101014">{{ issues }}</div>
+              </div>
+              <div role="button" aria-label="Switch robot" class="rh-sbtn" @click="openSheet('robots')">
+                <span class="ms" style="font-size:22px">swap_horiz</span>
+              </div>
+              <div role="button" :aria-label="gridLabel" class="rh-sbtn rh-grid" @click="toggleStrip">
+                <span class="ms rh-chev" style="font-size:15px">{{ strip ? 'keyboard_arrow_down' : 'keyboard_arrow_up' }}</span>
+                <span class="ms" style="font-size:20px">apps</span>
               </div>
             </div>
-            <div role="button" aria-label="Switch robot" class="rh-barbtn" style="left:256px" @click="openSheet('robots')">
-              <span class="ms" style="font-size:24px">swap_horiz</span>
-            </div>
-            <div role="button" :aria-label="gridLabel" class="rh-barbtn rh-grid" style="left:310px" @click="toggleStrip">
-              <span class="ms rh-chev">{{ strip ? 'keyboard_arrow_down' : 'keyboard_arrow_up' }}</span>
-              <span class="ms" style="font-size:21px">apps</span>
+            <div class="rh-sheet-track" :style="{ border: trackStyle.border, boxShadow: trackStyle.boxShadow }">
+              <div class="rh-track-fill" :style="{ width: (prog * 294 + 62) + 'px', opacity: fillOp, borderRadius: '32px' }"></div>
+              <div class="rh-track-label" :style="{ padding: leftSide ? '0 62px 0 0' : '0 0 0 62px' }"><span :style="labelStyle">{{ label }}</span></div>
+              <div role="slider" :aria-label="knobLabel" aria-valuemin="0" aria-valuemax="1" :aria-valuenow="prog.toFixed(2)" class="rh-knob" :style="{ top: '3px', left: (3 + prog * 294) + 'px', width: '56px', height: '56px' }" @pointerdown="knobDown" @pointermove="knobMove" @pointerup="knobUp" @pointercancel="knobUp">
+                <div class="rh-knob-disc" :style="knobDisc"></div>
+                <div v-for="o in orbits(56)" :key="o.key" :style="o.style"><div v-if="o.dot" :style="o.dot"></div></div>
+                <svg width="56" height="56" viewBox="0 0 56 56" class="rh-ring">
+                  <circle cx="28" cy="28" r="25" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="2.5" />
+                  <circle cx="28" cy="28" r="25" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="157.08" :stroke-dashoffset="(157.08 * (1 - ringFrac)).toFixed(2)" :style="ringStyle" />
+                </svg>
+                <span class="ms rh-knob-ic" :style="{ fontSize: '26px', color: knobIcon }">power_settings_new</span>
+              </div>
             </div>
           </div>
         </div>
@@ -275,6 +290,7 @@ import {
   startRobot, stopRobot, switchRobot, darkOnAccent, fitName, effectMode,
   GREEN, GREY, RED,
 } from './homeData.js'
+import { loadWire, whenLabel } from '../../../services/marketWireService.js'
 import '../fx/falling-fx.js'
 import '../fx/voice-fx.js'
 
@@ -367,7 +383,7 @@ function progFromPointer(x, py) {
     if (a < 0) a = x < ARC.cx ? 180 : 0
     return Math.max(0, Math.min(1, (ARC.a0 - a) / ARC.span))
   }
-  const travel = L.value === 'full' ? 128 : 202
+  const travel = L.value === 'full' ? 294 : 202
   return Math.max(0, Math.min(1, ds.p + (x - ds.x) / travel))
 }
 
@@ -546,7 +562,6 @@ const mediaStyle = computed(() => ({
 
 const nmC = computed(() => fitName(rb.value.raw, 300, 60, 34, 40))
 const nmF = computed(() => fitName(rb.value.raw, 310, 62, 36, 50))
-const nmB = computed(() => fitName(rb.value.raw, 262, 50, 32, 48))
 const nameStroke = computed(() => running.value ? 'color-mix(in srgb, var(--a) 45%, #FFFFFF)' : 'color-mix(in srgb, var(--a) 45%, #4A4A54)')
 const nameGlow = computed(() => lite.value
   ? (running.value ? 'drop-shadow(0 0 6px var(--a))' : 'none')
@@ -613,6 +628,79 @@ const waveBg = computed(() => lite.value ? 'rgba(16,16,21,.95)' : 'rgba(10,10,14
 const hintText = computed(() => voice.value === 'cancel' ? 'Release to cancel' : 'Slide left to cancel')
 const hintColor = computed(() => voice.value === 'cancel' ? '#FF8A8A' : 'rgba(255,255,255,.75)')
 
+/* ── Full-Bleed: thin name, bare mic, glass sheet ────────────────── */
+const thinName = computed(() => (rb.value.raw || rb.value.name || '').replace('|', ' ').trim().toUpperCase())
+const thinSize = computed(() => Math.max(22, Math.min(50, Math.floor(272 / (Math.max(1, thinName.value.length) * 1.06)))) + 'px')
+const thinGlow = computed(() => lite.value
+  ? (running.value ? '0 0 8px var(--a)' : 'none')
+  : running.value
+    ? '0 0 10px color-mix(in srgb, var(--a) 95%, transparent), 0 0 28px color-mix(in srgb, var(--a) 75%, transparent), 0 0 60px color-mix(in srgb, var(--a) 45%, transparent)'
+    : '0 2px 12px rgba(0,0,0,.7)')
+/** The mic is only a glyph: thin outline at rest, filled and glowing while held. */
+const bareStyle = computed(() => {
+  const v = voice.value
+  return {
+    fontSize: '30px', fontWeight: 300,
+    fontVariationSettings: `'FILL' ${v === 'listen' || v === 'answer' ? 1 : 0}, 'wght' 300`,
+    color: v === 'listen' ? 'color-mix(in srgb, var(--a) 45%, #FFFFFF)' : v === 'cancel' ? '#FF8A8A' : v === 'answer' ? 'color-mix(in srgb, var(--a) 30%, #FFFFFF)' : 'rgba(255,255,255,.9)',
+    textShadow: lite.value ? 'none' : v === 'listen' ? '0 0 10px var(--a), 0 0 26px var(--a), 0 0 48px color-mix(in srgb, var(--a) 60%, transparent)' : v === 'answer' ? '0 0 14px color-mix(in srgb, var(--a) 80%, transparent)' : v === 'cancel' ? '0 0 14px rgba(255,93,93,.7)' : '0 2px 12px rgba(0,0,0,.7)',
+    transform: v === 'listen' ? 'scale(1.08)' : 'scale(1)',
+  }
+})
+const sheetStyle = computed(() => {
+  const g = lite.value ? 'none' : 'blur(30px) saturate(1.6)'
+  return {
+    background: lite.value ? 'rgba(16,16,21,.95)' : 'linear-gradient(180deg, rgba(20,20,26,.36), rgba(10,10,14,.62))',
+    backdropFilter: g, WebkitBackdropFilter: g,
+    boxShadow: (running.value && !lite.value) ? '0 -24px 60px -20px color-mix(in srgb, var(--a) 55%, transparent)' : '0 -20px 50px -24px rgba(0,0,0,.6)',
+  }
+})
+
+/* ── Next news release (market-wire), design 4a–4c ───────────────── */
+/* Impact sets the colour. The bar fills over the last four hours before the
+   release. There is no robot bias in the wire, so the card names the currency
+   and the figures instead of inventing a BUY/SELL. */
+const IMPACT = { high: ['HIGH', '#FF7A45'], medium: ['MED', '#F2B53A'], low: ['LOW', '#A3A3AE'], none: ['LOW', '#A3A3AE'] }
+const RANK = { high: 0, medium: 1, low: 2, none: 3 }
+const wire = ref(null)
+const nowMs = ref(Date.now())
+let wireT = 0
+async function loadNews() {
+  if (!live.value || L.value !== 'full') return
+  try {
+    const w = await loadWire(symbolRows.value.map(r => r.sym))
+    wire.value = w.events
+  } catch { wire.value = { ok: false, items: [] } }
+}
+const nextEvent = computed(() => {
+  const items = (wire.value?.items || []).filter(e => e.at && new Date(e.at).getTime() > nowMs.value)
+  if (!items.length) return null
+  const t0 = new Date(items.reduce((a, e) => (e.at < a ? e.at : a), items[0].at)).getTime()
+  /* The soonest release, unless a bigger one lands within the next hour of it. */
+  return items
+    .filter(e => new Date(e.at).getTime() - t0 < 3600e3)
+    .sort((a, b) => (RANK[a.impact] - RANK[b.impact]) || (a.at < b.at ? -1 : 1))[0]
+})
+const news = computed(() => {
+  const e = nextEvent.value
+  if (!e) {
+    const msg = !wire.value ? 'Loading calendar…' : wire.value.ok ? 'No releases ahead' : 'Calendar unavailable'
+    return { lvl: 'NEWS', name: msg, when: '', sub: 'Tap for Fundamentals', color: '#A3A3AE', frac: null, aria: `${msg}. Open Fundamentals` }
+  }
+  const [lvl, color] = IMPACT[e.impact] || IMPACT.none
+  const mins = Math.max(0, Math.round((new Date(e.at).getTime() - nowMs.value) / 60000))
+  const when = mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : whenLabel(e.at, nowMs.value)
+  const figs = [e.forecast && `F ${e.forecast}`, e.previous && `P ${e.previous}`].filter(Boolean).join(' · ')
+  return {
+    lvl, color, when, name: e.title,
+    sub: [e.currency, figs].filter(Boolean).join(' · ') || 'Tap for Fundamentals',
+    frac: Math.max(0.02, Math.min(1, 1 - mins / 240)),
+    aria: `${e.title} ${whenLabel(e.at, nowMs.value)}, ${lvl.toLowerCase()} impact. Open Fundamentals`,
+  }
+})
+function openNews() { if (live.value) go('/scanner?screen=fund') }
+watch(L, loadNews)
+
 const knobLabel = computed(() => running.value ? `Running. Hold to stop ${rb.value.name}` : `Slide to start ${rb.value.name}`)
 const symLabel = computed(() => issues.value ? `Trading symbols, ${issues.value} need setting up` : 'Trading symbols')
 const gridLabel = computed(() => strip.value ? 'Close screens' : 'Other screens. Or swipe up.')
@@ -628,15 +716,20 @@ const fxClear = computed(() => {
   const x = v => (v + dx.value).toFixed(0)
   const dot = `${x(356)},${(70 + st.value).toFixed(0)},24`
   const mic = L.value === 'focus' ? `${x(195)},${(700 + dy.value).toFixed(0)},48`
-    : L.value === 'full' ? `${x(336)},${(636 + dy.value).toFixed(0)},46`
+    : L.value === 'full' ? `${x(195)},${(653 + dy.value).toFixed(0)},40`
     : `${x(338)},${(680 + dy.value).toFixed(0)},50`
   return `${dot};${mic}`
 })
 
 /* Re-read the symbol plan when returning to Home from the wizard. */
 function onVisible() { if (document.visibilityState === 'visible') refreshPlan() }
-onMounted(() => { refreshPlan(); document.addEventListener('visibilitychange', onVisible) })
+onMounted(() => {
+  refreshPlan(); document.addEventListener('visibilitychange', onVisible)
+  loadNews()
+  if (live.value) wireT = setInterval(() => { nowMs.value = Date.now() }, 30000)
+})
 onUnmounted(() => {
+  clearInterval(wireT)
   document.removeEventListener('visibilitychange', onVisible)
   cancelAnimationFrame(raf)
   clearTimeout(holdT)
@@ -649,6 +742,9 @@ onUnmounted(() => {
 @keyframes rhSpin { to { transform: rotate(360deg) } }
 @keyframes rhRing { 0% { transform: scale(1); opacity: .7 } 100% { transform: scale(1.9); opacity: 0 } }
 @keyframes rhShimmer { 0% { background-position: 120% 0 } 100% { background-position: -120% 0 } }
+@keyframes rhSheen { 0% { transform: translateX(-140px) } 60%,100% { transform: translateX(420px) } }
+@keyframes rhBreath { 0%,100% { opacity: 1 } 50% { opacity: .78 } }
+@keyframes rhPulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.6); opacity: .4 } }
 </style>
 
 <style scoped>
@@ -683,7 +779,6 @@ onUnmounted(() => {
 }
 .rh-name-c { position: absolute; left: 28px; right: 28px; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 6; pointer-events: none; }
 .rh-name-f { left: 0; right: 0; height: 120px; z-index: 6; pointer-events: none; justify-content: center; }
-.rh-name-b { left: 24px; width: 270px; height: 118px; z-index: 6; align-items: flex-start; justify-content: flex-end; text-align: left; }
 .rh-powered { display: flex; align-items: center; gap: 4px; font-size: 11.5px; letter-spacing: .02em; color: rgba(255,255,255,.5); text-shadow: 0 1px 6px rgba(0,0,0,.7); pointer-events: none; z-index: 9; }
 .rh-powered-b { font-weight: 600; color: rgba(255,255,255,.8); }
 
@@ -701,7 +796,7 @@ onUnmounted(() => {
 .rh-arc { left: 0; z-index: 3; pointer-events: none; overflow: visible; }
 
 .rh-sat { position: absolute; width: 52px; height: 52px; border-radius: 50%; z-index: 7; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid rgba(255,255,255,.14); transition: transform .15s ease; }
-.rh-sat:active, .rh-barbtn:active { transform: scale(.94); }
+.rh-sat:active { transform: scale(.94); }
 .rh-grid { flex-direction: column; }
 .rh-chev { font-size: 16px; color: rgba(255,255,255,.7); margin: -7px 0 -5px; }
 .rh-badge { position: absolute; right: -3px; top: -3px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #F2B53A; border: 2px solid #08080B; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #141008; }
@@ -714,9 +809,36 @@ onUnmounted(() => {
 .rh-ring { position: absolute; left: 0; top: 0; transform: rotate(-90deg); overflow: visible; }
 .rh-knob-ic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 500; }
 
-.rh-bar { position: absolute; left: 10px; width: 370px; height: 80px; border-radius: 40px; z-index: 7; transition: border-color .5s ease, box-shadow .5s ease; }
-.rh-barbtn { position: absolute; top: 16px; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; background: rgba(255,255,255,.07); transition: transform .15s ease; }
-.rh-bar-track { position: absolute; left: 66px; top: 12px; width: 184px; height: 56px; border-radius: 28px; background: rgba(0,0,0,.28); }
+/* Full-Bleed (design 1a/3a/4a–4c) */
+.rh-thin-wrap { left: 26px; width: 272px; z-index: 6; display: flex; flex-direction: column; gap: 12px; transition: opacity .4s ease; }
+.rh-thin { font-family: Geist, sans-serif; font-weight: 200; line-height: 1; letter-spacing: .42em; white-space: nowrap; color: #FFFFFF; transition: text-shadow .6s ease; }
+.rh-thin-by { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 500; letter-spacing: .24em; color: rgba(255,255,255,.55); white-space: nowrap; }
+.rh-thin-rule { width: 18px; height: 1px; background: var(--a); box-shadow: 0 0 6px var(--a); }
+.rh-thin-b { font-weight: 600; color: rgba(255,255,255,.88); }
+.rh-bare { position: absolute; left: 163px; width: 64px; height: 54px; z-index: 8; cursor: pointer; touch-action: none; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+.rh-bare .ms { transition: color .2s ease, text-shadow .3s ease, transform .18s ease; }
+.rh-sheet { position: absolute; bottom: 0; z-index: 7; border-radius: 34px 34px 0 0; border-top: 1px solid rgba(255,255,255,.16); overflow: hidden; transition: box-shadow .6s ease; }
+.rh-sheet-edge { position: absolute; left: 28px; right: 28px; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--a), transparent); box-shadow: 0 0 16px 1px var(--a); transition: opacity .6s ease; }
+.rh-sheen { position: absolute; left: 0; top: 0; width: 140px; height: 1px; background: linear-gradient(90deg, transparent, #FFFFFF, transparent); transition: opacity .6s ease; }
+.rh-sheet-row { position: absolute; left: 50%; margin-left: -179px; width: 358px; top: 16px; height: 44px; display: flex; align-items: center; gap: 8px; }
+.rh-sheet-track { position: absolute; left: 50%; margin-left: -179px; width: 358px; top: 72px; height: 64px; border-radius: 32px; background: rgba(0,0,0,.32); transition: border-color .5s ease, box-shadow .5s ease; }
+.rh-sbtn { position: relative; flex: none; width: 44px; height: 44px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1); transition: transform .15s ease; }
+.rh-sbtn:active { transform: scale(.94); }
+.rh-news {
+  position: relative; flex: 1; min-width: 0; height: 44px; padding: 0 12px 2px; border-radius: 14px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px; overflow: hidden; cursor: pointer;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--n) 13%, transparent), color-mix(in srgb, var(--n) 4%, transparent));
+  border: 1px solid color-mix(in srgb, var(--n) 34%, transparent); transition: transform .15s ease;
+}
+.rh-news:active { transform: scale(.98); }
+.rh-news-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rh-news-lvl { font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: var(--n); white-space: nowrap; }
+.rh-news-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rh-news-t { font-family: 'Geist Mono', monospace; font-size: 13px; font-weight: 500; color: var(--n); white-space: nowrap; }
+.rh-news-l2 { font-size: 11.5px; color: rgba(255,255,255,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rh-news-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.08); }
+.rh-news-fill { position: relative; height: 100%; background: var(--n); box-shadow: 0 0 8px var(--n); transition: width 1s ease; }
+.rh-news-dot { position: absolute; right: -2px; top: -1.5px; width: 5px; height: 5px; border-radius: 50%; background: var(--n); }
 
 .rh-wave { position: absolute; left: 16px; right: 16px; height: 56px; border-radius: 28px; z-index: 7; border: 1px solid rgba(255,255,255,.1); overflow: hidden; pointer-events: none; }
 .rh-hint { position: absolute; height: 18px; z-index: 7; display: flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 500; pointer-events: none; white-space: nowrap; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
